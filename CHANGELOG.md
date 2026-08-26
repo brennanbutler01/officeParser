@@ -25,8 +25,17 @@ This release is a ground-up rewrite of PDF text extraction and drops one depreca
 - **`OfficeMetadata.language`**, populated from a PDF's `/Lang`; and `metadata.nativeProperties.tagged` plus the raw `markInfo`.
 - **`NodeBounds`** type and error/warning codes `PDF_PASSWORD_REQUIRED`, `PDF_PASSWORD_INCORRECT`, `PDF_STRUCT_TREE_UNRELIABLE`.
 - **`scripts/generate-pdf-fixtures.js`** producing the committed multi-column, rotated and encrypted PDF test fixtures.
+- **Document outline / bookmarks** are extracted into `ast.auxiliary.outline` as a tree of `list` nodes carrying `#page=N` destination links (honors `ignoreInternalLinks`).
+- **Page labels** (`PageMetadata.pageLabel`, e.g. roman-numeral front matter), **document permissions**, **optional-content layer names**, and **AcroForm field values** are surfaced (the latter three under `metadata.nativeProperties`).
+- **Accessible PDF generation**: `PdfGeneratorConfig.tagged` (default true) emits a tagged PDF, and `outline` emits a heading-derived bookmark tree.
+- **`PDF_GENERATION_FAILED`** error and **`PDF_TEXT_ENCODING_SUSPECT`** warning codes. The latter fires when a page's text is dominated by unmappable glyphs (broken/missing ToUnicode), so "empty" is distinguishable from "undecodable".
 
 ### Fixed
+- **Internal PDF links now resolve in generated HTML/PDF.** Page sections carry `id="page=N"`, matching the `href="#page=N"` links the parser emits, so cross-references and the outline actually navigate.
+- **Rotated text (90/180/270 degrees) is no longer silently dropped**; it is recovered as trailing paragraphs (precise visual ordering of rotated text remains a limitation).
+- **A super/subscript run now attaches to the preceding text without a stray space** (`super`+`script` -> `superscript`, `H`+`2` -> `H2`) unless a genuine word gap exists.
+- **PDF images are sized from their on-page bounds** (points) in generated HTML/PDF rather than their intrinsic pixel size, so a high-DPI scan no longer prints oversized.
+- **PDF generation fails loudly**: a rendering/engine failure throws `PDF_GENERATION_FAILED` instead of returning a silent zero-byte buffer.
 - **Broken and glued PDF words.** Spacing is now inferred from the horizontal gap between text fragments, so runs split by a font or size change (like `super`+`script`) join into `superscript`, and genuinely separate words keep their space.
 - **`ignoreInternalLinks` is now honored for PDF** (internal-destination links were always emitted before), and internal destinations resolve to `#page=N` where cheaply possible.
 - **`ignoreHeadersAndFooters` is now meaningful for PDF**: running headers/footers marked as Artifacts route to `ast.auxiliary` or are dropped.
