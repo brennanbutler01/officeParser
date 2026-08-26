@@ -198,7 +198,12 @@ function clusterToLine(clusterRuns: RawRun[], cfg: PdfLayoutConfig): PdfLine {
         if (prev) {
             const gap = r.x - (prev.x + prev.width);
             const ref = Math.min(prev.fontSize, r.fontSize) || lineFontSize;
-            if (gap >= cfg.spaceToleranceFactor * ref) lead = ' ';
+            // A super/subscript run attaches to the preceding text with no space ("super"+"script" ->
+            // "superscript", "H"+"2" -> "H2"); only a genuinely wide gap (a real word boundary) still
+            // inserts one. A normal run uses the ordinary small-gap threshold.
+            const isSupSub = !!(fmt.superscript || fmt.subscript);
+            const threshold = isSupSub ? Math.max(ref, cfg.spaceToleranceFactor * lineFontSize) : cfg.spaceToleranceFactor * ref;
+            if (gap >= threshold) lead = ' ';
         }
 
         const box: NodeBounds = { x: r.x, y: r.yTop, width: r.width, height: r.height };

@@ -12,9 +12,10 @@
  *   with a geometric fallback for untagged files. (Tagged path: {@link module:parsers/pdf/structTree}.)
  * - Per-node page geometry (`bounds`) and page dimensions, on by default, opt out with
  *   `ignorePositions`.
- * - Password-protected documents via `pdfParserConfig.password`.
- * - Comprehensive metadata, hyperlink extraction, image extraction with optional OCR, and embedded
- *   file attachments.
+ * - Password-protected documents via `pdfParserConfig.password`, or the `pdfParserConfig.onPassword`
+ *   callback to supply one lazily/interactively.
+ * - Comprehensive metadata (including the document outline/bookmarks, page labels, and permissions),
+ *   hyperlink extraction, image extraction with optional OCR, and embedded file attachments.
  *
  * **Pipeline**
  * 1. Open the document (one worker, one pass).
@@ -38,7 +39,7 @@ import { checkAbortSignal, getOfficeError, logWarning } from '../utils/errorUtil
 import { createAttachment } from '../utils/imageUtils.js';
 import { loadPdfJs } from '../utils/moduleLoader.js';
 import { performOcr } from '../utils/ocrUtils.js';
-import { computeRunBox, roundBounds, rotateBoundsToRendered } from './pdf/geometry.js';
+import { computeRunBox, roundBounds, rotateBoundsToRendered, unionAll } from './pdf/geometry.js';
 import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
 import { blockToNodes, buildLines, computeDocContext, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
 import { buildTaggedNodes } from './pdf/structTree.js';
@@ -276,7 +277,7 @@ async function resolveDest(dest: string | unknown[], pdfDocument: any, cache: Ma
         let explicit = dest;
         if (typeof dest === 'string') {
             if (cache.has(dest)) { const c = cache.get(dest); return c ?? '#internal'; }
-            if (cache.size >= 50) return '#internal';
+            if (cache.size >= 2000) return '#internal';
             explicit = await pdfDocument.getDestination(dest);
             if (!explicit) { cache.set(dest, null); return '#internal'; }
         }
@@ -301,6 +302,71 @@ function linkForBox(x: number, yTop: number, w: number, h: number, links: Resolv
         if (minX < lx2 && maxX > lx1 && minY < ly2 && maxY > ly1) return l.meta;
     }
     return undefined;
+}
+
+/** Maps the granted-permission flags from `getPermissions()` to readable action names. */
+function permissionNames(pdfjs: any, perms: number[]): string[] {
+    const F = pdfjs.PermissionFlag || {};
+    const pairs: [number | undefined, string][] = [
+        [F.PRINT, 'print'], [F.MODIFY_CONTENTS, 'modify'], [F.COPY, 'copy'],
+        [F.MODIFY_ANNOTATIONS, 'annotate'], [F.FILL_INTERACTIVE_FORMS, 'fillForms'],
+        [F.COPY_FOR_ACCESSIBILITY, 'copyForAccessibility'], [F.ASSEMBLE, 'assemble'],
+        [F.PRINT_HIGH_QUALITY, 'printHighQuality'],
+    ];
+    const set = new Set(perms);
+    return pairs.filter(([flag]) => flag !== undefined && set.has(flag)).map(([, name]) => name);
+}
+
+/** Lists optional-content (layer) names and default visibility, defensively across pdf.js shapes. */
+function listOptionalContentLayers(oc: any): { name: string; visible: boolean }[] {
+    const out: { name: string; visible: boolean }[] = [];
+    if (!oc || typeof oc.getGroups !== 'function') return out;
+    let groups: any;
+    try { groups = oc.getGroups(); } catch { return out; }
+    if (!groups) return out;
+    const entries: [string, any][] = groups instanceof Map
+        ? [...groups.entries()]
+        : Object.keys(groups).map(k => [k, groups[k]] as [string, any]);
+    for (const [id, g] of entries) {
+        const name = (g && (g.name || (g.data && g.data.name))) || id;
+        let visible = true;
+        try { if (typeof oc.isVisible === 'function') visible = !!oc.isVisible(id); } catch { /* keep default */ }
+        out.push({ name: String(name), visible });
+    }
+    return out;
+}
+
+/** Builds the document outline (bookmarks) as a tree of `list` nodes carrying destination links. */
+async function buildOutline(
+    pdfDocument: any, destCache: Map<string, string | null>, config: FullOfficeParserConfig,
+): Promise<OfficeContentNode[] | undefined> {
+    let outline: any[] | null;
+    try { outline = await pdfDocument.getOutline(); } catch { return undefined; }
+    if (!Array.isArray(outline) || !outline.length) return undefined;
+
+    const convert = async (items: any[], depth: number): Promise<OfficeContentNode[]> => {
+        const nodes: OfficeContentNode[] = [];
+        for (const item of items) {
+            const title = typeof item?.title === 'string' ? item.title : '';
+            let link: string | undefined;
+            let linkType: 'internal' | 'external' | undefined;
+            if (item?.url) { link = item.url; linkType = 'external'; }
+            else if (item?.dest != null) { link = await resolveDest(item.dest, pdfDocument, destCache); linkType = 'internal'; }
+            const nested = Array.isArray(item?.items) && item.items.length ? await convert(item.items, depth + 1) : [];
+            const label: OfficeContentNode = { type: 'text', text: title };
+            if (link) label.metadata = { link, linkType };
+            nodes.push({
+                type: 'list',
+                text: title,
+                children: [label, ...nested],
+                metadata: { listType: 'unordered', indentation: depth, alignment: 'left', listId: 'pdf-outline', itemIndex: nodes.length },
+            });
+        }
+        return nodes;
+    };
+
+    const nodes = await convert(outline, 0);
+    return nodes.length ? nodes : undefined;
 }
 
 /** Collects one page's text runs, images and annotations into a PageExtract. */
@@ -606,6 +672,25 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     metadata.nativeProperties['tagged'] = !!(markInfo && markInfo.Marked);
     if (markInfo) metadata.nativeProperties['markInfo'] = markInfo;
 
+    // Document permissions (which user actions the file allows). `null` means all actions allowed;
+    // pdf.js cannot validate signatures, so we only report presence, never validity.
+    try {
+        const perms: number[] | null = await pdfDocument.getPermissions();
+        metadata.nativeProperties['permissions'] = perms ? permissionNames(pdfjs, perms) : 'all';
+    } catch { /* not available */ }
+
+    // Optional-content group (layer) names and default visibility, for consumers that care which
+    // layers exist. Text inside hidden layers is still extracted (getTextContent ignores visibility).
+    try {
+        const oc = await pdfDocument.getOptionalContentConfig();
+        const layers = listOptionalContentLayers(oc);
+        if (layers.length) metadata.nativeProperties['layers'] = layers;
+    } catch { /* no optional content */ }
+
+    // Printed page labels (e.g. roman-numeral front matter), distinct from the physical page index.
+    let pageLabels: (string | null)[] | null = null;
+    try { pageLabels = await pdfDocument.getPageLabels(); } catch { pageLabels = null; }
+
     // --- Embedded file attachments ---
     try {
         const embeddedFiles = await pdfDocument.getAttachments();
@@ -714,11 +799,18 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
             pageNode.metadata.pageHeight = Math.round(extract.height * 100) / 100;
             if (extract.rotation) pageNode.metadata.rotation = extract.rotation;
         }
+        if (pageNode.type === 'page' && pageNode.metadata) {
+            const label = pageLabels?.[extract.pageNumber - 1];
+            if (label && label !== String(extract.pageNumber)) pageNode.metadata.pageLabel = label;
+        }
         content.push(pageNode);
     }
 
-    const auxiliary = (auxHeaders.length || auxFooters.length)
-        ? { headers: auxHeaders, footers: auxFooters }
+    // Document outline (bookmarks / TOC), when present, into auxiliary.
+    const outline = config.ignoreInternalLinks ? undefined : await buildOutline(pdfDocument, destCache, config);
+
+    const auxiliary = (auxHeaders.length || auxFooters.length || outline)
+        ? { headers: auxHeaders, footers: auxFooters, ...(outline ? { outline } : {}) }
         : undefined;
 
     return createAST('pdf', metadata, content, attachments, config, auxiliary);
@@ -729,6 +821,35 @@ function geometricNodes(runs: RawRun[], pageCtx: PageContext, docCtx: DocContext
     const lines = buildLines(runs, pdfCfg);
     const out: OfficeContentNode[] = [];
     for (const block of segmentIntoBlocks(lines, pdfCfg)) out.push(...blockToNodes(block, pageCtx, docCtx));
+    // Rescue rotated text (90/180/270), which the horizontal line builder skips, so it is not
+    // silently dropped. It is appended after the main flow, in the source content order (which is
+    // usually the correct reading order); precise visual ordering of rotated text is a limitation.
+    out.push(...rotatedTextNodes(runs, pageCtx, pdfCfg));
+    return out;
+}
+
+/** Recovers rotated (90/180/270) runs as trailing paragraphs, one per angle, in content order. */
+function rotatedTextNodes(runs: RawRun[], pageCtx: PageContext, pdfCfg: PdfLayoutConfig): OfficeContentNode[] {
+    const out: OfficeContentNode[] = [];
+    for (const angle of [90, 270, 180] as const) {
+        const group = runs.filter(r => r.angle === angle && r.text.trim().length > 0);
+        if (!group.length) continue;
+        let text = '';
+        for (const r of group) {
+            if (text && !/\s$/.test(text) && !/^\s/.test(r.text)) text += ' ';
+            text += r.text;
+        }
+        text = text.replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const node: OfficeContentNode = { type: 'paragraph', text, children: [{ type: 'text', text }] };
+        const box = unionAll(group.map(r => ({ x: r.x, y: r.yTop, width: r.width, height: r.height })));
+        if (pdfCfg.includePositions && box) {
+            const rendered = roundBounds(rotateBoundsToRendered(box, pageCtx.rotation, pageCtx.authoredW, pageCtx.authoredH));
+            node.bounds = rendered;
+            if (node.children && node.children[0]) node.children[0].bounds = rendered;
+        }
+        out.push(node);
+    }
     return out;
 }
 

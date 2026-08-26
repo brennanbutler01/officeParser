@@ -77,8 +77,9 @@ export function computeRunBox(m: number[], itemWidth: number, ascent: number, de
     if (angle === 0) {
         return { x: originX, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
     }
-    // Non-horizontal runs: report an axis-aligned box around the advance so bounds stay meaningful,
-    // but let the caller route them to the decorated bucket rather than normal line flow.
+    // Non-horizontal runs: report an axis-aligned box around the advance so bounds stay meaningful.
+    // The horizontal line builder skips these; PdfParser's rotatedTextNodes recovers 90/180/270 runs
+    // as trailing paragraphs so their text is not lost.
     if (angle === 180) {
         return { x: originX - itemWidth, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
     }

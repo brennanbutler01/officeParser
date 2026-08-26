@@ -2189,6 +2189,13 @@ export interface PageMetadata {
      * rotated space.
      */
     rotation?: number;
+    /**
+     * The printed page label from the PDF's `/PageLabels` tree (e.g. `"iv"`, `"A-1"`), when it
+     * exists and differs from the plain 1-based `pageNumber`. Front matter numbered in roman
+     * numerals is the common case. Absent when the document has no page labels.
+     * @example "iv" for the fourth page of front matter
+     */
+    pageLabel?: string;
 }
 
 /**
@@ -2695,6 +2702,13 @@ export interface OfficeAuxiliaryContent {
     footers?: OfficeContentNode[];
     /** Slide Masters extracted from presentations. */
     slideMasters?: OfficeContentNode[];
+    /**
+     * The document outline (bookmarks / table of contents), as a tree of `list` nodes. Each item's
+     * text is the bookmark title and its `metadata.link` points to the destination (`#page=N` when
+     * resolvable, else `#internal`); nested bookmarks are the item's `children`. Populated for PDFs
+     * that declare an outline, unless `ignoreInternalLinks` is set. Absent otherwise.
+     */
+    outline?: OfficeContentNode[];
 }
 
 /**

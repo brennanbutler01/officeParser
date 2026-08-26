@@ -108,7 +108,7 @@ export interface PageExtract {
     rotation: number;
     runs: RawRun[];
     images: PdfImage[];
-    /** Raw pdf.js struct tree for the tagged path (Increment B); null when untagged/unavailable. */
+    /** Raw pdf.js struct tree for the tagged path; null when untagged/unavailable. */
     structTree: unknown | null;
 }
 
