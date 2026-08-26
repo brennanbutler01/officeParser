@@ -107,7 +107,9 @@ export enum OfficeWarningType {
     /** A presentation archive contains no slides (a zero-slide presentation is legitimate) */
     NO_SLIDES_FOUND = 'NO_SLIDES_FOUND',
     /** A PDF's tagged-structure tree was absent, incomplete, or flagged unreliable; heuristics were used instead */
-    PDF_STRUCT_TREE_UNRELIABLE = 'PDF_STRUCT_TREE_UNRELIABLE'
+    PDF_STRUCT_TREE_UNRELIABLE = 'PDF_STRUCT_TREE_UNRELIABLE',
+    /** A PDF page yielded mostly unmappable glyphs (broken/missing ToUnicode); extracted text is likely garbage */
+    PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT'
 }
 
 /**

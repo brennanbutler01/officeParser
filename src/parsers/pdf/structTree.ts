@@ -88,6 +88,13 @@ function walkNode(node: StructNode, ctx: WalkCtx, sectionDepth: number): OfficeC
         }
         case 'Sect': case 'Part': case 'Art': case 'Section':
             return walkChildren(node, ctx, sectionDepth + 1);
+        case 'Formula': {
+            // Real math reconstruction from positioned glyphs is out of scope; at least mark the block
+            // as a formula so consumers can tell it apart from ordinary prose.
+            const nodes = blockWithNotes(node, ctx, 0);
+            for (const n of nodes) if (n.type === 'paragraph') n.metadata = { ...(n.metadata || {}), style: 'formula' };
+            return nodes;
+        }
         case 'Private': return [];
         // Transparent containers: recurse and flatten.
         default:

@@ -304,6 +304,23 @@ function linkForBox(x: number, yTop: number, w: number, h: number, links: Resolv
     return undefined;
 }
 
+/** Warns when a document's extracted text is dominated by unmappable glyphs (bad/missing ToUnicode). */
+function warnIfEncodingSuspect(runs: RawRun[], config: FullOfficeParserConfig): void {
+    let total = 0, bad = 0;
+    for (const r of runs) {
+        for (const ch of r.text) {
+            const c = ch.codePointAt(0)!;
+            if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) continue; // skip whitespace
+            total++;
+            // Private Use Area, replacement char, or a C0/C1 control character.
+            if ((c >= 0xE000 && c <= 0xF8FF) || c === 0xFFFD || c < 0x20 || (c >= 0x7F && c <= 0x9F)) bad++;
+        }
+    }
+    if (total >= 50 && bad / total >= 0.2) {
+        logWarning(OfficeWarningType.PDF_TEXT_ENCODING_SUSPECT, config, `${Math.round((bad / total) * 100)}% of characters were unmappable`);
+    }
+}
+
 /** Maps the granted-permission flags from `getPermissions()` to readable action names. */
 function permissionNames(pdfjs: any, perms: number[]): string[] {
     const F = pdfjs.PermissionFlag || {};
@@ -687,6 +704,24 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
         if (layers.length) metadata.nativeProperties['layers'] = layers;
     } catch { /* no optional content */ }
 
+    // AcroForm field values (filled form data). Many real-world PDFs (applications, invoices) carry
+    // their content here rather than as page text. Reported structurally; extraction, not validation.
+    try {
+        const fieldObjects = await pdfDocument.getFieldObjects();
+        if (fieldObjects) {
+            const fields: Record<string, unknown> = {};
+            for (const name of Object.keys(fieldObjects)) {
+                const arr = (fieldObjects as any)[name];
+                const f = Array.isArray(arr) ? arr[0] : arr;
+                if (!f || typeof f !== 'object') continue;
+                const entry: Record<string, unknown> = { value: f.value, type: f.type };
+                if (f.defaultValue !== undefined && f.defaultValue !== null) entry.defaultValue = f.defaultValue;
+                fields[name] = entry;
+            }
+            if (Object.keys(fields).length) metadata.nativeProperties['formFields'] = fields;
+        }
+    } catch { /* no AcroForm */ }
+
     // Printed page labels (e.g. roman-numeral front matter), distinct from the physical page index.
     let pageLabels: (string | null)[] | null = null;
     try { pageLabels = await pdfDocument.getPageLabels(); } catch { pageLabels = null; }
@@ -720,6 +755,10 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
 
     const allRuns = extracts.flatMap(e => e.runs);
     const docCtx = computeDocContext(allRuns, pdfCfg, config.newlineDelimiter);
+
+    // Warn when extracted text is mostly unmappable glyphs (broken/missing ToUnicode), so consumers
+    // can tell "genuinely empty" from "font could not be decoded" and reach for OCR.
+    warnIfEncodingSuspect(allRuns, config);
 
     // Tagged-structure trust: the document must declare it is tagged and not flag it as suspect.
     const docTagged = !!(markInfo && markInfo.Marked);
