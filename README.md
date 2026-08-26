@@ -36,7 +36,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
   - [Callback (Backward Compat)](#callback-backward-compat)
   - [File Buffers & ArrayBuffers](#file-buffers--arraybuffers)
   - [`ast.to()`: Generate from AST](#astto-generate-from-ast)
-  - [`ast.toText()`: Quick Text Extraction](#asttotext-quick-text-extraction)
+  - [`.to('text')`: Plain Text Extraction](#totext-plain-text-extraction)
 - [OfficeGenerator](#officegenerator)
 - [OfficeConverter: One-Step API](#officeconverter-one-step-api)
 - [Native RAG Chunking](#native-rag-chunking)
@@ -134,7 +134,7 @@ npx officeparser my_document --fileType=docx --to=json
 | `--renderMetadata` | boolean | `false` | Render metadata as visible content in the generated output |
 | `--htmlConfig.containerWidth` | string \| number | `auto` | HTML output container width (e.g. `900px`, `100%`) |
 | ~~`--format`~~ | `json\|text\|md\|html\|csv\|rtf\|pdf\|epub\|chunks` | `json` | **Deprecated.** Use `--to` |
-| ~~`--toText`~~ | `true\|false` | `false` | **Deprecated.** Use `--to=text`, which keeps footnote text and image placeholders by default (both switchable); this flag drops them unconditionally |
+| ~~`--toText`~~ | | | **Removed in v8.** Use `--to=text`. |
 | ~~`--ocrLanguage`~~ | string | `eng` | **Deprecated.** Use `--ocrConfig.language` |
 | ~~`--putNotesAtLast`~~ | `true\|false` | `false` | **Deprecated and ignored.** Notes are attached structurally to their nodes. |
 | ~~`--outputErrorToConsole`~~ | `true\|false` | `false` | **Deprecated.** Use `--verbose` |
@@ -182,9 +182,9 @@ const ast = await OfficeParser.parseOffice('report.docx', {
 ### Callback (Backward Compat)
 
 ```js
-officeParser.parseOffice('/path/to/file.docx', function(ast, err) {
+officeParser.parseOffice('/path/to/file.docx', async function(ast, err) {
     if (err) { console.error(err); return; }
-    console.log(ast.toText());
+    console.log((await ast.to('text')).value);
 });
 ```
 
@@ -292,58 +292,43 @@ const { value: chunks }             = await ast.to('chunks', { strategy: 'fixed-
 const { value: pdfBytes }           = await ast.to('pdf'); // Uint8Array
 ```
 
-### `ast.toText()`: Quick Text Extraction
+### `.to('text')`: Plain Text Extraction
 
-> [!WARNING]
-> `toText()` is **synchronous** and deprecated in favour of the async `ast.to('text')`. It remains
-> available for backward compatibility, but it is the older, less capable renderer: it has no
-> configuration at all, so footnote/endnote text and image placeholders are **unconditionally
-> dropped** rather than being something you can ask for. Prefer `.to('text')` for new code.
+Plain text comes from `.to('text')`, which is asynchronous and configurable. Its defaults render
+tables as aligned grids, lists with markers and indentation, and include notes and image
+placeholders:
 
 ```js
-const text = ast.toText(); // synchronous, returns plain string
-```
-
-#### Migrating to `.to('text')`
-
-`.to('text')` is asynchronous and configurable. Its defaults render tables as aligned grids, lists
-with markers/indentation, and include notes and image placeholders:
-
-```js
-// Default: aligned table grids, list markers, notes, image placeholders
+// Default: aligned tables, list markers, notes, image placeholders, layout-faithful PDF pages
 const { value } = await ast.to('text');
 
-// Deliberate opt-out: the combination closest to toText()'s shape
+// Flat stream of text, no grid alignment or markers
 const { value } = await ast.to('text', {
     includeImages: false,
     textConfig: { preserveLayout: false, renderNotes: false },
 });
 ```
 
-**At its default configuration, `.to('text')` emits everything `toText()` emits.** Verified across
-every bundled fixture in all 12 supported formats, in both layout modes: no word `toText()` produces
-is missing from `.to('text')`. It additionally emits notes and image placeholders, which `toText()`
-never produces, and it renders merged table cells correctly (`toText()` glues a two-cell row into
-`OneThree`, where `.to('text')` gives `One Three`).
-
-Notes and images are **configuration, not intrinsic behavior**. They are on by default and you can
-turn them off. The real difference from `toText()` is that they are a choice at all:
-
-| | `toText()` | `.to('text')` | governed by |
+| Feature | default | flat (`preserveLayout: false`) | governed by |
 |---|---|---|---|
-| Tables | one cell per line | aligned grid, or tab-separated | `textConfig.preserveLayout` (default `true`) |
-| Lists | plain text | markers + indentation, or plain | `textConfig.preserveLayout` (default `true`) |
-| Footnotes/endnotes | never emitted | emitted by default | `textConfig.renderNotes` (default `true`) |
-| Image placeholders | never emitted | emitted by default | `includeImages` (default `true`) |
-| Chart data series | emitted | emitted | n/a |
+| Tables | aligned grid | one cell per line, tab-separated | `textConfig.preserveLayout` (default `true`) |
+| Lists | markers + indentation | plain text | `textConfig.preserveLayout` (default `true`) |
+| PDF pages | spatial monospace grid (columns/tables aligned like the page) | flowing text | `textConfig.preserveLayout` + geometry |
+| Footnotes/endnotes | emitted | emitted | `textConfig.renderNotes` (default `true`) |
+| Image placeholders | emitted | emitted | `includeImages` (default `true`) |
 
-Nothing about `.to('text')` forces the richer output on you. The defaults simply start from the more
-complete document, and the opt-out above gets you back to `toText()`'s shape deliberately rather
-than by having no alternative.
+For PDFs with page geometry (the default, unless `ignorePositions` is set), `preserveLayout` renders
+each page as a spatial monospace grid so multi-column text and tables line up much like the original
+page, similar to `pdftotext -layout`. Use `textConfig.pageSeparator` (default `'\n'`, or `'\f'` for a
+form feed) to control what goes between pages.
 
 Spreadsheets (CSV/ODS/XLSX) are unaffected by `preserveLayout`: it governs `table`/`list` nodes,
 while spreadsheet content is `sheet`/`row`/`cell`. There the default aligned grid is the most
 faithful rendering.
+
+> [!NOTE]
+> The synchronous `ast.toText()` method was **removed in v8**. Use `(await ast.to('text')).value`,
+> which produces the same content at its defaults and adds the configuration above.
 
 ---
 
@@ -535,8 +520,7 @@ OfficeParserAST
 │   ├── ocrText?: string  (if ocr: true)
 │   └── chartData?: { title, dataSets, labels }
 ├── warnings: OfficeIssue[]  (non-fatal issues from the parsing phase)
-├── to(format, config?)  (format: 'html'|'md'|'text'|'csv'|'rtf'|'pdf'|'chunks', returns { value, messages })
-└── ~~toText()~~             (Deprecated: use .to('text'); drops footnotes + image placeholders)
+└── to(format, config?)  (format: 'html'|'md'|'text'|'csv'|'rtf'|'pdf'|'chunks', returns { value, messages })
 ```
 
 ### `OfficeIssue`: Warning / Error Object
@@ -676,7 +660,7 @@ Break Node (type: 'break')
 ```
 
 > [!NOTE]
-> Break nodes have no `text` property, but `ast.toText()` and `ast.to('text')` automatically convert them to the configured newline delimiter.
+> Break nodes have no `text` property, but `ast.to('text')` automatically converts them to the configured newline delimiter.
 
 > [!NOTE]
 > DOCX writes breaks inline (`w:br`/`w:cr`), so they land as children of the paragraph. ODF instead
@@ -985,15 +969,36 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `serializeRawContent` | `boolean` | `true` | Re-serialize XML to clean strings (only if `includeRawContent: true`) |
 | `preserveXmlWhitespace` | `boolean` | `false` | Preserve original XML whitespace during serialization |
 | `includeBreakNodes` | `boolean` | `false` | Include typed break nodes: DOCX `w:br`/`w:cr`, ODF `fo:break-before`/`fo:break-after` and `text:soft-page-break` |
-| `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal cross-references from AST |
+| `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal cross-references from AST (now honored for PDF too) |
+| `ignorePositions` | `boolean` | `false` | Omit per-node page-location data (`bounds`, page dimensions). Currently produced by the PDF parser |
 | `fileType` | `SupportedFileType \| null` | `null` | **Required for text-based binary data** (`'md'`, `'html'`, `'csv'`) as these lack magic bytes. |
 | `csvDelimiter` | `string` | `','` | Input delimiter when parsing CSV files |
 | `decompressionLimits` | `DecompressionLimits` | `{ maxUncompressedBytes: 512MB, maxZipEntries: 10000, maxTableCells: 1000000 }` | **New**: Limits applied during ZIP extraction (and ODF cell expansion) to protect against excessive memory and resource usage |
 | `htmlParserConfig` | `HtmlParserConfig` | `{}` | HTML/XHTML/EPUB parsing options. `preserveAttributes` (`boolean`, default `false`): keep generic source attributes no typed field consumed on `node.htmlAttributes`. `preserveIframes` (`boolean \| string[]`, default `false`): preserve non-YouTube `<iframe>` embeds (otherwise dropped) as `embed` nodes — `true` for any, or a hostname allowlist; the src is scheme-checked on generation. `embedFolkForms` (`boolean`, default `false`): opt in to importing ambiguous folk embed forms (Obsidian `![](youtube-url)`, thumbnail-link) as YouTube embeds |
 | `pdfWorkerSrc` | `string` | CDN (jsDelivr) | Path/URL to `pdf.worker.min.mjs` (required in browser) |
+| `pdfParserConfig` | `PdfParserConfig` | see below | PDF-specific options ([table below](#pdfparserconfig)) |
 | `onWarning` | `(issue: OfficeIssue) => void` | — | Callback for non-fatal parsing issues |
 | `abortSignal` | `AbortSignal \| null` | `null` | Optional signal to cancel parsing (rejects with AbortError) |
 | ~~`outputErrorToConsole`~~ | `boolean` | `false` | **Deprecated.** Use `onWarning` instead |
+
+---
+
+### PdfParserConfig
+
+PDF-specific options, passed as `pdfParserConfig` on the parser config.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `password` | `string` | `''` | Password for an encrypted PDF. A missing password rejects with `PDF_PASSWORD_REQUIRED`, a wrong one with `PDF_PASSWORD_INCORRECT` |
+| `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted PDF needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Mirrors pdf.js's `onPassword` |
+| `useTags` | `boolean` | `true` | Use the tagged-structure tree (headings, tables, lists, notes) when present and reliable; set `false` to force geometry-only extraction |
+| `detectColumns` | `boolean` | `true` | Recover reading order for multi-column and float-beside-text pages (recursive XY-cut) |
+| `mergeHyphenatedWords` | `boolean` | `true` | Join words split across a line break by a trailing hyphen |
+| `lineToleranceFactor` | `number` | `0.35` | Baseline tolerance (fraction of font size) for grouping fragments onto one line |
+| `spaceToleranceFactor` | `number` | `0.25` | Gap threshold (fraction of font size) for inserting a space between fragments |
+| `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | Heading detection strategy on the geometric path |
+| `pageRange` | `string` | `''` (all) | Restrict to given pages, e.g. `'1-3,7'`. Output keeps original page numbers |
+| `disableTextNormalization` | `boolean` | `false` | Return un-normalized text (preserve ligatures, combining marks, original whitespace) |
 
 ---
 
@@ -1008,6 +1013,7 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 | `renderMetadata` | `boolean` | `false` | Render title/author as visible header block |
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
 | `includeImages` | `boolean` | `true` | Include image nodes in output |
+| `maxInlineImageBytes` | `number` | `2000000` | Max base64 size an image is inlined as a `data:` URI (HTML/Markdown). Larger images render their text (e.g. OCR text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. `0` never inlines, `Infinity` always inlines |
 | `includeCharts` | `boolean` | `true` | Include interactive charts (HTML only) |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output |
 | `ignoreDefaultStyleMap` | `boolean` | `false` | Disable built-in style mappings (e.g., "Heading 1" → h1) |
@@ -1189,8 +1195,9 @@ Pass as `textConfig` inside `GeneratorConfig`.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `newlineDelimiter` | `string` | `'\n'` | String inserted between structural blocks |
-| `preserveLayout` | `boolean` | `true` | Render tables with aligned columns using whitespace |
+| `preserveLayout` | `boolean` | `true` | Render tables with aligned columns using whitespace, and PDF pages as a spatial monospace grid |
 | `renderNotes` | `boolean` | `true` | Append the collected footnote/endnote section |
+| `pageSeparator` | `string` | `'\n'` | String inserted between PDF pages (set `'\f'` for a form feed) |
 
 ### metadataOverrides
 
@@ -1419,6 +1426,8 @@ For a full debugging guide, visit the [Live Documentation](https://harshankur.gi
 
 1. **ODT/ODS Charts**: May show inaccurate data when the chart references external cell ranges or uses complex layout-based data.
 2. **PDF Images (Browser)**: Extracted as BMP files for cross-platform compatibility. Conversion is automatic.
+3. **PDF structure without tags**: Tables, lists and headings come from the PDF's tag tree when present. For untagged PDFs they are recovered geometrically, which is best-effort: complex float-beside-text layouts and tables without a tag tree may not separate perfectly. Column reading order, paragraphs and word spacing are handled on both paths.
+4. **PDF text color, underline and strikethrough** are not extracted (they are drawn as separate graphics operators rather than carried as text properties). Vertical (top-to-bottom) writing is read but not laid out spatially. Table cell row/column spans are not exposed by the underlying library.
 
 ---
 

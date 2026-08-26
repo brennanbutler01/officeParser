@@ -58,6 +58,15 @@
                     syntax in the output.</td>
             </tr>
             <tr>
+                <td><code>maxInlineImageBytes</code></td>
+                <td><code>number</code></td>
+                <td><code>2000000</code></td>
+                <td><strong>Resources</strong>: Max base64 size an image is inlined as a <code>data:</code> URI in
+                    HTML/Markdown. Larger images render their text (e.g. OCR text) or a name reference instead, so a
+                    scanned page cannot emit a multi-megabyte line that breaks downstream parsers. <code>0</code> never
+                    inlines; <code>Infinity</code> always inlines.</td>
+            </tr>
+            <tr>
                 <td><code>includeCharts</code></td>
                 <td><code>boolean</code></td>
                 <td><code>true</code></td>
@@ -534,13 +543,19 @@ await ast.to('md', {
                 <td><code>preserveLayout</code></td>
                 <td><code>boolean</code></td>
                 <td><code>true</code></td>
-                <td>Attempts to align table columns using spaces.</td>
+                <td>Aligns table columns using spaces, and renders PDF pages (when geometry is present) as a spatial monospace grid so columns and tables line up like the source page.</td>
             </tr>
             <tr>
                 <td><code>renderNotes</code></td>
                 <td><code>boolean</code></td>
                 <td><code>true</code></td>
                 <td>Appends the collected footnote/endnote section to the output.</td>
+            </tr>
+            <tr>
+                <td><code>pageSeparator</code></td>
+                <td><code>string</code></td>
+                <td><code>'\n'</code></td>
+                <td>String inserted between PDF pages in the rendered text. Set <code>'\f'</code> for a form feed.</td>
             </tr>
         </tbody>
     </table>

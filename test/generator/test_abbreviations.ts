@@ -13,8 +13,7 @@ async function testAbbreviations() {
                 type: 'paragraph',
                 text: 'The company name is Alpha Inc. It is located in the city.'
             }
-        ],
-        toText: () => 'The company name is Alpha Inc. It is located in the city.'
+        ]
     };
 
     // Test 1: Default (should NOT split on Inc.)

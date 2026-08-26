@@ -140,7 +140,7 @@ export class OfficeParser {
      * });
      * 
      * // Extract text
-     * const text = ast.toText();
+     * const text = (await ast.to('text')).value;
      * ```
      */
     public static async parseOffice(file: string | Buffer | ArrayBuffer | Uint8Array | BlobLike, configOrCallback?: OfficeParserConfig | ((ast: OfficeParserAST, err?: any) => void), config?: OfficeParserConfig): Promise<OfficeParserAST> {

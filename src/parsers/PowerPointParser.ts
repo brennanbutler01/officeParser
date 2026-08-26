@@ -989,20 +989,6 @@ export const parsePowerPoint = async (buffer: Buffer, config: FullOfficeParserCo
 
     // putNotesAtLast is deprecated. Notes are now structurally attached to their respective slides.
 
-    const toTextSync = () => content.map(c => {
-        // Recursive text extraction
-        const getText = (node: OfficeContentNode): string => {
-            let t = '';
-            if (node.children) {
-                t += node.children.map(getText).filter(t => t != '').join(!node.children[0]?.children ? '' : config.newlineDelimiter);
-            }
-            else
-                t += node.text || '';
-            return t;
-        };
-        return getText(c);
-    }).filter(t => t != '').join(config.newlineDelimiter);
-
     const auxiliaryContent = slideMasters.length > 0 ? {
         slideMasters
     } : undefined;
@@ -1014,6 +1000,5 @@ export const parsePowerPoint = async (buffer: Buffer, config: FullOfficeParserCo
         attachments,
         config,
         auxiliaryContent,
-        toTextSync
     );
 };

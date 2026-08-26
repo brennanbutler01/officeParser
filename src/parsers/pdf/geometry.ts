@@ -1,0 +1,116 @@
+/**
+ * Pure geometry helpers for the PDF pipeline: bounding-box arithmetic and run normalization.
+ * No pdf.js objects appear here; callers pass in the already-composed transform matrix.
+ *
+ * @module parsers/pdf/geometry
+ */
+
+import { NodeBounds } from '../../types.js';
+import { RunAngle } from './pdfTypes.js';
+
+/** Rounds to 2 decimals, collapsing -0 to 0. */
+export function round2(n: number): number {
+    const r = Math.round(n * 100) / 100;
+    return r === 0 ? 0 : r;
+}
+
+/** Returns a copy of the box with all fields rounded to 2 decimals. */
+export function roundBounds(b: NodeBounds): NodeBounds {
+    return { x: round2(b.x), y: round2(b.y), width: round2(b.width), height: round2(b.height) };
+}
+
+/** Smallest box containing both inputs. */
+export function unionBounds(a: NodeBounds, b: NodeBounds): NodeBounds {
+    const x = Math.min(a.x, b.x);
+    const y = Math.min(a.y, b.y);
+    const right = Math.max(a.x + a.width, b.x + b.width);
+    const bottom = Math.max(a.y + a.height, b.y + b.height);
+    return { x, y, width: right - x, height: bottom - y };
+}
+
+/** Smallest box containing every input, or undefined for an empty list. */
+export function unionAll(boxes: (NodeBounds | undefined)[]): NodeBounds | undefined {
+    let acc: NodeBounds | undefined;
+    for (const b of boxes) {
+        if (!b) continue;
+        acc = acc ? unionBounds(acc, b) : b;
+    }
+    return acc;
+}
+
+/** Snaps an angle in radians to the nearest quarter turn when within ~0.5 degrees, else -1. */
+export function snapAngle(radians: number): RunAngle | -1 {
+    let deg = (radians * 180) / Math.PI;
+    deg = ((deg % 360) + 360) % 360;
+    for (const cand of [0, 90, 180, 270] as const) {
+        if (Math.abs(deg - cand) <= 0.5 || Math.abs(deg - (cand + 360)) <= 0.5) return cand;
+    }
+    return -1;
+}
+
+/** Geometry derived from a single normalized text run. */
+export interface RunBox {
+    x: number;
+    yTop: number;
+    yBaseline: number;
+    width: number;
+    height: number;
+    fontSize: number;
+    angle: RunAngle | -1;
+}
+
+/**
+ * Normalizes one text item into top-left-origin viewport space.
+ *
+ * @param m - the composed matrix `Util.transform(viewport.transform, item.transform)`
+ * @param itemWidth - pdf.js `TextItem.width` (already in viewport units for a scale-1 viewport)
+ * @param ascent - font ascent as a fraction of font size (from `textContent.styles`)
+ * @param descent - font descent as a fraction of font size (negative)
+ */
+export function computeRunBox(m: number[], itemWidth: number, ascent: number, descent: number): RunBox {
+    const fontSize = Math.hypot(m[2], m[3]) || Math.abs(m[3]) || 12;
+    const angle = snapAngle(Math.atan2(m[1], m[0]));
+    const originX = m[4];
+    const yBaseline = m[5];
+    const height = (ascent - descent) * fontSize;
+
+    if (angle === 0) {
+        return { x: originX, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
+    }
+    // Non-horizontal runs: report an axis-aligned box around the advance so bounds stay meaningful,
+    // but let the caller route them to the decorated bucket rather than normal line flow.
+    if (angle === 180) {
+        return { x: originX - itemWidth, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
+    }
+    if (angle === 90 || angle === 270) {
+        // Advance is vertical; approximate a box tall by itemWidth and wide by height.
+        const top = angle === 90 ? yBaseline : yBaseline - itemWidth;
+        return { x: yBaseline === top ? originX : originX - height, yTop: top, yBaseline, width: height, height: itemWidth, fontSize, angle };
+    }
+    // Arbitrary angle (-1): fall back to a small box at the origin.
+    return { x: originX, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
+}
+
+/**
+ * Maps a box from authored (rotation-0) page space into the page's rendered space for a given
+ * `/Rotate`. Reading order is computed in authored space; this is applied only at emit time so the
+ * public `NodeBounds` match what pdf.js renders. For rotation 0 it is the identity.
+ *
+ * @param authoredW - authored page width (rotation-0 viewport width)
+ * @param authoredH - authored page height
+ */
+export function rotateBoundsToRendered(b: NodeBounds, rotation: number, authoredW: number, authoredH: number): NodeBounds {
+    const r = ((rotation % 360) + 360) % 360;
+    if (r === 0) return b;
+    const corners = [
+        { x: b.x, y: b.y },
+        { x: b.x + b.width, y: b.y + b.height },
+    ].map(p => {
+        if (r === 90) return { x: authoredH - p.y, y: p.x };
+        if (r === 180) return { x: authoredW - p.x, y: authoredH - p.y };
+        return { x: p.y, y: authoredW - p.x }; // 270
+    });
+    const x = Math.min(corners[0].x, corners[1].x);
+    const y = Math.min(corners[0].y, corners[1].y);
+    return { x, y, width: Math.abs(corners[0].x - corners[1].x), height: Math.abs(corners[0].y - corners[1].y) };
+}

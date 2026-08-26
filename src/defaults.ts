@@ -1,4 +1,4 @@
-import { ChunkingConfig, CsvGeneratorConfig, DeepRequired, DocumentStructureChunkingConfig, FixedSizeChunkingConfig, FullGeneratorConfig, HtmlGeneratorConfig, HtmlParserConfig, MdGeneratorConfig, OcrConfig, OcrTimeoutConfig, OfficeParserConfig, PdfGeneratorConfig, SemanticChunkingConfig, TextGeneratorConfig } from './types.js';
+import { ChunkingConfig, CsvGeneratorConfig, DeepRequired, DocumentStructureChunkingConfig, FixedSizeChunkingConfig, FullGeneratorConfig, HtmlGeneratorConfig, HtmlParserConfig, MdGeneratorConfig, OcrConfig, OcrTimeoutConfig, OfficeParserConfig, PdfGeneratorConfig, PdfParserConfig, SemanticChunkingConfig, TextGeneratorConfig } from './types.js';
 
 const PDFJS_VERSION = '6.1.200';
 const DEFAULT_PDF_WORKER_SRC = typeof __SLIM__ !== 'undefined' && __SLIM__ ? '' : `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
@@ -49,6 +49,26 @@ const DEFAULT_HTML_PARSER_CONFIG: DeepRequired<HtmlParserConfig> = {
 };
 
 /**
+ * Default configuration for PDF parsing. Chosen so the out-of-the-box output is the highest-fidelity
+ * one: tagged structure when present, column detection and hyphenation repair on, positions emitted
+ * (governed by the flat `ignorePositions`).
+ */
+const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
+    password: '',
+    // No-op default returns undefined, i.e. "no password to offer", so an encrypted PDF without a
+    // valid `password` throws exactly as it would with the callback unset.
+    onPassword: () => undefined,
+    useTags: true,
+    detectColumns: true,
+    mergeHyphenatedWords: true,
+    lineToleranceFactor: 0.35,
+    spaceToleranceFactor: 0.25,
+    headingDetection: 'auto',
+    pageRange: '',
+    disableTextNormalization: false,
+};
+
+/**
  * Default configuration for the OfficeParser.
  */
 export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
@@ -71,6 +91,7 @@ export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     pdfWorkerSrc: DEFAULT_PDF_WORKER_SRC,
     includeBreakNodes: false,
     ignoreInternalLinks: false,
+    ignorePositions: false,
     fileType: null,
     csvDelimiter: ',',
     decompressionLimits: {
@@ -79,6 +100,7 @@ export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxTableCells: 1000000,
     },
     htmlParserConfig: DEFAULT_HTML_PARSER_CONFIG,
+    pdfParserConfig: DEFAULT_PDF_PARSER_CONFIG,
 };
 
 /**
@@ -150,6 +172,7 @@ const DEFAULT_TEXT_GENERATOR_CONFIG: DeepRequired<TextGeneratorConfig> = {
     newlineDelimiter: '\n',
     preserveLayout: true,
     renderNotes: true,
+    pageSeparator: '\n',
 };
 
 /**
@@ -221,6 +244,7 @@ export const DEFAULT_GENERATOR_CONFIG: FullGeneratorConfig = {
     metadataOverrides: {},
     ignoreDefaultStyleMap: false,
     includeImages: true,
+    maxInlineImageBytes: 2000000,
     includeCharts: true,
     ignoreInternalLinks: false,
     abortSignal: null,

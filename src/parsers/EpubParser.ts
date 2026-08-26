@@ -183,21 +183,5 @@ export const parseEpub = async (buffer: Buffer, config: FullOfficeParserConfig):
         }
     }
 
-    const toTextSync = () => content.map(n => {
-        const getText = (node: OfficeContentNode): string => {
-            if (node.type === 'text' || node.type === 'code') return node.text || '';
-            if (node.type === 'break') return '\n';
-            if (node.type === 'embed') return (node.metadata as EmbedMetadata)?.url || '';
-            if (node.type === 'image') return (node.metadata as ImageMetadata)?.altText || '';
-            if (node.children) {
-                const isBlock = ['table', 'row', 'list', 'sheet', 'slide', 'admonition'].includes(node.type);
-                return node.children.map(getText).join(isBlock ? config.newlineDelimiter : '');
-            }
-            return '';
-        };
-        return getText(n);
-    }).join(config.newlineDelimiter)
-        .replace(/\n{3,}/g, '\n\n');
-
-    return createAST('epub', metadata, content, attachments, config, undefined, toTextSync);
+    return createAST('epub', metadata, content, attachments, config, undefined);
 };

@@ -504,22 +504,33 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     if (!this.config.includeImages) return '';
                     const meta = node.metadata as ImageMetadata;
                     const alt = meta?.altText || 'image';
+                    const anchors = this.renderAnchors(meta);
+                    const anchorPrefix = anchors ? `${anchors}\n` : '';
                     let src = meta?.url || meta?.attachmentName || '';
 
                     // Resolve attachment to data URI if no external URL is provided
                     if (!meta?.url && meta?.attachmentName && this.ast) {
                         const attachment = this.ast.attachments.find(a => a.name === meta.attachmentName);
                         if (attachment) {
-                            src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                            if ((attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
+                                src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                            } else {
+                                // Too large to inline as a data URI (e.g. a scanned PDF page rendered
+                                // as one big image). Inlining it would emit a multi-megabyte single
+                                // line that can overflow downstream Markdown parsers. Prefer the node's
+                                // own text (OCR text, when present) so the content survives; otherwise
+                                // src stays the attachment name as a plain reference.
+                                const ocr = (node.text || '').trim();
+                                if (ocr) return `${anchorPrefix}${markdownEscapeText(ocr)}`;
+                            }
                         }
                     }
 
-                    const anchors = this.renderAnchors(meta);
                     // Strip `[]` from alt (would close the `![...]`) and neutralize the URL scheme.
                     const safeAlt = markdownEscapeText(alt).replace(/[[\]]/g, '');
                     const safeSrc = sanitizeMarkdownUrl(src, { allowDataImage: true });
                     const imgTitle = meta?.title ? ` "${meta.title.replace(/"/g, '\\"')}"` : '';
-                    return `${anchors}${anchors ? '\n' : ''}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
+                    return `${anchorPrefix}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
                 }
 
                 case 'table': {

@@ -765,20 +765,6 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
     };
     assignAttachmentData(content);
 
-    const toTextSync = () => content.map(c => {
-        // Recursive text extraction
-        const getText = (node: OfficeContentNode): string => {
-            let t = '';
-            if (node.children) {
-                t += node.children.map(getText).filter(t => t != '').join(!node.children[0]?.children ? '' : config.newlineDelimiter);
-            }
-            else
-                t += node.text || '';
-            return t;
-        };
-        return getText(c);
-    }).filter(t => t != '').join(config.newlineDelimiter);
-
     return createAST(
         'xlsx',
         metadata,
@@ -786,6 +772,5 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
         attachments,
         config,
         undefined,
-        toTextSync
     );
 };

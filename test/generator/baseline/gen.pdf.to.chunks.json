@@ -1,89 +1,33 @@
 [
   {
-    "text": "Demonstration of DOCX support in",
+    "text": "Demonstration of DOCX support in calibre",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Demonstration of DOCX support in",
+      "closestHeading": "Demonstration of DOCX support in calibre",
       "pageNumber": 1
     }
   },
   {
-    "text": "calibre",
+    "text": "This document demonstrates the ability of the calibre DOCX Input plugin to convert the various typographic features in a Microsoft Word (2007 and newer) document. Convert this document to a modern ebook format, such as AZW3 for Kindles or EPUB for other ebook readers, to see it in action.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "calibre",
+      "closestHeading": "Demonstration of DOCX support in calibre",
       "pageNumber": 1
     }
   },
   {
-    "text": "This document demonstrates the ability of the calibre DOCX Input plugin to",
+    "text": "There is support for images, tables, lists, footnotes, endnotes, links, dropcaps and various types of text and paragraph level formatting.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "calibre",
+      "closestHeading": "Demonstration of DOCX support in calibre",
       "pageNumber": 1
     }
   },
   {
-    "text": "convert the various typographic features in a Microsoft Word (2007 and newer)",
+    "text": "To see the DOCX conversion in action, simply add this file to calibre using the “Add Books” button and then click “Convert”. Set the output format in the top right corner of the conversion dialog to EPUB or AZW3 and click “OK”.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "document. Convert this document to a modern ebook format, such as AZW3 for",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "Kindles or EPUB for other ebook readers, to see it in action.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "There is support for images, tables, lists, footnotes, endnotes, links, dropcaps and",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "various types of text and paragraph level formatting.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "To see the DOCX conversion in action, simply add this file to calibre using the",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "“Add Books” button and then click “ Convert”. Set the output format in the top right",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
-      "pageNumber": 1
-    }
-  },
-  {
-    "text": "corner of the conversion dialog to EPUB or AZW3 and click “OK” .",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "calibre",
+      "closestHeading": "Demonstration of DOCX support in calibre",
       "pageNumber": 1
     }
   },
@@ -99,79 +43,31 @@
     "text": "Inline formatting",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Inline formatting",
       "pageNumber": 2
     }
   },
   {
-    "text": "Here, we demonstrate various types of inline text formatting and the use of",
+    "text": "Here, we demonstrate various types of inline text formatting and the use of embedded fonts.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Inline formatting",
       "pageNumber": 2
     }
   },
   {
-    "text": "embedded fonts.",
+    "text": "Here is some bold, italic, bold-italic, underlined and struck out text. Then, we have a superscript and a subscript. Now we see some red, green and blue text. Some text with a yellow highlight. Some text in a box. Some text in inverse video.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Inline formatting",
       "pageNumber": 2
     }
   },
   {
-    "text": "Here is some bold, italic, bold-italic, underlined and struck out text. Then, we",
+    "text": "A paragraph with styled text: subtle emphasis followed by strong text and intense emphasis. This paragraph uses document wide styles for styling rather than inline text properties as demonstrated in the previous paragraph — calibre can handle both with equal ease.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "have a super script and a sub script . Now we see some red, green and blue text. Some text",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "with a yellow highlight. Some text in a box. Some text in inverse video.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "A paragraph with styled text: subtle emphasis followed by strong text and",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "intense emphasis . This paragraph uses document wide styles for styling rather than",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "inline text properties as demonstrated in the previous paragraph — calibre can handle",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "both with equal ease.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Inline formatting",
       "pageNumber": 2
     }
   },
@@ -179,39 +75,15 @@
     "text": "Fun with fonts",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Fun with fonts",
       "pageNumber": 2
     }
   },
   {
-    "text": "This document has embedded the Ubuntu font family. The body text is in the",
+    "text": "This document has embedded the Ubuntu font family. The body text is in the Ubuntu typeface, here is some text in the Ubuntu Mono typeface, notice how every letter has the same width, even i and m. Every embedded font will automatically be embedded in the output ebook during conversion.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "Ubuntu typeface, here is some text in the Ubuntu Mono typeface, notice how every",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "letter has the same width, even i and m . Every embedded font will automatically",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "be embedded in the output ebook during conversion.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Fun with fonts",
       "pageNumber": 2
     }
   },
@@ -219,71 +91,23 @@
     "text": "Paragraph level formatting",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Paragraph level formatting",
       "pageNumber": 2
     }
   },
   {
-    "text": "You can do crazy things with paragraphs, if the urge strikes you. For instance this",
+    "text": "You can do crazy things with paragraphs, if the urge strikes you. For instance this paragraph is right aligned and has a right border. It has also been given a light gray background.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Paragraph level formatting",
       "pageNumber": 2
     }
   },
   {
-    "text": "paragraph is right aligned and has a right border. It has also been given a light gray",
+    "text": "For the lovers of poetry amongst you, paragraphs with hanging indents, like this often come in handy. You can use hanging indents to ensure that a line of poetry retains its individual identity as a line even when the screen is too narrow to display it as a single line. Not only does this paragraph have a hanging indent, it is also has an extra top margin, setting it apart from the preceding paragraph.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "background.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "For the lovers of poetry amongst you, paragraphs with hanging indents, like this often",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "come in handy. You can use hanging indents to ensure that a line of poetry",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "retains its individual identity as a line even when the screen is too narrow to",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "display it as a single line. Not only does this paragraph have a hanging indent, it",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
-      "pageNumber": 2
-    }
-  },
-  {
-    "text": "is also has an extra top margin, setting it apart from the preceding paragraph.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Text Formatting",
+      "closestHeading": "Paragraph level formatting",
       "pageNumber": 2
     }
   },
@@ -296,7 +120,16 @@
     }
   },
   {
-    "text": "ITEM NEEDED Tables in Word can vary from the extremely",
+    "text": "| ITEM | NEEDED |\n| Books | 1 |\n| Pens | 3 |\n| Pencils | 2 |\n| Highlighter | 2 colors |\n| Scissors | 1 pair |",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 3,
+      "isTableChunk": true
+    }
+  },
+  {
+    "text": "Tables in Word can vary from the extremely simple to the extremely complex. calibre tries to do its best when converting tables. While you may run into trouble with the occasional table, the vast majority of common cases should be converted very well, as demonstrated in this section. Note that for optimum results, when creating tables in Word, you should set their widths using percentages, rather than absolute units. To the left of this paragraph is a floating two column table with a nice green border and header row.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
@@ -304,7 +137,7 @@
     }
   },
   {
-    "text": "Books 1 simple to the extremely complex. calibre tries to do",
+    "text": "Now let’s look at a fancier table—one with alternating row colors and partial borders. This table is stretched out to take 100% of the available width.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
@@ -312,7 +145,16 @@
     }
   },
   {
-    "text": "Pens 3",
+    "text": "| City or Town | Point A | Point B | Point C | Point D | Point E |\n| Point A | — |  |  |  |  |\n| Point B | 87 | — |  |  |  |\n| Point C | 64 | 56 | — |  |  |\n| Point D | 37 | 32 | 91 | — |  |\n| Point E | 93 | 35 | 54 | 43 | — |",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 3,
+      "isTableChunk": true
+    }
+  },
+  {
+    "text": "Next, we see a table with special formatting in various locations. Notice how the formatting for the header row and sub header rows is preserved.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
@@ -320,227 +162,12 @@
     }
   },
   {
-    "text": "Pencils 2",
+    "text": "| College | New students | Graduating students | Change |\n|  | Undergraduate |  |  |\n| Cedar University | 110 | 103 | +7 |\n| Oak Institute | 202 | 210 | -8 |\n|  | Graduate |  |  |\n| Cedar University | 24 | 20 | +4 |\n| Elm College | 43 | 53 | -10 |\n| Total | 998 | 908 | 90 |",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "its best when converting tables. While you may run",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Highlighter 2 colors into trouble with the occasional table, the vast",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Scissors 1 pair majority of common cases should be converted very",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "well, as demonstrated in this section. Note that for",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "optimum results, when creating tables in Word, you should set their widths using",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "percentages, rather than absolute units. To the left of this paragraph is a floating two",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "column table with a nice green border and header row.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Now let’s look at a fancier table— one with alternating row colors and partial",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "borders. This table is stretched out to take 100% of the available width.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "City or Point A Point B Point C Point D Point E",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Town",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Point A —",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Point B 87 —",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Point C 64 56 —",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Point D 37 32 91 —",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Point E 93 35 54 43 —",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Next, we see a table with special formatting in various locations. Notice how the",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "formatting for the header row and sub header rows is preserved.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "College New students Graduating Change",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "students",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Undergraduate",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Cedar University 110 103 +7",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Oak Institute 202 210 -8",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Graduate",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Cedar University 24 20 +4",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Elm College 43 53 -10",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "Total 998 908 90",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
+      "pageNumber": 3,
+      "isTableChunk": true
     }
   },
   {
@@ -552,7 +179,7 @@
     }
   },
   {
-    "text": "Next, we have something a little more complex, a nested table, i.e. a table inside",
+    "text": "Next, we have something a little more complex, a nested table, i.e. a table inside another table. Additionally, the inner table has some of its cells merged. The table is displayed horizontally centered.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
@@ -560,71 +187,7 @@
     }
   },
   {
-    "text": "another table. Additionally, the inner table has some of its cells merged. The table is",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "displayed horizontally centered.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 3
-    }
-  },
-  {
-    "text": "One Two To the left is a table inside a",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "table, with some cells",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "Three Four merged.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "We end with a fancy calendar, note how much of the original formatting is",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "preserved. Note that this table will only display correctly on relatively wide screens. In",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "general, very wide tables or tables whose cells have fixed width requirements don’t",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Tables",
-      "pageNumber": 4
-    }
-  },
-  {
-    "text": "fare well in ebooks.",
+    "text": "We end with a fancy calendar, note how much of the original formatting is preserved. Note that this table will only display correctly on relatively wide screens. In general, very wide tables or tables whose cells have fixed width requirements don’t fare well in ebooks.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Tables",
@@ -635,23 +198,63 @@
     "text": "December 2007",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "Su Tu We Th",
+    "text": "Su n",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "n Mon e d u Fri Sat",
+    "text": "Mon",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "Tu e",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "We d",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "Th u",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "Fri",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "Sat",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
@@ -659,79 +262,247 @@
     "text": "1",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "2 3 4 5 6 7 8",
+    "text": "2",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "9 10 1 1 1 1 1",
+    "text": "3",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "1 2 3 4 5",
+    "text": "4",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "1 17 1 1 2 2 2",
+    "text": "5",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "6 8 9 0 1 2",
+    "text": "6",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "2 24 2 2 2 2 2",
+    "text": "7",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "3 5 6 7 8 9",
+    "text": "8",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "3 31",
+    "text": "9",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
   {
-    "text": "0",
+    "text": "10",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "December 2007",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 1",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 2",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 3",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 4",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 6",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "17",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "1 9",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 0",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 1",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 2",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 3",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "24",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 6",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 7",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "2 9",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "3 0",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
+      "pageNumber": 4
+    }
+  },
+  {
+    "text": "31",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Tables",
       "pageNumber": 4
     }
   },
@@ -744,15 +515,7 @@
     }
   },
   {
-    "text": "Miscellaneous structural elements you can add to your document, like footnotes,",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "endnotes, dropcaps and the like.",
+    "text": "Miscellaneous structural elements you can add to your document, like footnotes, endnotes, dropcaps and the like.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Structural Elements",
@@ -763,23 +526,23 @@
     "text": "Footnotes & Endnotes",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
+      "closestHeading": "Footnotes & Endnotes",
       "pageNumber": 5
     }
   },
   {
-    "text": "Footnotes 1 and endnotes i are automatically recognized and both are converted to",
+    "text": "Footnotes1 and endnotesi are automatically recognized and both are converted to endnotes, with backlinks for maximum ease of use in ebook devices.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
+      "closestHeading": "Footnotes & Endnotes",
       "pageNumber": 5
     }
   },
   {
-    "text": "endnotes, with backlinks for maximum ease of use in ebook devices.",
+    "text": "1  In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This conversion is handled automatically by calibre.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
+      "closestHeading": "Footnotes & Endnotes",
       "pageNumber": 5
     }
   },
@@ -787,31 +550,23 @@
     "text": "Dropcaps",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
+      "closestHeading": "Dropcaps",
       "pageNumber": 5
     }
   },
   {
-    "text": "rop caps are used to emphasize the leading paragraph at the start of a",
+    "text": "D",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
+      "closestHeading": "Dropcaps",
       "pageNumber": 5
     }
   },
   {
-    "text": "section. In Word it is possible to specify how many lines of text a drop-cap",
+    "text": "rop caps are used to emphasize the leading paragraph at the start of a section. In Word it is possible to specify how many lines of text a drop-cap should use.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Structural Elements",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "D should use.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Dropcaps",
       "pageNumber": 5
     }
   },
@@ -819,39 +574,15 @@
     "text": "Links",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Links",
       "pageNumber": 5
     }
   },
   {
-    "text": "Two kinds of links are possible, those that refer to an external website and those",
+    "text": "Two kinds of links are possible, those that refer to an external website and those that refer to locations inside the document itself. Both are supported by calibre. For example, here is a link pointing to the calibre download page. Then we have a link that points back to the section on paragraph level formatting in this document.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "that refer to locations inside the document itself. Both are supported by calibre. For",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "D should use.",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "example, here is a link pointing to the calibre download page . Then we have a link that",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "D should use.",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "points back to the section on paragraph level formatting in this document.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Links",
       "pageNumber": 5
     }
   },
@@ -859,183 +590,423 @@
     "text": "Table of Contents",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "You can see the Table of Contents created by calibre by clicking the Table of",
+    "text": "You can see the Table of Contents created by calibre by clicking the Table of Contents button in whatever viewer you are using to view the converted ebook.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Contents button in whatever viewer you are using to view the converted ebook.",
+    "text": "Demonstration of DOCX support in calibre",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Demonstration of DOCX support in calibre ................................................................ .............................. 1",
+    "text": "................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Text Formatting ................................................................................................................................ ................ 1",
+    "text": ".............................. 1",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Inline formatting ................................................................................................................................ ............. 2",
+    "text": "Text Formatting",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Fun with fonts ................................................................................................................................ ................. 2",
+    "text": "................................................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Paragraph level formatting ................................................................................................ ........................... 2",
+    "text": "................ 1",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Tables ................................................................................................................................................................ ... 2",
+    "text": "Inline formatting",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Structural Elements ................................................................................................................................ ......... 4",
+    "text": "................................................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Footnotes & Endnotes ................................................................................................................................ .... 5",
+    "text": "............. 2",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Dropcaps ................................................................................................................................ .......................... 5",
+    "text": "Fun with fonts",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Links ................................................................................................................................................................ . 5",
+    "text": "................................................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Table of Contents ................................................................................................................................ ........... 5",
+    "text": "................. 2",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "1 In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a",
+    "text": "Paragraph level formatting",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This",
+    "text": "................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "conversion is handled automatically by calibre.",
+    "text": "........................... 2",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 5
     }
   },
   {
-    "text": "Images ................................................................................................................................................................ .. 6",
+    "text": "Tables",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "... 2",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Structural Elements",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "......... 4",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Footnotes & Endnotes",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": ".... 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Dropcaps",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": ".......................... 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Links",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": ". 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Table of Contents",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "........... 5",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 5
+    }
+  },
+  {
+    "text": "Images",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
   {
-    "text": "Lists ................................................................................................................................................................ ...... 7",
+    "text": "................................................................................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
   {
-    "text": "Bulleted List ................................................................................................................................ .................... 8",
+    "text": ".. 6",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
   {
-    "text": "Numbered List ................................................................................................................................ ................. 8",
+    "text": "Lists",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
   {
-    "text": "Multi-level Lists ................................................................................................................................ ............... 8",
+    "text": "................................................................................................................................................................",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
   {
-    "text": "Continued Lists ................................................................................................................................ ................ 8",
+    "text": "...... 7",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "D should use.",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "Bulleted List",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": ".................... 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "Numbered List",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................. 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "Multi-level Lists",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "............... 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "Continued Lists",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................................................................................................................................",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
+      "pageNumber": 6
+    }
+  },
+  {
+    "text": "................ 8",
+    "metadata": {
+      "sourceType": "pdf",
+      "closestHeading": "Table of Contents",
       "pageNumber": 6
     }
   },
@@ -1048,7 +1019,7 @@
     }
   },
   {
-    "text": "Centered images like this are useful for large pictures that should be a focus of",
+    "text": "Centered images like this are useful for large pictures that should be a focus of attention.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Images",
@@ -1056,7 +1027,7 @@
     }
   },
   {
-    "text": "attention.",
+    "text": "There is no analogous technology in ebooks, so the conversion will usually end up placing the image either centered or floating close to the point in the text where it was inserted, not necessarily where it appears on the page in Word.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Images",
@@ -1064,27 +1035,11 @@
     }
   },
   {
-    "text": "There is no analogous technology in ebooks, so the conversion will usually end up",
+    "text": "i  Endnotes are typically used for longer notes, they remain endnotes when converted into ebook form, except that they have an additional backlink to make it easy to return to the current position after reading the note.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Images",
-      "pageNumber": 7
-    }
-  },
-  {
-    "text": "placing the image either centered or floating close to the point in the text where it",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Images",
-      "pageNumber": 7
-    }
-  },
-  {
-    "text": "was inserted , not necessarily where it appears on the page in Word.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Images",
-      "pageNumber": 7
+      "pageNumber": 8
     }
   },
   {
@@ -1096,15 +1051,7 @@
     }
   },
   {
-    "text": "All types of lists are supported by the conversion, with the exception of lists that",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "use fancy bullets, these get converted to regular bullets.",
+    "text": "All types of lists are supported by the conversion, with the exception of lists that use fancy bullets, these get converted to regular bullets.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Lists",
@@ -1115,23 +1062,23 @@
     "text": "Bulleted List",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Bulleted List",
       "pageNumber": 8
     }
   },
   {
-    "text": "• One",
+    "text": "One",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Bulleted List",
       "pageNumber": 8
     }
   },
   {
-    "text": "• Two",
+    "text": "Two",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Bulleted List",
       "pageNumber": 8
     }
   },
@@ -1139,31 +1086,23 @@
     "text": "Numbered List",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Numbered List",
       "pageNumber": 8
     }
   },
   {
-    "text": "1. One, with a very long line to demonstrate that the hanging indent for the",
+    "text": "One, with a very long line to demonstrate that the hanging indent for the list is working correctly",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Numbered List",
       "pageNumber": 8
     }
   },
   {
-    "text": "list is working correctly",
+    "text": "Two",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "2. Two",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Numbered List",
       "pageNumber": 8
     }
   },
@@ -1171,63 +1110,55 @@
     "text": "Multi-level Lists",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "1. One",
+    "text": "One",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "1.1. Two",
+    "text": "Two",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "1.1.1. Three",
+    "text": "Three",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "1.1.2. Four with a very long line to demonstrate that the hanging indent",
+    "text": "Four with a very long line to demonstrate that the hanging indent for the list is working correctly.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "for the list is working correctly.",
+    "text": "Five",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "1.1.3. Five",
+    "text": "Six",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "2. Six",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
@@ -1235,23 +1166,23 @@
     "text": "A Multi-level list with bullets:",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "▪ One",
+    "text": "One",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "• Two",
+    "text": "Two",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
@@ -1259,23 +1190,23 @@
     "text": "This bullet uses an image as the bullet item",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "o Four",
+    "text": "Four",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "▪ Five",
+    "text": "Five",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Multi-level Lists",
       "pageNumber": 8
     }
   },
@@ -1283,79 +1214,47 @@
     "text": "Continued Lists",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "i. One",
+    "text": "One",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "ii. Two",
+    "text": "Two",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "An interruption in our regularly scheduled listing, for this essential and very",
+    "text": "An interruption in our regularly scheduled listing, for this essential and very relevant public service announcement.",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "relevant public service announcement.",
+    "text": "We now resume our normal programming",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   },
   {
-    "text": "iii. We now resume our normal programming",
+    "text": "Four",
     "metadata": {
       "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "iv. Four",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "i Endnotes are typically used for longer notes, they remain endnotes when converted into ebook",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "form, except that they have an additional backlink to make it easy to return to the current position",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
-      "pageNumber": 8
-    }
-  },
-  {
-    "text": "after reading the note.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Lists",
+      "closestHeading": "Continued Lists",
       "pageNumber": 8
     }
   }

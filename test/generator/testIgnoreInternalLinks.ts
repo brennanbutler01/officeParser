@@ -40,7 +40,6 @@ async function runTests() {
                 ]
             }
         ],
-        toText: () => 'Main Heading with Internal Link and External Link',
         getImages: () => []
     } as any;
 

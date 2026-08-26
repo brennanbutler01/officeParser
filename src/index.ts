@@ -30,7 +30,7 @@
  *   includeRawContent: false
  * });
  * 
- * console.log(ast.toText()); // Plain text output
+ * console.log((await ast.to('text')).value); // Plain text output
  * console.log(ast.content);  // Structured content tree
  * console.log(ast.metadata); // Document metadata
  * ```

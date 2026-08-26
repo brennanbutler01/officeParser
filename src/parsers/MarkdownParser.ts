@@ -784,7 +784,7 @@ export const parseMarkdown = async (buffer: Buffer, config: FullOfficeParserConf
             const embedUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined;
             content.push({
                 type: 'embed',
-                // Childless nodes need .text so generic AST consumers (toText, chunking)
+                // Childless nodes need .text so generic AST consumers (text/chunking generators)
                 // don't silently drop them.
                 text: embedUrl,
                 metadata: {
@@ -1256,22 +1256,5 @@ export const parseMarkdown = async (buffer: Buffer, config: FullOfficeParserConf
         });
     }
 
-    const toTextSync = () => content.map(n => {
-        const getText = (node: OfficeContentNode): string => {
-            if (node.type === 'text' || node.type === 'code') return node.text || '';
-            if (node.type === 'break') return '\n';
-            // Childless nodes still carry meaningful text - fall back to it instead of
-            // silently vanishing from plain-text/RAG-chunk output.
-            if (node.type === 'embed') return (node.metadata as EmbedMetadata)?.url || '';
-            if (node.children) {
-                const isBlock = ['table', 'row', 'list', 'sheet', 'slide', 'admonition', 'definitionList'].includes(node.type);
-                return node.children.map(getText).join(isBlock ? config.newlineDelimiter : '');
-            }
-            return '';
-        };
-        return getText(n);
-    }).join(config.newlineDelimiter)
-        .replace(/\n{3,}/g, '\n\n'); // Normalize excessive whitespace
-
-    return createAST('md', metadata, content, attachments, config, undefined, toTextSync);
+    return createAST('md', metadata, content, attachments, config, undefined);
 };

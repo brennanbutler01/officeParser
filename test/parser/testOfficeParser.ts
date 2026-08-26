@@ -133,7 +133,20 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxZipEntries: 10000,
         maxTableCells: 1000000
     },
-    htmlParserConfig: { preserveAttributes: false, preserveIframes: false }
+    htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
+    ignorePositions: false,
+    pdfParserConfig: {
+        password: '',
+        onPassword: () => undefined,
+        useTags: true,
+        detectColumns: true,
+        mergeHyphenatedWords: true,
+        lineToleranceFactor: 0.35,
+        spaceToleranceFactor: 0.25,
+        headingDetection: 'auto',
+        pageRange: '',
+        disableTextNormalization: false
+    }
 };
 
 /** Config permutations to test */
@@ -783,17 +796,17 @@ function compareMetrics(
 }
 
 /**
- * Compare PDF metrics against DOCX baseline with format-aware logic.
- * 
- * PDF format limitations:
- * - Lists: 0 expected (PDF has no list structure, bullets are just text)
- * - Tables: 0 expected (PDF has no table structure, just positioned text)
- * - Notes: 0 expected (PDF has no footnote/endnote concept)
- * - Headings: WARN (heuristic detection based on font size, may differ)
- * - Images: WARN (internal structure differs, PDF may have more/fewer)
- * - Links: WARN (annotation layer, TOC entries may inflate count)
- * - Attachments: Should match (embedded files can be extracted)
- * - StyleMap: 0 expected (PDF has no style definitions)
+ * Compare PDF metrics against the DOCX baseline with format-aware logic.
+ *
+ * As of v8 the PDF parser recovers real structure from tagged PDFs, so tables/lists/notes are no
+ * longer expected to be zero:
+ * - Lists: recovered from tags; exact match PASSes, nonzero-but-different WARNs, zero-when-expected FAILs.
+ * - Tables: same as lists.
+ * - Notes: footnotes/endnotes are recovered from Note tags (WARN on count differences).
+ * - Headings: from tags when available, else font-size heuristic (WARN on differences).
+ * - Images/Links: WARN (annotation layer and rendering differences).
+ * - Attachments: should match (embedded files can be extracted).
+ * - StyleMap: 0 expected (PDF has no style definitions).
  */
 function comparePdfParity(
     groupName: string,
@@ -825,29 +838,34 @@ function comparePdfParity(
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Features that should be 0 (PDF has no semantic structure for these)
+    // Structure recovered from tagged PDFs (approximate the DOCX baseline)
     // ═══════════════════════════════════════════════════════════════════════
 
-    // Lists: PDF has no list structure. Bullet points are just text characters.
+    // Lists: a tagged PDF exposes real list structure. Exact match with DOCX PASSes; a nonzero but
+    // different count WARNs (tagging granularity differs); zero when DOCX had lists FAILs.
+    const listStatus = actual.lists.total === expected.lists.total ? 'PASS'
+        : (expected.lists.total === 0 ? (actual.lists.total === 0 ? 'PASS' : 'WARN')
+            : (actual.lists.total > 0 ? 'WARN' : 'FAIL'));
     results.push(createResult(
         'Lists - Total',
-        0,
+        expected.lists.total,
         actual.lists.total,
-        actual.lists.total === 0,
-        actual.lists.total === 0
-            ? 'PDF has no list structure (expected)'
-            : `UNEXPECTED: Found ${actual.lists.total} lists in PDF (should be 0)`
+        listStatus === 'PASS',
+        `Tagged PDF lists: ${actual.lists.total} (DOCX: ${expected.lists.total})`,
+        listStatus
     ));
 
-    // Tables: PDF has no table structure. Tables are just positioned text.
+    // Tables: likewise recovered from tags.
+    const tableStatus = actual.tables.total === expected.tables.total ? 'PASS'
+        : (expected.tables.total === 0 ? (actual.tables.total === 0 ? 'PASS' : 'WARN')
+            : (actual.tables.total > 0 ? 'WARN' : 'FAIL'));
     results.push(createResult(
         'Tables - Total',
-        0,
+        expected.tables.total,
         actual.tables.total,
-        actual.tables.total === 0,
-        actual.tables.total === 0
-            ? 'PDF has no table structure (expected)'
-            : `UNEXPECTED: Found ${actual.tables.total} tables in PDF (should be 0)`
+        tableStatus === 'PASS',
+        `Tagged PDF tables: ${actual.tables.total} (DOCX: ${expected.tables.total})`,
+        tableStatus
     ));
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3188,6 +3206,159 @@ async function runSingleFileTest(ext: string) {
     }
 }
 
+/**
+ * Fast, OCR-free PDF smoke tests.
+ *
+ * These run in BOTH fast and full mode: unlike the OCR-heavy full PDF parse, a plain parse is well
+ * under a second, so there is no reason to skip them. Every assertion is independent of OCR and uses
+ * an explicit config, so it holds identically under the full suite's FULL_CONFIG run. Covers text
+ * quality, geometry, columns/rotation/encryption fixtures, and config flags. Tagged-structure
+ * assertions (tables/lists/heading levels) live in the parity tests and baselines.
+ */
+async function testPdfSmoke(): Promise<FeatureTest[]> {
+    const results: FeatureTest[] = [];
+    const category = 'PDF Smoke';
+    const add = (feature: string, pass: boolean, expected: any, actual: any, note = '') =>
+        results.push({ category, feature, fileType: 'pdf', result: { status: pass ? 'PASS' : 'FAIL', expected, actual, details: note } });
+    const walk = (node: any, fn: (n: any) => void) => { fn(node); for (const c of node.children || []) walk(c, fn); };
+    const textOf = (ast: any) => ast.content.map((p: any) => p.text).join('\n');
+    const pdfDir = path.join(__dirname, '..', 'files', 'pdf');
+
+    // --- test.pdf, default config ---
+    try {
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, extractAttachments: false });
+        const text = textOf(ast);
+        add('Pages parsed', ast.content.length === 8, 8, ast.content.length);
+        add('Superscript joined', text.includes('superscript') && !text.includes('super script'), 'superscript (joined)', text.includes('superscript') ? 'joined' : 'missing/broken');
+        add('Subscript joined', text.includes('subscript') && !text.includes('sub script'), 'subscript (joined)', text.includes('subscript') ? 'joined' : 'missing/broken');
+        add('Document language', ast.metadata.language === 'en', 'en', ast.metadata.language);
+        add('Tagged flag', ast.metadata.nativeProperties?.tagged === true, true, ast.metadata.nativeProperties?.tagged);
+        const page1 = ast.content[0] as any;
+        add('Page dimensions', page1?.metadata?.pageWidth === 612 && page1?.metadata?.pageHeight === 792, '612x792', `${page1?.metadata?.pageWidth}x${page1?.metadata?.pageHeight}`);
+        let boundsCount = 0, textCount = 0;
+        ast.content.forEach((p: any) => walk(p, n => { if (n.type === 'text') { textCount++; if (n.bounds) boundsCount++; } }));
+        add('Bounds on text nodes (default)', textCount > 0 && boundsCount === textCount, `${textCount}/${textCount}`, `${boundsCount}/${textCount}`);
+        // page 3 body column not interleaved with the floating table
+        const page3 = ast.content.find((p: any) => p.metadata?.pageNumber === 3) as any;
+        const para = (page3?.children || []).find((n: any) => (n.text || '').includes('simple to the extremely complex'));
+        add('Page 3 column not interleaved', !!para && !(para.text || '').includes('Books 1'), 'no "Books 1" in body paragraph', para ? (String(para.text).includes('Books 1') ? 'interleaved' : 'clean') : 'paragraph missing');
+
+        // Tagged structure: real headings, tables, lists, notes.
+        const headings: any[] = [], tables: any[] = [], cells: any[] = [], listItems: any[] = [], notes: any[] = [];
+        ast.content.forEach((p: any) => walk(p, n => {
+            if (n.type === 'heading') headings.push(n);
+            if (n.type === 'table') tables.push(n);
+            if (n.type === 'cell') cells.push(n);
+            if (n.type === 'list') listItems.push(n);
+            if (n.type === 'note') notes.push(n);
+        }));
+        const h1 = headings.filter((h: any) => h.metadata?.level === 1);
+        add('Wrapped heading is one node', h1.some((h: any) => String(h.text || '').startsWith('Demonstration of DOCX support')) &&
+            !h1.some((h: any) => String(h.text || '').trim() === 'calibre'), 'single H1 "Demonstration..."', h1.map((h: any) => h.text).join(' | ').slice(0, 60));
+        add('Tables extracted from tags', tables.length >= 3, '>=3 tables', tables.length);
+        const t0 = tables[0];
+        add('Table has rows and header cell', !!t0 && (t0.children || []).length >= 2 && cells.some((c: any) => (c.text || '').includes('ITEM') && c.metadata?.style === 'header'), 'rows>=2 and ITEM header cell', t0 ? `${(t0.children || []).length} rows` : 'no table');
+        add('Lists extracted from tags', listItems.length >= 5, '>=5 list items', listItems.length);
+        add('List types classified', listItems.some((l: any) => l.metadata?.listType === 'ordered') && listItems.some((l: any) => l.metadata?.listType === 'unordered'), 'both ordered and unordered', `ordered:${listItems.filter((l: any) => l.metadata?.listType === 'ordered').length} unordered:${listItems.filter((l: any) => l.metadata?.listType === 'unordered').length}`);
+        add('Notes extracted from tags', notes.length >= 1, '>=1 note', notes.length);
+    } catch (e: any) {
+        add('test.pdf parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- useTags:false forces the geometric path (no tables), text still readable ---
+    try {
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, pdfParserConfig: { useTags: false } });
+        let tables = 0;
+        ast.content.forEach((p: any) => walk(p, n => { if (n.type === 'table') tables++; }));
+        add('useTags:false yields no tables', tables === 0, 0, tables);
+        add('useTags:false still parses text', textOf(ast).includes('Demonstration of DOCX support'), 'title present', textOf(ast).includes('Demonstration of DOCX support') ? 'present' : 'missing');
+    } catch (e: any) {
+        add('useTags:false parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- layout-faithful .to('text') ---
+    try {
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false });
+        const layout = String((await ast.to('text')).value);
+        add('Layout text aligns table columns', /ITEM\s{2,}NEEDED/.test(layout), 'ITEM   NEEDED (aligned)', /ITEM\s{2,}NEEDED/.test(layout) ? 'aligned' : 'not aligned');
+        add('Layout text not interleaved', !layout.includes('Books 1 simple'), 'no "Books 1 simple"', layout.includes('Books 1 simple') ? 'interleaved' : 'clean');
+        const ff = String((await ast.to('text', { textConfig: { pageSeparator: '\f' } })).value);
+        add('pageSeparator inserts form feeds', (ff.match(/\f/g) || []).length === 7, 7, (ff.match(/\f/g) || []).length);
+        const flow = String((await ast.to('text', { textConfig: { preserveLayout: false } })).value);
+        add('preserveLayout:false flows text', flow.includes('ITEM') && !/ITEM\s{2,}NEEDED/.test(flow), 'ITEM present, not grid-aligned', /ITEM\s{2,}NEEDED/.test(flow) ? 'still aligned' : 'flowed');
+    } catch (e: any) {
+        add('layout text', false, 'rendered', e?.message || String(e));
+    }
+
+    // --- ignorePositions strips geometry ---
+    try {
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignorePositions: true });
+        let anyBounds = false;
+        ast.content.forEach((p: any) => walk(p, n => { if (n.bounds) anyBounds = true; }));
+        const page1 = ast.content[0] as any;
+        add('ignorePositions strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
+        add('ignorePositions strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
+    } catch (e: any) {
+        add('ignorePositions parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- ignoreInternalLinks removes internal link runs ---
+    try {
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignoreInternalLinks: true });
+        let internal = 0;
+        ast.content.forEach((p: any) => walk(p, n => { if (n.metadata?.linkType === 'internal') internal++; }));
+        add('ignoreInternalLinks removes internal links', internal === 0, 0, internal);
+    } catch (e: any) {
+        add('ignoreInternalLinks parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- columns_untagged fixture: reading order left column before right column ---
+    try {
+        const ast = await OfficeParser.parseOffice(path.join(pdfDir, 'columns_untagged.pdf'), { ocr: false });
+        const text = textOf(ast);
+        const leftLast = text.indexOf('LEFT COLUMN OMEGA');
+        const rightFirst = text.indexOf('RIGHT COLUMN ONE');
+        add('Columns read left-then-right', leftLast >= 0 && rightFirst >= 0 && leftLast < rightFirst, 'left before right', `${leftLast} < ${rightFirst}`);
+    } catch (e: any) {
+        add('columns_untagged parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- rotated fixture: same text, swapped dims, rotation 90 ---
+    try {
+        const ast = await OfficeParser.parseOffice(path.join(pdfDir, 'rotated.pdf'), { ocr: false });
+        const text = textOf(ast);
+        const page1 = ast.content[0] as any;
+        add('Rotated text readable', text.includes('LEFT COLUMN ALPHA') && text.includes('RIGHT COLUMN NINE'), 'columns present', text.includes('LEFT COLUMN ALPHA') ? 'present' : 'missing');
+        add('Rotated dims swapped', page1?.metadata?.pageWidth === 792 && page1?.metadata?.pageHeight === 612, '792x612', `${page1?.metadata?.pageWidth}x${page1?.metadata?.pageHeight}`);
+        add('Rotated rotation metadata', page1?.metadata?.rotation === 90, 90, page1?.metadata?.rotation);
+    } catch (e: any) {
+        add('rotated parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- encrypted fixture: password handling ---
+    const encPath = path.join(pdfDir, 'encrypted.pdf');
+    try {
+        await OfficeParser.parseOffice(encPath, { ocr: false });
+        add('Encrypted rejects without password', false, 'PDF_PASSWORD_REQUIRED', 'parsed');
+    } catch (e: any) {
+        add('Encrypted rejects without password', e?.officeIssue?.code === 'PDF_PASSWORD_REQUIRED', 'PDF_PASSWORD_REQUIRED', e?.officeIssue?.code);
+    }
+    try {
+        const ast = await OfficeParser.parseOffice(encPath, { ocr: false, pdfParserConfig: { password: 'test123' } });
+        add('Encrypted parses with password', textOf(ast).includes('SECRET CONTENT'), 'SECRET CONTENT', textOf(ast).trim().slice(0, 30));
+    } catch (e: any) {
+        add('Encrypted parses with password', false, 'SECRET CONTENT', e?.officeIssue?.code || e?.message);
+    }
+    try {
+        await OfficeParser.parseOffice(encPath, { ocr: false, pdfParserConfig: { password: 'wrongpw' } });
+        add('Encrypted rejects wrong password', false, 'PDF_PASSWORD_INCORRECT', 'parsed');
+    } catch (e: any) {
+        add('Encrypted rejects wrong password', e?.officeIssue?.code === 'PDF_PASSWORD_INCORRECT', 'PDF_PASSWORD_INCORRECT', e?.officeIssue?.code);
+    }
+
+    return results;
+}
+
 async function runAllTests() {
     const outputDir = path.join(__dirname, 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
@@ -3248,6 +3419,10 @@ async function runAllTests() {
     // 8. ZIP type detection for archives that defeat magic-byte sniffing
     console.log('Running ZIP type detection tests...');
     allResults.push(...await testZipTypeDetection());
+
+    // 9. PDF smoke tests (OCR-free, so they run even in fast mode where the OCR-heavy PDF parse is skipped)
+    console.log('Running PDF smoke tests...');
+    allResults.push(...await testPdfSmoke());
 
     // 9. Generate report
     console.log('\n');

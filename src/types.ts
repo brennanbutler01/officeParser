@@ -21,6 +21,10 @@ export enum OfficeErrorType {
     INVALID_INPUT = 'INVALID_INPUT',
     /** PDF worker source is missing (required in browser) */
     PDF_WORKER_MISSING = 'PDF_WORKER_MISSING',
+    /** The PDF is encrypted and no password was supplied */
+    PDF_PASSWORD_REQUIRED = 'PDF_PASSWORD_REQUIRED',
+    /** The supplied password did not decrypt the PDF */
+    PDF_PASSWORD_INCORRECT = 'PDF_PASSWORD_INCORRECT',
     /** Attempted to use Node.js-only features in a browser environment */
     FEATURE_NOT_SUPPORTED_IN_BROWSER = 'FEATURE_NOT_SUPPORTED_IN_BROWSER',
     /** Style mapping string is malformed */
@@ -99,7 +103,9 @@ export enum OfficeWarningType {
     /** A workbook archive contains no worksheet parts (chartsheet-only workbooks are legitimate) */
     NO_WORKSHEETS_FOUND = 'NO_WORKSHEETS_FOUND',
     /** A presentation archive contains no slides (a zero-slide presentation is legitimate) */
-    NO_SLIDES_FOUND = 'NO_SLIDES_FOUND'
+    NO_SLIDES_FOUND = 'NO_SLIDES_FOUND',
+    /** A PDF's tagged-structure tree was absent, incomplete, or flagged unreliable; heuristics were used instead */
+    PDF_STRUCT_TREE_UNRELIABLE = 'PDF_STRUCT_TREE_UNRELIABLE'
 }
 
 /**
@@ -383,6 +389,126 @@ export interface CommonOfficeParserConfig {
      * memory and resource usage.
      */
     decompressionLimits?: DecompressionLimits;
+    /**
+     * Flag to omit per-node page-location data from the AST.
+     *
+     * By default, parsers that know where content sits on the page attach a {@link NodeBounds}
+     * box to text runs, paragraphs, headings, tables, cells and images, and page dimensions to
+     * page nodes. Today only the PDF parser produces this. Set this to strip all of it, which
+     * makes the AST smaller and matches the pre-8.0 output shape.
+     *
+     * Note this also disables the layout-faithful `.to('text')` rendering, which relies on those
+     * boxes; without them the text generator falls back to flowing text.
+     *
+     * Default is false.
+     */
+    ignorePositions?: boolean;
+}
+
+/**
+ * Format-specific options for PDF parsing.
+ *
+ * Mirrors {@link HtmlParserConfig}: everything intrinsically PDF-only lives here, while
+ * cross-format flags (e.g. `ignorePositions`, `ignoreInternalLinks`, `ignoreHeadersAndFooters`)
+ * stay flat on {@link CommonOfficeParserConfig}.
+ */
+export interface PdfParserConfig {
+    /**
+     * Password for an encrypted (password-protected) PDF.
+     *
+     * When the document is encrypted and neither this nor `onPassword` yields a working password,
+     * parsing rejects with `PDF_PASSWORD_REQUIRED` (none supplied) or `PDF_PASSWORD_INCORRECT`
+     * (supplied but wrong).
+     *
+     * Default is '' (no password).
+     */
+    password?: string;
+    /**
+     * Callback invoked when an encrypted PDF needs a password that `password` did not satisfy,
+     * so the password can be supplied lazily or interactively (a prompt, a vault lookup) instead
+     * of up front. Mirrors pdf.js's own `onPassword` hook.
+     *
+     * Called with `'required'` when the document is encrypted and no password was given, or
+     * `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to retry;
+     * return `undefined`/`''` to stop, in which case parsing rejects with `PDF_PASSWORD_REQUIRED`
+     * or `PDF_PASSWORD_INCORRECT` as it would with no callback. Retries are capped so a callback
+     * that keeps returning a wrong password cannot loop forever.
+     *
+     * By default this is unset, so an encrypted PDF without a valid `password` simply throws. This
+     * is the conventional behavior: an undecryptable document is unrecoverable for that call, so it
+     * is an error rather than a warning. The callback is the escape hatch for handling it gracefully.
+     */
+    onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
+    /**
+     * Use the PDF's tagged-structure tree (headings, tables, lists, notes) when the document
+     * declares one and it passes reliability checks.
+     *
+     * When false, or when the tree is missing or flagged unreliable, structure is recovered from
+     * geometry instead (column detection, line and paragraph reconstruction). Set false to force
+     * the geometric path even on tagged PDFs.
+     *
+     * Default is true.
+     */
+    useTags?: boolean;
+    /**
+     * Detect columns and floating blocks (via a recursive XY-cut) so multi-column and
+     * float-beside-text pages read in the correct order.
+     *
+     * When false, each page is read strictly top-to-bottom, left-to-right, which is faster but
+     * interleaves columns.
+     *
+     * Only used on the geometric path (untagged PDFs, or when `useTags` is false).
+     *
+     * Default is true.
+     */
+    detectColumns?: boolean;
+    /**
+     * Merge words split across a line break by a trailing hyphen (e.g. "extre-\nmely" -> "extremely").
+     * Soft hyphens (U+00AD) are always removed; a literal hyphen is dropped only before a lowercase
+     * continuation.
+     *
+     * Default is true.
+     */
+    mergeHyphenatedWords?: boolean;
+    /**
+     * Tolerance, as a fraction of font size, for grouping text fragments onto the same visual line
+     * by their baseline. Larger values are more forgiving of baseline jitter but risk merging
+     * adjacent lines.
+     *
+     * Default is 0.35.
+     */
+    lineToleranceFactor?: number;
+    /**
+     * Threshold, as a fraction of font size, for the horizontal gap that triggers inserting a space
+     * between two adjacent text fragments. Larger values insert fewer spaces.
+     *
+     * Default is 0.25.
+     */
+    spaceToleranceFactor?: number;
+    /**
+     * How headings are detected on the geometric path.
+     * - 'auto': tagged roles when trusted, otherwise a font-size and weight heuristic.
+     * - 'font-size': always use the heuristic, even on tagged PDFs.
+     * - 'off': never emit headings; everything is a paragraph.
+     *
+     * Default is 'auto'.
+     */
+    headingDetection?: 'auto' | 'font-size' | 'off';
+    /**
+     * Restrict parsing to a subset of pages, e.g. '1-3,7' or '2,4,6'. Pages are 1-based and the
+     * output keeps their original page numbers. An empty string parses all pages; an unparseable
+     * value warns and parses all pages.
+     *
+     * Default is '' (all pages).
+     */
+    pageRange?: string;
+    /**
+     * Return un-normalized text from pdf.js: ligatures, combining marks and original whitespace are
+     * preserved rather than Unicode-normalized. Use when you need byte-faithful source glyphs.
+     *
+     * Default is false.
+     */
+    disableTextNormalization?: boolean;
 }
 
 /**
@@ -441,7 +567,8 @@ export interface HtmlParserConfig {
  */
 type ParserSpecificConfig<F extends string> =
     F extends 'html' | 'epub' ? { htmlParserConfig?: HtmlParserConfig } :
-    Partial<{ htmlParserConfig: HtmlParserConfig }>;
+    F extends 'pdf' ? { pdfParserConfig?: PdfParserConfig } :
+    Partial<{ htmlParserConfig: HtmlParserConfig; pdfParserConfig: PdfParserConfig }>;
 
 /**
  * Configuration options for the OfficeParser.
@@ -722,6 +849,19 @@ export interface CommonGeneratorConfig {
      * Defaults to true.
      */
     includeImages?: boolean;
+    /**
+     * Maximum size, in base64 characters, of an image that HTML/Markdown will inline as a `data:`
+     * URI. An attachment whose base64 exceeds this is not inlined: the image node renders its text
+     * (e.g. OCR text) when it has any, otherwise a compact reference to the attachment name.
+     *
+     * This guards against pathologically large single lines. A scanned PDF page, for instance, is
+     * one big image; inlined as a multi-megabyte `data:` URI it can overflow downstream Markdown
+     * parsers. Set to `0` to disable inlining entirely (always reference), or `Infinity` to always
+     * inline regardless of size.
+     *
+     * Defaults to 2000000 (about 1.5 MB of image data).
+     */
+    maxInlineImageBytes?: number;
     /**
      * Whether to include interactive charts in the generated output (HTML only).
      * Defaults to true.
@@ -1369,6 +1509,14 @@ export interface TextGeneratorConfig {
      * Defaults to true.
      */
     renderNotes?: boolean;
+    /**
+     * String inserted between top-level page nodes (PDF) in the rendered text. Set to '\f' for a
+     * form feed between pages (matching `pdftotext`), or a custom banner. Applies in both the
+     * layout-faithful and flowing text modes.
+     *
+     * Defaults to '\n' (a single blank line between pages).
+     */
+    pageSeparator?: string;
 }
 
 
@@ -2023,6 +2171,24 @@ export interface PageMetadata {
      * @example 1 for the first page, 2 for the second page, etc.
      */
     pageNumber: number;
+    /**
+     * Page width in PDF points (1/72 inch), after applying the page's own rotation. Matches the
+     * coordinate space of child {@link NodeBounds}. Absent when `ignorePositions` is set.
+     * @example 612 for US Letter portrait
+     */
+    pageWidth?: number;
+    /**
+     * Page height in PDF points (1/72 inch), after applying the page's own rotation.
+     * Absent when `ignorePositions` is set.
+     * @example 792 for US Letter portrait
+     */
+    pageHeight?: number;
+    /**
+     * The page's clockwise rotation in degrees (`/Rotate`), one of 0/90/180/270. Emitted only when
+     * non-zero. The reported `pageWidth`/`pageHeight` and all child bounds are already in this
+     * rotated space.
+     */
+    rotation?: number;
 }
 
 /**
@@ -2196,9 +2362,37 @@ export type ContentMetadata = SlideMetadata | SheetMetadata | HeadingMetadata | 
  * }
  */
 /**
+ * An axis-aligned bounding box describing where a node sits on its page.
+ *
+ * Coordinates are in PDF points (1/72 inch), in post-rotation page space with the origin at the
+ * page's top-left corner and y growing downward, i.e. exactly what pdf.js renders at scale 1. This
+ * matches the `pageWidth`/`pageHeight` on {@link PageMetadata}. Values are rounded to 2 decimals.
+ *
+ * Populated by the PDF parser unless `ignorePositions` is set. Container nodes (paragraph, table,
+ * row, cell) carry the union of their children's boxes.
+ */
+export interface NodeBounds {
+    /** Distance from the page's left edge to the box's left edge. */
+    x: number;
+    /** Distance from the page's top edge to the box's top edge. */
+    y: number;
+    /** Box width. */
+    width: number;
+    /** Box height. */
+    height: number;
+}
+
+/**
  * Shared properties available on all document content nodes.
  */
 export interface BaseContentNode {
+    /**
+     * Where this node sits on its page, as an axis-aligned box in page coordinates.
+     * See {@link NodeBounds} for the coordinate convention. Present only when the parser knows
+     * the geometry (currently PDF) and `ignorePositions` is not set.
+     */
+    bounds?: NodeBounds;
+
     /**
      * The complete text content of the node and all its children combined.
      * For container nodes (paragraph, heading), this is the concatenation of all child text.
@@ -2477,6 +2671,12 @@ export interface OfficeMetadata {
     customProperties?: Record<string, string | number | boolean | Date>;
     /** Keywords associated with the document. */
     keywords?: string;
+    /**
+     * The document's primary language as a BCP 47 tag, when the source declares one.
+     * For PDF this comes from the document `/Lang` entry (or the text-content language hint).
+     * @example "en", "en-US", "fr"
+     */
+    language?: string;
     /** 
      * Contains all format-specific metadata fields extracted verbatim.
      * Consumers can use this to access properties not mapped to the standard OfficeMetadata fields.
@@ -2522,7 +2722,7 @@ export interface OfficeAuxiliaryContent {
  * console.log(ast.type); // 'docx'
  * console.log(ast.metadata.author); // 'John Doe'
  * console.log(ast.content.length); // Number of top-level content nodes
- * console.log(ast.toText()); // Plain text representation
+ * console.log((await ast.to('text')).value); // Plain text representation
  * console.log((await ast.to('md')).value); // Markdown representation
  * console.log((await ast.to('html')).value); // HTML representation
  * console.log((await ast.to('rtf')).value); // RTF representation
@@ -2584,47 +2784,6 @@ export interface OfficeParserAST {
 
     /** Any warnings or non-fatal issues encountered during parsing. */
     warnings: OfficeIssue[];
-
-    /**
-     * @deprecated Use `.to('text')` instead. This method is the older renderer and takes no
-     * configuration; `.to('text')` produces the same content and lets you configure the rest.
-     *
-     * Converts the entire AST to plain text, flattening the document structure and stripping all
-     * formatting, metadata, and structure. Text is joined using `config.newlineDelimiter`
-     * (default: `'\n'`).
-     *
-     * **Migrating.** `.to('text')` is asynchronous and configurable. At its defaults it emits
-     * everything this method emits, verified across every bundled fixture in all 12 supported
-     * formats in both layout modes: no word produced here is missing there. It also renders merged
-     * table cells correctly, where this method glues them (`OneThree` vs `One Three`).
-     *
-     * Where the two differ is configuration, not capability. Notes and image placeholders are
-     * emitted by default but are switchable; this method emits neither and offers no way to ask
-     * for them. Layout is likewise a knob rather than a fixed behavior:
-     *
-     * ```typescript
-     * // Default: aligned table grids, list markers, notes, image placeholders.
-     * const { value } = await ast.to('text');
-     *
-     * // Deliberate opt-out - closest to this method's shape.
-     * const { value } = await ast.to('text', {
-     *     includeImages: false,
-     *     textConfig: { preserveLayout: false, renderNotes: false },
-     * });
-     * ```
-     *
-     * Spreadsheets (CSV/ODS/XLSX) are unaffected by `preserveLayout`, since it governs
-     * `table`/`list` nodes rather than `sheet`/`row`/`cell`; there the default aligned grid is the
-     * most faithful rendering.
-     *
-     * @returns A plain text representation of the document
-     * @example
-     * ```typescript
-     * const text = ast.toText();
-     * console.log(text); // "Hello world\nChapter 1\n..."
-     * ```
-     */
-    toText(): string;
 
     /**
      * Converts this AST to the specified destination format.

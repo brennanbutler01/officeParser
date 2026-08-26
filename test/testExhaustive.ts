@@ -866,7 +866,7 @@ async function testGeneratedOutput(): Promise<void> {
         const chunks = (await OfficeGenerator.generate(ast, 'chunks')).value as any[];
         assert.ok(chunks.length > 0, `chunking (${origin}): produces chunks, not []`);
         const chunkChars = strip(chunks.map(c => c.text).join(' ')).length;
-        const plainChars = strip(ast.toText() || '').length;
+        const plainChars = strip(((await ast.to('text')).value as string) || '').length;
         assert.ok(chunkChars >= plainChars * 0.9, `chunking (${origin}): retains >=90% of .to('text') chars (${chunkChars}/${plainChars})`);
     }
 

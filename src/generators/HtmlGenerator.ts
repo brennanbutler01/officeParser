@@ -748,9 +748,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
                 if (!meta?.url && attachmentName && this.ast) {
                     const attachment = this.ast.attachments.find(a => a.name === attachmentName);
-                    if (attachment) {
+                    if (attachment && (attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
                         src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                     }
+                    // Oversized attachments (e.g. a scanned PDF page) are not inlined as a
+                    // multi-megabyte data URI; src stays the attachment name reference. Any OCR text
+                    // is still carried on the img `alt`. Mirrors MarkdownGenerator's inline cap.
                 }
                 // Match CustomImage's exact data-width/data-align + style contract so a loaded
                 // image re-hydrates the editor node without losing size/alignment.

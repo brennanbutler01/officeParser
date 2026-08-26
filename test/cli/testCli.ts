@@ -320,12 +320,16 @@ async function runTests() {
         results.push({ name: 'Custom config flag', status: 'FAIL', details: `CLI failed with exit code ${res8.status}`, duration: d8 });
     }
 
-    // 9. Legacy --toText=true
-    console.log('Test 9: Legacy --toText=true');
+    // 9. Removed --toText flag errors clearly
+    console.log('Test 9: Removed --toText flag');
     const t9 = Date.now();
     const res9 = runCli(['--toText=true']);
     const d9 = Date.now() - t9;
-    assertContains(res9.stdout, 'Demonstration of DOCX support', 'Legacy --toText', d9);
+    if (res9.status !== 0 && /removed in v8/i.test(res9.stderr)) {
+        results.push({ name: 'Removed --toText flag errors', status: 'PASS', details: 'CLI exited nonzero with removal message', duration: d9 });
+    } else {
+        results.push({ name: 'Removed --toText flag errors', status: 'FAIL', details: `status ${res9.status}, stderr: ${res9.stderr.slice(0, 80)}`, duration: d9 });
+    }
 
     // 10. Help / Usage output
     console.log('Test 10: Usage output (no args)');

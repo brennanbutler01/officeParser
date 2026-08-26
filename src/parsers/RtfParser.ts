@@ -1872,8 +1872,8 @@ export const parseRtf = async (buffer: Buffer, config: FullOfficeParserConfig): 
         assignOcr(content);
     }
 
-    // Final pass to ensure all 'note' nodes have their 'text' property populated
-    // (This supports the simple toText implementation)
+    // Final pass to ensure all 'note' nodes have their 'text' property populated so downstream
+    // generators that read node.text (e.g. chunking) see the note's content.
     const populateNoteText = (nodes: OfficeContentNode[]) => {
         for (const node of nodes) {
             if (node.type === 'note' && node.children) {
@@ -1891,10 +1891,6 @@ export const parseRtf = async (buffer: Buffer, config: FullOfficeParserConfig): 
     populateNoteText(content);
     populateNoteText(notes);
 
-    const toTextSync = () => {
-        return content.map(c => c.text).join(config.newlineDelimiter);
-    };
-
     const result = createAST(
         'rtf',
         {
@@ -1904,7 +1900,6 @@ export const parseRtf = async (buffer: Buffer, config: FullOfficeParserConfig): 
         attachments, // PNG and JPEG images extracted from \\pict groups
         config,
         undefined,
-        toTextSync
     );
 
     return result;

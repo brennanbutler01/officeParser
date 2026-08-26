@@ -111,6 +111,9 @@ export function resolveParserConfig(
         if (userConfig.htmlParserConfig) {
             resolved.htmlParserConfig = { ...userConfig.htmlParserConfig };
         }
+        if (userConfig.pdfParserConfig) {
+            resolved.pdfParserConfig = { ...userConfig.pdfParserConfig };
+        }
         return resolved;
     }
 
@@ -122,9 +125,9 @@ export function resolveParserConfig(
     }
 
     // 2. Merge user config
-    // We handle ocrConfig, decompressionLimits, and htmlParserConfig specially to avoid
-    // shallow-overwriting the whole nested objects
-    const { ocrConfig, decompressionLimits, htmlParserConfig, ...rest } = userConfig;
+    // We handle ocrConfig, decompressionLimits, htmlParserConfig, and pdfParserConfig specially to
+    // avoid shallow-overwriting the whole nested objects
+    const { ocrConfig, decompressionLimits, htmlParserConfig, pdfParserConfig, ...rest } = userConfig;
     Object.assign(config, withoutPrototypeKeys(rest));
 
     if (decompressionLimits) {
@@ -138,6 +141,13 @@ export function resolveParserConfig(
         config.htmlParserConfig = {
             ...config.htmlParserConfig,
             ...htmlParserConfig,
+        };
+    }
+
+    if (pdfParserConfig) {
+        config.pdfParserConfig = {
+            ...config.pdfParserConfig,
+            ...pdfParserConfig,
         };
     }
 

@@ -1,62 +1,34 @@
 /**
  * PDF Parser
- * 
- * Extracts text, metadata, images, links, and attachments from PDF files using PDF.js (pdfjs-dist).
- * 
- * **Features:**
- * - Text extraction with formatting (bold, italic, font, size)
- * - Comprehensive metadata extraction (title, author, subject, creator, producer, creation/modification dates)
- * - Hyperlink extraction from PDF annotations
- * - Heading detection via font size heuristics
- * - Image extraction as attachments with optional OCR (using Tesseract.js)
- * - Embedded file attachment extraction
- * - Layout preservation (respects order of text and images)
- * 
- * **PDF Format Limitations (compared to DOCX/ODT):**
- * 
- * PDF was designed as a "page description language" for visual fidelity, not semantic structure.
- * The following features **cannot be reliably extracted** from PDFs:
- * 
- * - **Tables**: PDF has no table structure. Tables are just text positioned to look tabular.
- *   Extracting tables would require complex spatial analysis with many false positives.
- *   See: https://stackoverflow.com/questions/36978446/why-is-it-difficult-to-extract-data-from-pdfs
- * 
- * - **Lists**: PDF has no list structure. Bullets/numbers are just text characters.
- *   No hierarchy or list type information is stored. Would require heuristic detection
- *   that would have many edge cases and errors.
- * 
- * - **Styles**: PDF has no style definitions like "Heading1" or "Normal". Only visual
- *   properties (font, size) exist. We use font size heuristics to detect headings.
- * 
- * - **Notes (Footnotes/Endnotes)**: PDF has no concept of footnotes/endnotes as structured
- *   elements. They're just smaller text at the bottom of pages.
- * 
- * - **Text Color**: While PDF stores color, pdfjs-dist doesn't expose text color in the
- *   textContent API. Would require parsing the operator stream which is complex.
- * 
- * - **Background Color**: Same limitation as text color.
- * 
- * - **Underline/Strikethrough**: These are drawn as separate line elements in PDF,
- *   not properties of text. Association would require spatial analysis.
- * 
- * **Parsing Approach:**
- * 1. Load PDF document using pdfjs-dist.
- * 2. Extract global metadata from document info dictionary.
- * 3. Extract embedded file attachments.
- * 4. Iterate through each page:
- *    a. Collect text items with position and formatting.
- *    b. Collect link annotations with associated text.
- *    c. Collect images from the operator list.
- *    d. Sort all items by vertical position (top-to-bottom reading order).
- *    e. Group text into paragraphs/headings based on line breaks and font sizes.
- *    f. Process images as attachments with optional OCR.
- * 5. Apply heading detection based on font size heuristics.
- * 
+ *
+ * Extracts text, structure, metadata, images, links and attachments from PDF files using PDF.js
+ * (pdfjs-dist).
+ *
+ * **Features**
+ * - High-fidelity text assembly: baseline line clustering, gap-based word spacing (no more glued or
+ *   broken words), super/subscript detection, hyphenation repair, and paragraph reconstruction.
+ * - Reading-order recovery for multi-column and float-beside-text pages via a recursive XY-cut.
+ * - Semantic structure from tagged PDFs (headings, tables, lists, footnotes) via the structure tree,
+ *   with a geometric fallback for untagged files. (Tagged path: {@link module:parsers/pdf/structTree}.)
+ * - Per-node page geometry (`bounds`) and page dimensions, on by default, opt out with
+ *   `ignorePositions`.
+ * - Password-protected documents via `pdfParserConfig.password`.
+ * - Comprehensive metadata, hyperlink extraction, image extraction with optional OCR, and embedded
+ *   file attachments.
+ *
+ * **Pipeline**
+ * 1. Open the document (one worker, one pass).
+ * 2. Extract metadata and embedded attachments.
+ * 3. For each selected page, collect normalized text runs, images, annotations and (when tagged) the
+ *    structure tree in a single pass.
+ * 4. Post-process purely in memory: resolve fonts once per document, build lines, segment blocks,
+ *    reconstruct paragraphs/headings (or walk the structure tree), and interleave images.
+ *
  * @module PdfParser
  * @see https://mozilla.github.io/pdf.js/ PDF.js documentation
- * @see https://www.adobe.com/devnet/pdf/pdf_reference.html PDF Reference
  */
 
+import { zlibSync } from 'fflate';
 import { DEFAULT_OFFICE_PARSER_CONFIG } from '../defaults.js';
 import { FullOfficeParserConfig, ImageMetadata, OfficeAttachment, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting, TextMetadata } from '../types.js';
 import { createAST } from '../utils/astUtils.js';
@@ -66,222 +38,103 @@ import { checkAbortSignal, getOfficeError, logWarning } from '../utils/errorUtil
 import { createAttachment } from '../utils/imageUtils.js';
 import { loadPdfJs } from '../utils/moduleLoader.js';
 import { performOcr } from '../utils/ocrUtils.js';
+import { computeRunBox, roundBounds, rotateBoundsToRendered } from './pdf/geometry.js';
+import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
+import { blockToNodes, buildLines, computeDocContext, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
+import { buildTaggedNodes } from './pdf/structTree.js';
 
-/** Type guard for TextItem in PDF.js 5.x */
-function isTextItem(item: any): item is { str: string; transform: number[]; width: number; height: number; fontName: string } {
+/** Type guard for a pdf.js TextItem (marked-content items lack `str`/`transform`). */
+function isTextItem(item: any): item is { str: string; transform: number[]; width: number; height: number; fontName: string; dir?: string; hasEOL?: boolean } {
     return item && typeof item.str === 'string' && Array.isArray(item.transform) && item.transform.length >= 6;
 }
 
-/** Represents a text item with position and formatting */
-interface TextPageItem {
-    type: 'text';
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    text: string;
-    fontName?: string;
-    formatting: TextFormatting;
+/** A link annotation matched to text by geometric overlap. */
+interface ResolvedLink {
+    /** Rect in layout (rotation-0) viewport space: [minX, minY, maxX, maxY]. */
+    rect: [number, number, number, number];
+    meta: TextMetadata;
 }
 
-/** Represents an image with position */
-interface ImagePageItem {
-    type: 'image';
-    x: number;
-    y: number;
-    name: string;
-    data: Uint8Array | Uint8ClampedArray;
-    width: number;
-    height: number;
-    kind?: number;
-}
-
-/** Represents a link annotation */
-interface LinkAnnotation {
-    rect: number[];  // [x1, y1, x2, y2]
-    url?: string;
-    dest?: string | unknown[];  // Internal destination (named or explicit array)
-}
-
-type PageItem = TextPageItem | ImagePageItem;
-
-
-/**
- * Calculates statistics about font sizes in the document.
- * Used for heading detection heuristics.
- */
-function calculateFontStats(pageItems: PageItem[][]): { median: number; max: number } {
-    const sizes: number[] = [];
-
-    for (const page of pageItems) {
-        for (const item of page) {
-            if (item.type === 'text' && item.height > 0) {
-                sizes.push(item.height);
-            }
-        }
+/** Precomputed CRC-32 table (polynomial 0xEDB88320) for PNG chunk checksums. */
+const CRC32_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        table[n] = c >>> 0;
     }
+    return table;
+})();
 
-    if (sizes.length === 0) return { median: 12, max: 12 };
-
-    sizes.sort((a, b) => a - b);
-    const median = sizes[Math.floor(sizes.length / 2)];
-    const max = sizes[sizes.length - 1];
-
-    return { median, max };
+/** CRC-32 over a byte range, as PNG requires over each chunk's type+data. */
+function crc32(bytes: Uint8Array): number {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
 /**
- * Determines if a text item should be considered a heading based on its font size.
- * 
- * Heuristic: Text that is at least 20% larger than the median body text size
- * is considered a heading. The level (1-6) is determined by relative size.
- * 
- * @param fontSize - The font size of the text
- * @param fontStats - Statistics about fonts in the document
- * @returns Heading level (1-6) or 0 if not a heading
+ * Encodes raw RGBA pixel data into a PNG buffer (8-bit RGB, alpha flattened against white).
+ *
+ * PNG replaced an earlier uncompressed BMP encoder: a scanned page as BMP is many megabytes, and
+ * inlining that as a base64 `data:` URI produced multi-megabyte single lines that broke downstream
+ * consumers (e.g. Markdown renderers). Deflate typically shrinks a scanned page by an order of
+ * magnitude, and PNG is a real image format that Tesseract and browsers both accept, so OCR and
+ * embedding still work. Uses fflate's `zlibSync` (the same browser-safe dependency the ZIP reader
+ * uses) rather than Node's `zlib`, so the browser bundle needs no polyfill.
  */
-function detectHeadingLevel(fontSize: number, fontStats: { median: number; max: number }): number {
-    // If font is less than 20% larger than median, it's not a heading
-    if (fontSize <= fontStats.median * 1.2) return 0;
-
-    // Calculate heading level based on how much larger than median
-    const ratio = fontSize / fontStats.median;
-
-    if (ratio >= 2.0) return 1;      // 2x or more = H1
-    if (ratio >= 1.7) return 2;      // 1.7x-2x = H2
-    if (ratio >= 1.5) return 3;      // 1.5x-1.7x = H3
-    if (ratio >= 1.35) return 4;     // 1.35x-1.5x = H4
-    if (ratio >= 1.2) return 5;      // 1.2x-1.35x = H5
-
-    return 0;  // Below threshold
-}
-
-function findLinkForText(item: TextPageItem, annotations: LinkAnnotation[]): LinkAnnotation | undefined {
-    const itemMinX = item.x;
-    const itemMaxX = item.x + item.width;
-    const itemMinY = item.y;
-    const itemMaxY = item.y + item.height;
-
-    for (const annot of annotations) {
-        const [x1, y1, x2, y2] = annot.rect;
-        const annotMinX = Math.min(x1, x2);
-        const annotMaxX = Math.max(x1, x2);
-        const annotMinY = Math.min(y1, y2);
-        const annotMaxY = Math.max(y1, y2);
-
-        // Check for any intersection between boxes
-        const intersects = (itemMinX < annotMaxX && itemMaxX > annotMinX) &&
-            (itemMinY < annotMaxY && itemMaxY > annotMinY);
-
-        if (intersects) {
-            return annot;
-        }
-    }
-    return undefined;
-}
-
-/**
- * Encodes raw RGBA data into a 24-bit BMP buffer with a white background.
- * Transparency (alpha channel) is flattened against white.
- * 
- * @param width - Image width
- * @param height - Image height
- * @param data - RGBA pixel data
- * @returns BMP Buffer
- */
-function encodeBmp(width: number, height: number, data: Uint8Array | Uint8ClampedArray): Buffer {
-    // BMP row size must be a multiple of 4 bytes
-    const rowSize = Math.floor((24 * width + 31) / 32) * 4;
-    const padding = rowSize - (width * 3);
-    const headerSize = 54; // 14 (File Header) + 40 (DIB Header)
-    const imageSize = rowSize * height;
-    const fileSize = headerSize + imageSize;
-    const buffer = Buffer.alloc(fileSize);
-
-    // --- File Header (14 bytes) ---
-    buffer.write('BM', 0);             // Signature
-    buffer.writeUInt32LE(fileSize, 2); // File Size
-    buffer.writeUInt32LE(0, 6);        // Reserved
-    buffer.writeUInt32LE(headerSize, 10); // Offset to pixel data
-
-    // --- DIB Header (BITMAPINFOHEADER - 40 bytes) ---
-    buffer.writeUInt32LE(40, 14);      // Header Size
-    buffer.writeInt32LE(width, 18);    // Width
-    buffer.writeInt32LE(-height, 22);  // Height (negative for top-down)
-    buffer.writeUInt16LE(1, 26);       // Planes
-    buffer.writeUInt16LE(24, 28);      // Bit Count (24-bit RGB)
-    buffer.writeUInt32LE(0, 30);       // Compression (BI_RGB)
-    buffer.writeUInt32LE(imageSize, 34); // Image Size
-    buffer.writeInt32LE(2835, 38);     // X PixelsPerMeter (72 DPI)
-    buffer.writeInt32LE(2835, 42);     // Y PixelsPerMeter (72 DPI)
-    buffer.writeUInt32LE(0, 46);       // Colors Used
-    buffer.writeUInt32LE(0, 50);       // Colors Important
-
-    // --- Pixel Data ---
-    let offset = headerSize;
+function encodePng(width: number, height: number, data: Uint8Array | Uint8ClampedArray): Buffer {
+    // Raw image data: one filter byte (0 = none) per scanline, then RGB triples, top-to-bottom.
+    const raw = new Uint8Array(height * (1 + width * 3));
+    let o = 0;
     for (let y = 0; y < height; y++) {
+        raw[o++] = 0; // filter: none
         for (let x = 0; x < width; x++) {
             const i = (y * width + x) * 4;
-            // RGBA input
-            const r = data[i + 0];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const a = data[i + 3];
-
-            // Flatten alpha against white background
-            // out = alpha * pixel + (1 - alpha) * white
-            // white = 255
-            const alpha = a / 255;
-            const outR = Math.round(r * alpha + 255 * (1 - alpha));
-            const outG = Math.round(g * alpha + 255 * (1 - alpha));
-            const outB = Math.round(b * alpha + 255 * (1 - alpha));
-
-            // Write as BGR (BMP standard)
-            buffer[offset + 0] = outB;
-            buffer[offset + 1] = outG;
-            buffer[offset + 2] = outR;
-            offset += 3;
-        }
-        // Write padding
-        for (let p = 0; p < padding; p++) {
-            buffer[offset] = 0;
-            offset++;
+            const alpha = data[i + 3] / 255;
+            raw[o++] = Math.round(data[i + 0] * alpha + 255 * (1 - alpha));
+            raw[o++] = Math.round(data[i + 1] * alpha + 255 * (1 - alpha));
+            raw[o++] = Math.round(data[i + 2] * alpha + 255 * (1 - alpha));
         }
     }
+    const idatData = zlibSync(raw, { level: 6 });
 
-    return buffer;
+    // Assemble chunks: each is length(4 BE) + type(4) + data + CRC32(4 BE) over type+data.
+    const chunk = (type: string, body: Uint8Array): Buffer => {
+        const typeBytes = Buffer.from(type, 'ascii');
+        const out = Buffer.alloc(12 + body.length);
+        out.writeUInt32BE(body.length, 0);
+        typeBytes.copy(out, 4);
+        Buffer.from(body).copy(out, 8);
+        out.writeUInt32BE(crc32(out.subarray(4, 8 + body.length)), 8 + body.length);
+        return out;
+    };
+
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr[8] = 8;   // bit depth
+    ihdr[9] = 2;   // color type: 2 = truecolor RGB
+    ihdr[10] = 0;  // compression: deflate
+    ihdr[11] = 0;  // filter: adaptive
+    ihdr[12] = 0;  // interlace: none
+
+    const signature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    return Buffer.concat([
+        signature,
+        chunk('IHDR', ihdr),
+        chunk('IDAT', idatData),
+        chunk('IEND', new Uint8Array(0)),
+    ]);
 }
 
 /**
- * Converts raw PDF image data to a buffer for attachment extraction.
- * 
- * **Important Limitation:**
- * PDF images are stored as raw pixel data (RGB, RGBA, or grayscale), not as encoded
- * image files like PNG or JPEG. This function converts the raw data to a normalized
- * RGBA buffer, but this is NOT a valid image file format.
- * 
- * For display, the raw RGBA data would need to be encoded to PNG/JPEG, which requires
- * an additional library like `sharp` or `pngjs`. Currently, this is stored as raw bytes.
- * 
- * OCR is NOT supported for PDF images because Tesseract.js requires encoded image files
- * (PNG, JPEG, etc.), not raw pixel data. To enable OCR, a PNG encoder would need to be added.
- * 
- * @param data - Raw pixel data from PDF.js
- * @param width - Image width in pixels
- * @param height - Image height in pixels
- * @param kind - PDF.js image kind (1=Grayscale, 2=RGB, 3=RGBA)
- * @returns Buffer containing RGBA pixel data (NOT an encoded image file)
+ * Converts raw PDF image pixel data (grayscale/RGB/RGBA) to a normalized RGBA buffer. The result is
+ * re-encoded to PNG by {@link encodePng}, which is what enables OCR on PDF images.
  */
 function convertToRgbaBuffer(data: Uint8Array | Uint8ClampedArray, width: number, height: number, kind?: number): Buffer {
-    // PDF.js image kind values:
-    // 1 = GRAYSCALE
-    // 2 = RGB  
-    // 3 = RGBA
-
     let rgbaData: Uint8ClampedArray;
-
     if (kind === 1) {
-        // Grayscale - expand to RGBA
         rgbaData = new Uint8ClampedArray(width * height * 4);
         for (let i = 0; i < width * height; i++) {
             const gray = data[i];
@@ -291,7 +144,6 @@ function convertToRgbaBuffer(data: Uint8Array | Uint8ClampedArray, width: number
             rgbaData[i * 4 + 3] = 255;
         }
     } else if (kind === 2 || data.length === width * height * 3) {
-        // RGB - add alpha channel
         rgbaData = new Uint8ClampedArray(width * height * 4);
         for (let i = 0; i < width * height; i++) {
             rgbaData[i * 4] = data[i * 3];
@@ -300,16 +152,314 @@ function convertToRgbaBuffer(data: Uint8Array | Uint8ClampedArray, width: number
             rgbaData[i * 4 + 3] = 255;
         }
     } else {
-        // Assume RGBA
         rgbaData = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
     }
-
     return Buffer.from(rgbaData.buffer, rgbaData.byteOffset, rgbaData.byteLength);
+}
+
+/** Reads and coerces the PDF-specific knobs from a resolved parser config. */
+function resolvePdfLayoutConfig(config: FullOfficeParserConfig): PdfLayoutConfig {
+    const p = config.pdfParserConfig ?? {};
+    const num = (v: unknown, fallback: number) => {
+        const n = typeof v === 'number' ? v : Number(v);
+        return Number.isFinite(n) ? n : fallback;
+    };
+    return {
+        useTags: p.useTags !== false,
+        detectColumns: p.detectColumns !== false,
+        mergeHyphenatedWords: p.mergeHyphenatedWords !== false,
+        lineToleranceFactor: num(p.lineToleranceFactor, 0.35),
+        spaceToleranceFactor: num(p.spaceToleranceFactor, 0.25),
+        headingDetection: p.headingDetection ?? 'auto',
+        disableTextNormalization: !!p.disableTextNormalization,
+        includePositions: !config.ignorePositions,
+    };
+}
+
+/** Parses a 1-based page-range spec like "1-3,7" against a page count. Empty/invalid means all. */
+function parsePageRange(spec: string | undefined, numPages: number): number[] {
+    const all = () => Array.from({ length: numPages }, (_, i) => i + 1);
+    if (!spec || !spec.trim()) return all();
+    const pages = new Set<number>();
+    for (const part of spec.split(',')) {
+        const token = part.trim();
+        if (!token) continue;
+        const range = token.match(/^(\d+)\s*-\s*(\d+)$/);
+        if (range) {
+            const lo = parseInt(range[1], 10), hi = parseInt(range[2], 10);
+            if (lo < 1 || hi < lo) return all();
+            for (let p = lo; p <= hi; p++) if (p <= numPages) pages.add(p);
+        } else if (/^\d+$/.test(token)) {
+            const p = parseInt(token, 10);
+            if (p >= 1 && p <= numPages) pages.add(p);
+        } else {
+            return all();
+        }
+    }
+    return pages.size ? [...pages].sort((a, b) => a - b) : all();
+}
+
+/** Resolves a font id once per document into name/weight/style plus ascent/descent for geometry. */
+async function resolveFont(fontKey: string, commonObjs: any, styles: Record<string, any>): Promise<ResolvedFont> {
+    const style = styles[fontKey] || {};
+    const resolved: ResolvedFont = {
+        bold: false,
+        italic: false,
+        ascent: typeof style.ascent === 'number' ? style.ascent : 0.8,
+        descent: typeof style.descent === 'number' ? style.descent : -0.2,
+        vertical: !!style.vertical,
+    };
+    try {
+        if (commonObjs?.has?.(fontKey)) {
+            const fontData: any = await new Promise((resolve) => commonObjs.get(fontKey, (d: any) => resolve(d)));
+            const rawName: string | undefined = typeof fontData?.name === 'string' ? fontData.name : undefined;
+            if (rawName) {
+                resolved.name = rawName.replace(/^[A-Z]{6}\+/, '');
+                const lower = rawName.toLowerCase();
+                resolved.bold = lower.includes('bold') || (typeof fontData.black === 'boolean' && fontData.black);
+                resolved.italic = lower.includes('italic') || lower.includes('oblique');
+            }
+        }
+    } catch {
+        // Font lookup failed; ascent/descent from styles are enough to proceed.
+    }
+    if (typeof style.fontFamily === 'string' && !resolved.name) resolved.name = style.fontFamily;
+    return resolved;
+}
+
+/** Applies a 6-element affine matrix to a point. */
+function applyMatrix(m: number[], x: number, y: number): [number, number] {
+    return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+}
+
+/** Converts a PDF-space rect [x1,y1,x2,y2] to a normalized layout-viewport rect. */
+function toViewportRect(viewport: any, rect: number[]): [number, number, number, number] {
+    const m = viewport.transform;
+    const [ax, ay] = applyMatrix(m, rect[0], rect[1]);
+    const [bx, by] = applyMatrix(m, rect[2], rect[3]);
+    return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
+}
+
+/** Resolves a page's Link annotations into geometry + hyperlink metadata (honoring config flags). */
+async function resolveAnnotations(
+    page: any, viewport: any, pdfDocument: any, config: FullOfficeParserConfig, destCache: Map<string, string | null>,
+): Promise<ResolvedLink[]> {
+    const out: ResolvedLink[] = [];
+    let annots: any[];
+    try {
+        annots = await page.getAnnotations();
+    } catch (e) {
+        logWarning(OfficeWarningType.ANNOTATION_EXTRACTION_FAILED, config, page.pageNumber, e);
+        return out;
+    }
+    for (const annot of annots) {
+        if (annot.subtype !== 'Link' || !annot.rect) continue;
+        const url: string | undefined = annot.url || annot.unsafeUrl || annot.data?.url;
+        let meta: TextMetadata | undefined;
+        if (url) {
+            const internal = url.startsWith('#');
+            if (internal && config.ignoreInternalLinks) continue;
+            meta = { link: url, linkType: internal ? 'internal' : 'external' };
+        } else if (annot.dest) {
+            if (config.ignoreInternalLinks) continue;
+            const href = await resolveDest(annot.dest, pdfDocument, destCache);
+            meta = { link: href, linkType: 'internal' };
+        }
+        if (meta) out.push({ rect: toViewportRect(viewport, annot.rect), meta });
+    }
+    return out;
+}
+
+/** Resolves an internal destination to `#page=N` when cheaply possible, else `#internal`. */
+async function resolveDest(dest: string | unknown[], pdfDocument: any, cache: Map<string, string | null>): Promise<string> {
+    try {
+        let explicit = dest;
+        if (typeof dest === 'string') {
+            if (cache.has(dest)) { const c = cache.get(dest); return c ?? '#internal'; }
+            if (cache.size >= 50) return '#internal';
+            explicit = await pdfDocument.getDestination(dest);
+            if (!explicit) { cache.set(dest, null); return '#internal'; }
+        }
+        if (Array.isArray(explicit) && explicit[0]) {
+            const idx = await pdfDocument.getPageIndex(explicit[0]);
+            const href = `#page=${idx + 1}`;
+            if (typeof dest === 'string') cache.set(dest, href);
+            return href;
+        }
+    } catch {
+        // fall through
+    }
+    if (typeof dest === 'string') cache.set(dest, null);
+    return '#internal';
+}
+
+/** Finds the hyperlink metadata for a run by intersecting its box with the page's link rects. */
+function linkForBox(x: number, yTop: number, w: number, h: number, links: ResolvedLink[]): TextMetadata | undefined {
+    const minX = x, maxX = x + w, minY = yTop, maxY = yTop + h;
+    for (const l of links) {
+        const [lx1, ly1, lx2, ly2] = l.rect;
+        if (minX < lx2 && maxX > lx1 && minY < ly2 && maxY > ly1) return l.meta;
+    }
+    return undefined;
+}
+
+/** Collects one page's text runs, images and annotations into a PageExtract. */
+async function collectPage(
+    pdfjs: any, pdfDocument: any, pageNumber: number, config: FullOfficeParserConfig,
+    pdfCfg: PdfLayoutConfig, fontCache: Map<string, ResolvedFont>, destCache: Map<string, string | null>,
+): Promise<PageExtract> {
+    const page = await pdfDocument.getPage(pageNumber);
+    const rotation = ((page.rotate % 360) + 360) % 360;
+    const layoutViewport = page.getViewport({ scale: 1, rotation: 0 });
+    const authoredW = layoutViewport.width;
+    const authoredH = layoutViewport.height;
+    const width = rotation % 180 === 0 ? authoredW : authoredH;
+    const height = rotation % 180 === 0 ? authoredH : authoredW;
+
+    const textContent = await page.getTextContent({ includeMarkedContent: true, disableNormalization: pdfCfg.disableTextNormalization });
+    const styles: Record<string, any> = textContent.styles || {};
+
+    // Resolve every font on the page once (document-scoped cache).
+    const seen = new Set<string>();
+    for (const item of textContent.items) if (isTextItem(item) && item.fontName) seen.add(item.fontName);
+    for (const key of seen) if (!fontCache.has(key)) fontCache.set(key, await resolveFont(key, page.commonObjs, styles));
+
+    const links = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache);
+
+    // Walk items, tracking the marked-content stack for mcid / Artifact scope.
+    const stack: { id: string | null; tag: string | null }[] = [];
+    const runs: RawRun[] = [];
+    for (const item of textContent.items) {
+        if (!isTextItem(item)) {
+            const type = (item as any).type as string | undefined;
+            if (type === 'beginMarkedContent' || type === 'beginMarkedContentProps') {
+                stack.push({ id: (item as any).id ?? null, tag: (item as any).tag ?? null });
+            } else if (type === 'endMarkedContent') {
+                stack.pop();
+            }
+            continue;
+        }
+        if (!item.str) continue;
+        const font = fontCache.get(item.fontName) || { bold: false, italic: false, ascent: 0.8, descent: -0.2, vertical: false };
+        const m = pdfjs.Util.transform(layoutViewport.transform, item.transform);
+        const box = computeRunBox(m, item.width || 0, font.ascent, font.descent);
+
+        const formatting: TextFormatting = {};
+        if (font.name) formatting.font = font.name;
+        if (font.bold) formatting.bold = true;
+        if (font.italic) formatting.italic = true;
+        formatting.size = String(Math.round(box.fontSize * 2) / 2);
+
+        let mcid: string | null = null, inArtifact = false;
+        for (let i = stack.length - 1; i >= 0; i--) {
+            if (stack[i].tag === 'Artifact') inArtifact = true;
+            if (mcid === null && stack[i].id !== null) mcid = stack[i].id;
+        }
+
+        const dir = (item.dir === 'rtl' || item.dir === 'ttb') ? item.dir : 'ltr';
+        const link = linkForBox(box.x, box.yTop, box.width, box.height, links);
+
+        runs.push({
+            text: item.str,
+            x: box.x, yTop: box.yTop, yBaseline: box.yBaseline, width: box.width, height: box.height,
+            fontSize: box.fontSize,
+            fontKey: item.fontName,
+            dir,
+            hasEOL: !!item.hasEOL,
+            angle: box.angle === -1 ? 0 : box.angle,
+            mcid, inArtifact,
+            formatting,
+            link,
+        });
+    }
+
+    const images = (config.extractAttachments || config.ocr)
+        ? await collectImages(pdfjs, page, layoutViewport, config, pageNumber)
+        : [];
+
+    let structTree: unknown | null = null;
+    if (pdfCfg.useTags) {
+        try { structTree = await page.getStructTree(); } catch { structTree = null; }
+    }
+
+    if (typeof page.cleanup === 'function') { try { page.cleanup(); } catch { /* best effort */ } }
+
+    return { pageNumber, width, height, authoredW, authoredH, rotation, runs, images, structTree };
+}
+
+/** Extracts images from a page's operator list, positioned in layout-viewport space. */
+async function collectImages(pdfjs: any, page: any, viewport: any, config: FullOfficeParserConfig, pageNumber: number): Promise<PdfImage[]> {
+    const images: PdfImage[] = [];
+    try {
+        const ops = await page.getOperatorList();
+        const fnArray = ops.fnArray;
+        const argsArray = ops.argsArray;
+        for (let j = 0; j < fnArray.length; j++) {
+            const fn = fnArray[j];
+            if (fn === pdfjs.OPS.dependency) {
+                for (const dep of argsArray[j]) {
+                    try {
+                        if (page.objs.has(dep)) continue;
+                        await new Promise<void>((resolve) => {
+                            const timeout = setTimeout(resolve, 500);
+                            page.objs.get(dep, () => { clearTimeout(timeout); resolve(); });
+                        });
+                    } catch (e) {
+                        logWarning(OfficeWarningType.DEPENDENCY_LOAD_FAILED, config, dep, e);
+                    }
+                }
+            }
+            if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintXObject) {
+                const imgName = argsArray[j][0];
+                try {
+                    let hasObj = page.objs.has(imgName);
+                    let targetObjs = page.objs;
+                    if (!hasObj && page.commonObjs.has(imgName)) { hasObj = true; targetObjs = page.commonObjs; }
+                    if (!hasObj) continue;
+                    const imgObj: any = await new Promise((resolve) => targetObjs.get(imgName, (d: any) => resolve(d)));
+                    if (isBrowser && !imgObj.data && imgObj.bitmap) {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = imgObj.width; canvas.height = imgObj.height;
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) { ctx.drawImage(imgObj.bitmap, 0, 0); imgObj.data = ctx.getImageData(0, 0, imgObj.width, imgObj.height).data; imgObj.kind = 3; }
+                        } catch (e) {
+                            logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, undefined, e);
+                        }
+                    }
+                    if (imgObj?.data && imgObj.width > 0 && imgObj.height > 0) {
+                        // Nearest preceding CTM gives the image placement (unit square mapped by [a,b,c,d,e,f]).
+                        let ctm: number[] | null = null;
+                        for (let k = j - 1; k >= 0; k--) {
+                            if (fnArray[k] === pdfjs.OPS.transform) { ctm = argsArray[k]; break; }
+                        }
+                        const bounds = ctm ? imageBounds(viewport, ctm) : { x: 0, y: 0, width: 0, height: 0 };
+                        images.push({ name: imgName, bounds, data: imgObj.data, pixelWidth: imgObj.width, pixelHeight: imgObj.height, kind: imgObj.kind });
+                    }
+                } catch {
+                    // Image access failed, continue.
+                }
+            }
+        }
+    } catch (e) {
+        logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, `from page ${pageNumber}`, e);
+    }
+    return images;
+}
+
+/** Maps an image CTM to a layout-viewport box (the image fills the unit square under the CTM). */
+function imageBounds(viewport: any, ctm: number[]): { x: number; y: number; width: number; height: number } {
+    const [a, b, c, d, e, f] = ctm;
+    const xs = [e, e + a, e + c, e + a + c];
+    const ys = [f, f + b, f + d, f + b + d];
+    const rect = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    const [vx1, vy1, vx2, vy2] = toViewportRect(viewport, rect);
+    return { x: vx1, y: vy1, width: vx2 - vx1, height: vy2 - vy1 };
 }
 
 /**
  * Parses a PDF file and extracts content.
- * 
+ *
  * @param buffer - The PDF file buffer
  * @param config - Parser configuration
  * @returns Promise resolving to the parsed AST
@@ -317,20 +467,15 @@ function convertToRgbaBuffer(data: Uint8Array | Uint8ClampedArray, width: number
 export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): Promise<OfficeParserAST> => {
     checkAbortSignal(config.abortSignal);
     const pdfjs = await loadPdfJs();
+    const pdfCfg = resolvePdfLayoutConfig(config);
 
-    // Configure worker
-
+    // --- Worker configuration ---
     const workerSrc = config.pdfWorkerSrc;
-
     if (isBrowser) {
         pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
     } else {
-        // Node.js: Try to auto-resolve local worker path to avoid remote download errors
         assertNode('pdf-worker-auto-resolution');
         let resolved = false;
-
-        // If the user provided a custom path (not the default CDN one), use it.
-        // Otherwise, check if the worker is already loaded globally, or try to find it locally.
         if (workerSrc !== DEFAULT_OFFICE_PARSER_CONFIG.pdfWorkerSrc && workerSrc !== '') {
             pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
             resolved = true;
@@ -338,11 +483,8 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
             resolved = true;
         } else {
             try {
-                // We use require.resolve to find the exact path of the installed package.
                 // @ts-ignore - 'require' is available in Node.js/CommonJS environment
                 const localWorkerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
-                // Use file:// URL for the worker source in Node.js to ensure compatibility with ESM-native PDF.js 5.x
-                // We use dynamic import for 'url' to avoid breaking browser bundles
                 const { pathToFileURL } = await import('url');
                 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(localWorkerPath).href;
                 resolved = true;
@@ -350,63 +492,77 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
                 logWarning(OfficeWarningType.PDF_WORKER_FALLBACK, config, undefined, e);
             }
         }
-
-        if (!resolved) {
-            pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-        }
+        if (!resolved) pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
     }
 
-    const uint8Array = new Uint8Array(buffer);
-    const loadingTask = pdfjs.getDocument({
-        data: uint8Array,
-        verbosity: 0, // ERRORS only, suppresses warnings
-        // Harden against untrusted PDFs: don't let pdf.js JIT font/CMap fast-paths
-        // compile via `new Function`.
-        isEvalSupported: false
-    });
+    const onPassword = config.pdfParserConfig?.onPassword;
+    // Cap callback-driven retries so an onPassword that keeps returning a wrong password can't loop.
+    const MAX_PASSWORD_ATTEMPTS = 3;
+    let password: string | undefined = config.pdfParserConfig?.password || undefined;
+    let passwordAttempts = 0;
 
-    // Handle loading errors, specifically missing worker in browser
-    let pdfDocument;
-    try {
-        pdfDocument = await loadingTask.promise;
-    } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        if (message.includes('workerSrc') || message.includes('No "GlobalWorkerOptions.workerSrc" specified')) {
-            throw getOfficeError(OfficeErrorType.PDF_WORKER_MISSING, config);
+    // Open the document, retrying with an onPassword-supplied password when the PDF is encrypted.
+    while (true) {
+        checkAbortSignal(config.abortSignal);
+        // A fresh copy per attempt: pdf.js transfers the data buffer to its worker, detaching it, so
+        // reusing the same Uint8Array on a password retry would fail with a transfer error.
+        const loadingTask = pdfjs.getDocument({
+            data: new Uint8Array(buffer),
+            verbosity: 0,
+            isEvalSupported: false,
+            password,
+        });
+
+        let pdfDocument;
+        try {
+            pdfDocument = await loadingTask.promise;
+        } catch (e: any) {
+            try { await loadingTask.destroy(); } catch { /* best effort cleanup */ }
+            if (e?.name === 'PasswordException') {
+                const need = pdfjs.PasswordResponses?.NEED_PASSWORD;
+                const reason: 'required' | 'incorrect' = e.code === need ? 'required' : 'incorrect';
+                if (onPassword && passwordAttempts < MAX_PASSWORD_ATTEMPTS) {
+                    passwordAttempts++;
+                    const supplied = await onPassword(reason);
+                    if (supplied) { password = supplied; continue; }
+                }
+                throw getOfficeError(reason === 'required' ? OfficeErrorType.PDF_PASSWORD_REQUIRED : OfficeErrorType.PDF_PASSWORD_INCORRECT, config);
+            }
+            const message = e instanceof Error ? e.message : String(e);
+            if (message.includes('workerSrc') || message.includes('No "GlobalWorkerOptions.workerSrc" specified')) {
+                throw getOfficeError(OfficeErrorType.PDF_WORKER_MISSING, config);
+            }
+            throw e;
         }
-        throw e;
-    }
 
+        try {
+            return await buildAst(pdfjs, pdfDocument, config, pdfCfg);
+        } finally {
+            try { await loadingTask.destroy(); } catch { /* best effort cleanup */ }
+        }
+    }
+};
+
+/** Assembles the AST from an opened document. Separated so the caller can guarantee task cleanup. */
+async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserConfig, pdfCfg: PdfLayoutConfig): Promise<OfficeParserAST> {
     const content: OfficeContentNode[] = [];
     const attachments: OfficeAttachment[] = [];
     const numPages = pdfDocument.numPages;
 
-    // Collect all page items for font statistics before processing
-    const allPageItems: PageItem[][] = [];
-
-    // --- Metadata Extraction ---
-    // Extract all available metadata from the PDF info dictionary.
-    // Note: Some metadata fields depend on how the PDF was created.
-    // - Producer: Software that created the PDF
-    // - Creator: Application that made the original document
-    // - Keywords, Description are rarely present
+    // --- Metadata ---
     const meta = await pdfDocument.getMetadata().catch(() => ({ info: {} }));
-    const info = meta.info as Record<string, unknown>;
-
+    const info = (meta.info || {}) as Record<string, unknown>;
     const metadata: OfficeMetadata = {
         pages: numPages,
         title: info?.Title as string | undefined,
         author: info?.Author as string | undefined,
         subject: info?.Subject as string | undefined,
-        description: info?.Keywords as string | undefined,  // Map Keywords to description as closest match
+        description: info?.Keywords as string | undefined,
         created: parseOfficeDate(info?.CreationDate as string | undefined),
         modified: parseOfficeDate(info?.ModDate as string | undefined),
-        // Note: lastModifiedBy is not available in PDF format - there's no concept of "last modifier"
-        // The Author field only tracks original author.
     };
+    if (typeof info?.Language === 'string') metadata.language = info.Language as string;
 
-    // Extract non-standard entries from the PDF Info dictionary as custom properties.
-    // The standard keys are defined by the PDF spec; anything else is user/tool-defined.
     const standardPdfInfoKeys = new Set([
         'Title', 'Author', 'Subject', 'Keywords', 'Creator', 'Producer',
         'CreationDate', 'ModDate', 'Trapped', 'IsAcroFormPresent', 'IsXFAPresent',
@@ -416,535 +572,207 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
         metadata.nativeProperties = {};
         for (const [key, val] of Object.entries(info)) {
             if (key === 'Custom' && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date) && val !== null) {
-                for (const [customKey, customVal] of Object.entries(val)) {
-                    metadata.nativeProperties[customKey] = customVal;
-                }
+                for (const [ck, cv] of Object.entries(val)) metadata.nativeProperties[ck] = cv;
             } else {
                 metadata.nativeProperties[key] = val;
             }
         }
-
         const customProperties: Record<string, string | number | boolean | Date> = {};
         for (const key of Object.keys(info)) {
             if (standardPdfInfoKeys.has(key)) continue;
             const val = info[key];
             if (val === null || val === undefined) continue;
-            // pdf.js groups document-level custom metadata under a 'Custom' object.
-            // Flatten its entries directly into customProperties.
             if (key === 'Custom' && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
-                for (const [customKey, customVal] of Object.entries(val)) {
-                    if (customVal === null || customVal === undefined) continue;
-                    if (typeof customVal === 'string' || typeof customVal === 'number' || typeof customVal === 'boolean' || customVal instanceof Date) {
-                        customProperties[customKey] = customVal;
-                    }
+                for (const [ck, cv] of Object.entries(val)) {
+                    if (cv === null || cv === undefined) continue;
+                    if (typeof cv === 'string' || typeof cv === 'number' || typeof cv === 'boolean' || cv instanceof Date) customProperties[ck] = cv;
                 }
                 continue;
             }
-            if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean' || val instanceof Date) {
-                customProperties[key] = val;
-            }
+            if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean' || val instanceof Date) customProperties[key] = val;
         }
-        if (Object.keys(customProperties).length > 0) {
-            metadata.customProperties = customProperties;
-        }
+        if (Object.keys(customProperties).length > 0) metadata.customProperties = customProperties;
     }
-
     if (meta.metadata) {
         if (!metadata.nativeProperties) metadata.nativeProperties = {};
         const xmp: any = meta.metadata;
-        if (typeof xmp.getAll === 'function') {
-            metadata.nativeProperties['XMP'] = xmp.getAll();
-        } else {
-            metadata.nativeProperties['XMP'] = xmp;
-        }
+        metadata.nativeProperties['XMP'] = typeof xmp.getAll === 'function' ? xmp.getAll() : xmp;
     }
 
-    // --- Embedded File Attachment Extraction ---
-    /**
-     * PDF can contain embedded files (not images in content, but attached files).
-     * These are separate from images in the page content stream.
-     */
+    // Tagged flag for consumers.
+    let markInfo: any = null;
+    try { markInfo = await pdfDocument.getMarkInfo(); } catch { markInfo = null; }
+    if (!metadata.nativeProperties) metadata.nativeProperties = {};
+    metadata.nativeProperties['tagged'] = !!(markInfo && markInfo.Marked);
+    if (markInfo) metadata.nativeProperties['markInfo'] = markInfo;
+
+    // --- Embedded file attachments ---
     try {
         const embeddedFiles = await pdfDocument.getAttachments();
         if (embeddedFiles && config.extractAttachments) {
             for (const name in embeddedFiles) {
                 const file = embeddedFiles[name];
-                const fileBuffer = Buffer.from(file.content);
-                const attachment = createAttachment(file.filename, fileBuffer);
-                attachments.push(attachment);
+                attachments.push(createAttachment(file.filename, Buffer.from(file.content)));
             }
         }
     } catch (e) {
         logWarning(OfficeWarningType.ATTACHMENT_EXTRACTION_FAILED, config, undefined, e);
     }
 
-    // --- First Pass: Collect all items for font statistics ---
-    for (let i = 1; i <= numPages; i++) {
+    // --- Single collection pass ---
+    const pageNumbers = parsePageRange(config.pdfParserConfig?.pageRange, numPages);
+    const fontCache = new Map<string, ResolvedFont>();
+    const destCache = new Map<string, string | null>();
+    const extracts: PageExtract[] = [];
+    for (const pageNum of pageNumbers) {
         checkAbortSignal(config.abortSignal);
-        let page: any;
-        let textContent;
-        const pageItems: PageItem[] = [];
-
         try {
-            page = await pdfDocument.getPage(i);
-            // Extract text content
-            textContent = await page.getTextContent();
-        } catch (e: any) {
-            logWarning(OfficeWarningType.PAGE_LOAD_FAILED, config, i, e);
-            // Push empty items to maintain index alignment for second pass
-            allPageItems.push(pageItems);
-            continue;
-        }
-
-        const commonObjs = page.commonObjs;
-
-        const fontCache = new Map<string, Record<string, unknown>>();
-
-        for (const item of textContent.items) {
-            // PDF.js 5.x: textContent.items can contain TextMarkedContent which lack
-            // 'str' and 'transform'. Skip these to avoid crashes and page skipping.
-            if (!isTextItem(item)) {
-                continue;
-            }
-
-            // At this point we know the item is a TextItem
-            const textItem = item;
-            const transform = textItem.transform;
-            const x = transform[4];
-            const y = transform[5];
-            const width = textItem.width || 0;
-            const height = textItem.height || Math.abs(transform[3]) || 12;
-
-            // Extract formatting from font
-            const formatting: TextFormatting = {};
-            let fontName: string | undefined;
-
-            if (textItem.fontName && commonObjs) {
-                try {
-                    if (commonObjs.has(textItem.fontName)) {
-                        let fontData = fontCache.get(textItem.fontName);
-                        if (!fontData) {
-                            // Use callback-based get to ensure safe resolution
-                            fontData = await new Promise<Record<string, unknown>>((resolve) => {
-                                // @ts-ignore - commonObjs.get is callback-based in legacy builds
-                                commonObjs.get(textItem.fontName, (data: Record<string, unknown>) => resolve(data));
-                            });
-                            fontCache.set(textItem.fontName, fontData);
-                        }
-
-                        if (fontData?.name && typeof fontData.name === 'string') {
-                            // Remove PDF subset prefix (6 uppercase letters + '+')
-                            fontName = fontData.name.replace(/^[A-Z]{6}\+/, '');
-                            formatting.font = fontName;
-
-                            // Detect bold/italic from font name
-                            const lowerName = fontData.name.toLowerCase();
-                            if (lowerName.includes('bold')) formatting.bold = true;
-                            if (lowerName.includes('italic') || lowerName.includes('oblique')) formatting.italic = true;
-                        }
-                    }
-                } catch {
-                    // Font lookup failed, continue without font info
-                }
-            }
-
-            if (height > 0) {
-                formatting.size = Math.round(height).toString();
-            }
-
-            pageItems.push({
-                type: 'text',
-                x,
-                y,
-                width,
-                height,
-                text: textItem.str,
-                fontName,
-                formatting
-            });
-        }
-
-        // Extract images if enabled
-        if (config.extractAttachments || config.ocr) {
-            try {
-                const ops = await page.getOperatorList();
-                const fnArray = ops.fnArray;
-                const argsArray = ops.argsArray;
-
-                for (let j = 0; j < fnArray.length; j++) {
-                    const fn = fnArray[j];
-
-                    if (fn === pdfjs.OPS.dependency) {
-                        const deps = argsArray[j];
-                        for (const dep of deps) {
-                            // In pdfjs-dist v3+, get() throws if not resolved unless a callback is provided.
-                            // We must use the callback pattern to wait for resolution.
-                            try {
-                                if (page.objs.has(dep)) continue;
-
-                                await new Promise<void>((resolve) => {
-                                    const timeout = setTimeout(() => {
-                                        resolve();
-                                    }, 500);
-
-                                    page.objs.get(dep, (data: unknown) => {
-                                        clearTimeout(timeout);
-                                        resolve();
-                                    });
-                                });
-                            } catch (e: any) {
-                                logWarning(OfficeWarningType.DEPENDENCY_LOAD_FAILED, config, dep, e);
-                            }
-                        }
-                    }
-
-                    if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintXObject) {
-                        const imgName = argsArray[j][0];
-
-                        try {
-                            let hasObj = page.objs.has(imgName);
-                            let targetObjs = page.objs;
-
-                            if (!hasObj && page.commonObjs.has(imgName)) {
-                                hasObj = true;
-                                targetObjs = page.commonObjs;
-                            }
-
-                            if (hasObj) {
-                                // Use callback-based get to ensure safe resolution
-                                const imgObj = await new Promise<Record<string, unknown> & { data?: Uint8ClampedArray; bitmap?: ImageBitmap; width: number; height: number; kind?: number }>((resolve) => {
-                                    // @ts-ignore - targetObjs.get is callback-based
-                                    targetObjs.get(imgName, (data: any) => resolve(data));
-                                });
-
-                                // Browser-specific: Handle ImageBitmap if data is missing
-                                if (isBrowser && !imgObj.data && imgObj.bitmap) {
-                                    try {
-                                        const canvas = document.createElement('canvas');
-                                        canvas.width = imgObj.width;
-                                        canvas.height = imgObj.height;
-                                        const ctx = canvas.getContext('2d');
-                                        if (ctx) {
-                                            ctx.drawImage(imgObj.bitmap, 0, 0);
-                                            imgObj.data = ctx.getImageData(0, 0, imgObj.width, imgObj.height).data;
-                                            imgObj.kind = 3; // RGBA
-                                        }
-                                    } catch (e) {
-                                        logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, undefined, e);
-                                    }
-                                }
-
-                                if (imgObj?.data && imgObj.width > 0 && imgObj.height > 0) {
-                                    // Find position from transform matrix
-                                    let imgX = 0, imgY = 0;
-                                    for (let k = j - 1; k >= 0; k--) {
-                                        if (fnArray[k] === pdfjs.OPS.transform) {
-                                            imgX = argsArray[k][4];
-                                            imgY = argsArray[k][5];
-                                            break;
-                                        }
-                                    }
-
-                                    pageItems.push({
-                                        type: 'image',
-                                        x: imgX,
-                                        y: imgY,
-                                        name: imgName,
-                                        data: imgObj.data,
-                                        width: imgObj.width,
-                                        height: imgObj.height,
-                                        kind: imgObj.kind
-                                    });
-                                }
-                            }
-                        } catch {
-                            // Image access failed, continue
-                        }
-                    }
-                }
-            } catch (e) {
-                logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, `from page ${i}`, e);
-            }
-        }
-
-        allPageItems.push(pageItems);
-    }
-
-    // Calculate font statistics for heading detection
-    const fontStats = calculateFontStats(allPageItems);
-
-    // --- Second Pass: Process pages with font statistics ---
-    for (let i = 0; i < allPageItems.length; i++) {
-        checkAbortSignal(config.abortSignal);
-        const pageNum = i + 1;
-        let page: any;
-        try {
-            page = await pdfDocument.getPage(pageNum);
+            extracts.push(await collectPage(pdfjs, pdfDocument, pageNum, config, pdfCfg, fontCache, destCache));
         } catch (e: any) {
             logWarning(OfficeWarningType.PAGE_LOAD_FAILED, config, pageNum, e);
-            continue;
         }
+    }
 
-        const pageItems = allPageItems[i];
-        const pageContent: OfficeContentNode[] = [];
+    const allRuns = extracts.flatMap(e => e.runs);
+    const docCtx = computeDocContext(allRuns, pdfCfg, config.newlineDelimiter);
 
-        // Extract link annotations for this page
-        const annotations: LinkAnnotation[] = [];
-        const matchedAnnotations = new Set<LinkAnnotation>();
-        try {
-            const annots = await page.getAnnotations();
-            for (const annot of annots) {
-                if (annot.subtype === 'Link' && annot.rect) {
-                    // PDF.js 5.x compatibility: url might be in 'url', 'unsafeUrl', or 'data.url'
-                    const url = annot.url || annot.unsafeUrl || annot.data?.url;
-                    annotations.push({
-                        rect: annot.rect,
-                        url: url,
-                        dest: annot.dest
-                    });
-                }
+    // Tagged-structure trust: the document must declare it is tagged and not flag it as suspect.
+    const docTagged = !!(markInfo && markInfo.Marked);
+    const docTrusted = docTagged && !markInfo.Suspects;
+    let structWarned = false;
+    const warnStruct = (reason: string) => {
+        if (structWarned) return;
+        structWarned = true;
+        logWarning(OfficeWarningType.PDF_STRUCT_TREE_UNRELIABLE, config, reason);
+    };
+    if (pdfCfg.useTags && docTagged && !docTrusted) warnStruct('the document flags its tags as suspect');
+
+    const auxHeaders: OfficeContentNode[] = [];
+    const auxFooters: OfficeContentNode[] = [];
+
+    let imageCounter = 0;
+    for (const extract of extracts) {
+        checkAbortSignal(config.abortSignal);
+        const pageCtx: PageContext = { pageNumber: extract.pageNumber, authoredW: extract.authoredW, authoredH: extract.authoredH, rotation: extract.rotation };
+        const bodyRuns = extract.runs.filter(r => !r.inArtifact);
+
+        let pageContent: OfficeContentNode[] | null = null;
+
+        // Tagged path: use the structure tree when trusted and it covers most of the page's text.
+        if (pdfCfg.useTags && docTrusted && extract.structTree) {
+            const runsByMcid = new Map<string, RawRun[]>();
+            for (const r of bodyRuns) {
+                if (!r.mcid) continue;
+                const list = runsByMcid.get(r.mcid);
+                if (list) list.push(r); else runsByMcid.set(r.mcid, [r]);
             }
-        } catch (e) {
-            logWarning(OfficeWarningType.ANNOTATION_EXTRACTION_FAILED, config, pageNum, e);
-        }
-
-        // Sort items: Y descending (top to bottom), then X ascending (left to right)
-        pageItems.sort((a, b) => {
-            // Relax tolerance slightly (5 -> 7) for PDF.js 5.x coordinate precision
-            if (Math.abs(b.y - a.y) > 7) return b.y - a.y;
-            return a.x - b.x;
-        });
-
-        // Process sorted items into content nodes
-        let currentNode: OfficeContentNode | null = null;
-        let currentNodeFontSize = 0;
-        let lastY = -1;
-        let imageCounter = 0;
-
-        for (const item of pageItems) {
-            if (item.type === 'text') {
-                const text = item.text;
-                if (!text) continue;
-
-                // Check for new line
-                const isNewLine = lastY !== -1 && Math.abs(item.y - lastY) > 5;
-
-                if (isNewLine && currentNode) {
-                    // Finalize and push current node
-                    if ((currentNode.text || '').trim().length > 0) {
-                        pageContent.push(currentNode);
-                    }
-                    currentNode = null;
+            const { nodes, coveredMcids } = buildTaggedNodes(extract.structTree, runsByMcid, pageCtx, docCtx, { ignoreNotes: config.ignoreNotes });
+            const textMcids = new Set(bodyRuns.filter(r => r.text.trim() && r.mcid).map(r => r.mcid as string));
+            let coveredText = 0;
+            for (const m of textMcids) if (coveredMcids.has(m)) coveredText++;
+            const coverage = textMcids.size ? coveredText / textMcids.size : 1;
+            if (coverage >= 0.7) {
+                pageContent = nodes;
+                // Stitch in any runs the tags did not cover, via the geometric path.
+                const leftover = bodyRuns.filter(r => r.text.trim() && (!r.mcid || !coveredMcids.has(r.mcid)));
+                if (leftover.length) {
+                    pageContent.push(...geometricNodes(leftover, pageCtx, docCtx, pdfCfg));
+                    warnStruct('some text on a page was outside the tag tree');
                 }
-
-                // Skip pure whitespace at start of lines
-                if (!currentNode && text.trim().length === 0) {
-                    lastY = item.y;
-                    continue;
-                }
-
-                // Determine if this should be a heading
-                const headingLevel = detectHeadingLevel(item.height, fontStats);
-
-                if (!currentNode) {
-                    // Start new node
-                    if (headingLevel > 0) {
-                        currentNode = {
-                            type: 'heading',
-                            text: '',
-                            children: [],
-                            metadata: { level: headingLevel }
-                        };
-                    } else {
-                        currentNode = {
-                            type: 'paragraph',
-                            text: '',
-                            children: []
-                        };
-                    }
-                    currentNodeFontSize = item.height;
-                }
-
-                // Handle whitespace
-                if (text.trim().length === 0) {
-                    if (currentNode.children && currentNode.children.length > 0) {
-                        const lastChild = currentNode.children[currentNode.children.length - 1];
-                        if (lastChild.type === 'text' && lastChild.text) {
-                            lastChild.text += text;
-                            currentNode.text += text;
-                        }
-                    }
-                    lastY = item.y;
-                    continue;
-                }
-
-                // Add space between words if needed
-                if (currentNode.text && currentNode.text.length > 0 && !currentNode.text.endsWith(' ')) {
-                    currentNode.text += ' ';
-                    if (currentNode.children && currentNode.children.length > 0) {
-                        const lastChild = currentNode.children[currentNode.children.length - 1];
-                        if (lastChild.type === 'text' && lastChild.text) {
-                            lastChild.text += ' ';
-                        }
-                    }
-                }
-
-                currentNode.text += text;
-
-                // Check for link
-                const link = findLinkForText(item, annotations);
-                if (link) matchedAnnotations.add(link);
-                let textMetadata: TextMetadata | undefined;
-                if (link) {
-                    if (link.url) {
-                        textMetadata = {
-                            link: link.url,
-                            linkType: link.url.startsWith('#') ? 'internal' : 'external'
-                        };
-                    } else if (link.dest) {
-                        // Internal destination
-                        textMetadata = {
-                            link: typeof link.dest === 'string' ? `#${link.dest}` : '#internal',
-                            linkType: 'internal'
-                        };
-                    }
-                }
-
-                // Try to merge with last child if same formatting and no link change
-                let merged = false;
-                if (currentNode.children && currentNode.children.length > 0 && !textMetadata) {
-                    const lastChild = currentNode.children[currentNode.children.length - 1];
-                    if (lastChild.type === 'text' &&
-                        isSameFormatting(lastChild.formatting, item.formatting) &&
-                        !lastChild.metadata) {
-                        lastChild.text = (lastChild.text || '') + text;
-                        merged = true;
-                    }
-                }
-
-                if (!merged) {
-                    const textNode: OfficeContentNode = {
-                        type: 'text',
-                        text: text,
-                        formatting: Object.keys(item.formatting).length > 0 ? item.formatting : undefined
-                    };
-                    if (textMetadata) {
-                        textNode.metadata = textMetadata;
-                    }
-                    currentNode.children?.push(textNode);
-                }
-
-                lastY = item.y;
-
-            } else if (item.type === 'image') {
-                // Flush current node
-                if (currentNode) {
-                    if ((currentNode.text || '').trim().length > 0) {
-                        pageContent.push(currentNode);
-                    }
-                    currentNode = null;
-                }
-
-                imageCounter++;
-                // Note: Using .bmp extension since we encode to BMP for broad compatibility
-                const attachmentName = `pdf_image_p${pageNum}_${imageCounter}.bmp`;
-
-                /**
-                 * Image extraction for PDF files.
-                 * 
-                 * PDF stores images as raw pixel data. We convert to BMP for compatibility.
-                 */
-                if (config.extractAttachments) {
-                    try {
-                        const imageBuffer = convertToRgbaBuffer(
-                            item.data,
-                            item.width,
-                            item.height,
-                            item.kind
-                        );
-
-                        // Encode as BMP
-                        const bmpBuffer = encodeBmp(item.width, item.height, new Uint8Array(imageBuffer));
-                        const attachment = createAttachment(attachmentName, bmpBuffer);
-                        attachment.mimeType = 'image/bmp';
-
-                        // Perform OCR if enabled
-                        if (config.ocr) {
-                            try {
-                                // Skip OCR for very small images/artifacts (e.g. < 10px) to avoid Tesseract warnings
-                                if (item.width >= 10 && item.height >= 10) {
-                                    attachment.ocrText = (await performOcr(bmpBuffer, { ...config.ocrConfig })).trim();
-                                }
-                            } catch (e) {
-                                logWarning(OfficeWarningType.OCR_FAILED, config, attachmentName, e);
-                            }
-                        }
-
-                        attachments.push(attachment);
-
-                        // Create image content node
-                        const imageMetadata: ImageMetadata = {
-                            attachmentName,
-                        };
-
-                        pageContent.push({
-                            type: 'image',
-                            text: attachment.ocrText || '',
-                            metadata: { ...imageMetadata }
-                        });
-
-                    } catch (e) {
-                        logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, attachmentName, e);
-                    }
-                }
+            } else {
+                warnStruct('the tag tree covered too little of the page text');
             }
         }
 
-        // Flush last node
-        if (currentNode && (currentNode.text || '').trim().length > 0) {
-            pageContent.push(currentNode);
+        // Geometric fallback (untagged, distrusted, or low coverage).
+        if (!pageContent) pageContent = geometricNodes(bodyRuns, pageCtx, docCtx, pdfCfg);
+
+        // Images: emit as attachments/OCR, then splice each into the flow before the first text node
+        // that sits lower on the page, so reading order is preserved without reordering text.
+        for (const img of extract.images) {
+            const node = await emitImage(img, extract.pageNumber, ++imageCounter, config, attachments, pageCtx, pdfCfg);
+            if (!node) continue;
+            const y = node.bounds?.y ?? Infinity;
+            const at = pageContent.findIndex(n => n.type !== 'image' && (n.bounds?.y ?? Infinity) > y);
+            if (at < 0) pageContent.push(node); else pageContent.splice(at, 0, node);
         }
 
-        // Add page node to content
-        content.push({
+        // Artifact runs (running headers/footers, decorations) route to auxiliary unless dropped.
+        if (!config.ignoreHeadersAndFooters) {
+            const artifacts = extract.runs.filter(r => r.inArtifact && r.text.trim());
+            classifyArtifacts(artifacts, extract, pageCtx, docCtx, pdfCfg, auxHeaders, auxFooters);
+        }
+
+        const pageNode: OfficeContentNode = {
             type: 'page',
             children: pageContent,
-            text: pageContent.map(node => node.text).join(config.newlineDelimiter),
-            metadata: { pageNumber: pageNum }
-        });
+            text: pageContent.map(n => n.text).join(config.newlineDelimiter),
+            metadata: { pageNumber: extract.pageNumber },
+        };
+        if (pdfCfg.includePositions && pageNode.type === 'page' && pageNode.metadata) {
+            pageNode.metadata.pageWidth = Math.round(extract.width * 100) / 100;
+            pageNode.metadata.pageHeight = Math.round(extract.height * 100) / 100;
+            if (extract.rotation) pageNode.metadata.rotation = extract.rotation;
+        }
+        content.push(pageNode);
     }
 
-    const toTextSync = () => content.map(c => c.text).join(config.newlineDelimiter);
+    const auxiliary = (auxHeaders.length || auxFooters.length)
+        ? { headers: auxHeaders, footers: auxFooters }
+        : undefined;
 
-    return createAST(
-        'pdf',
-        metadata,
-        content,
-        attachments,
-        config,
-        undefined,
-        toTextSync
-    );
-};
+    return createAST('pdf', metadata, content, attachments, config, auxiliary);
+}
 
-/**
- * Helper to compare two text formatting objects.
- * Returns true if both have the same properties with the same values.
- */
-function isSameFormatting(a: TextFormatting | undefined, b: TextFormatting | undefined): boolean {
-    if (!a && !b) return true;
-    if (!a || !b) return false;
+/** Runs the geometric (untagged) assembly path over a set of runs. */
+function geometricNodes(runs: RawRun[], pageCtx: PageContext, docCtx: DocContext, pdfCfg: PdfLayoutConfig): OfficeContentNode[] {
+    const lines = buildLines(runs, pdfCfg);
+    const out: OfficeContentNode[] = [];
+    for (const block of segmentIntoBlocks(lines, pdfCfg)) out.push(...blockToNodes(block, pageCtx, docCtx));
+    return out;
+}
 
-    const keysA = Object.keys(a).sort();
-    const keysB = Object.keys(b).sort();
+/** Sorts artifact text in the top/bottom margins into header/footer paragraph groups. */
+function classifyArtifacts(
+    runs: RawRun[], extract: PageExtract, pageCtx: PageContext, docCtx: DocContext, pdfCfg: PdfLayoutConfig,
+    headers: OfficeContentNode[], footers: OfficeContentNode[],
+): void {
+    if (!runs.length) return;
+    const h = extract.authoredH;
+    const headerRuns = runs.filter(r => r.yTop < 0.15 * h);
+    const footerRuns = runs.filter(r => r.yTop > 0.85 * h);
+    for (const node of geometricNodes(headerRuns, pageCtx, docCtx, pdfCfg)) headers.push(retypeAsHeaderFooter(node, 'header'));
+    for (const node of geometricNodes(footerRuns, pageCtx, docCtx, pdfCfg)) footers.push(retypeAsHeaderFooter(node, 'footer'));
+}
 
-    if (keysA.length !== keysB.length) return false;
+/** Wraps a paragraph produced from margin artifacts as a header/footer node. */
+function retypeAsHeaderFooter(node: OfficeContentNode, type: 'header' | 'footer'): OfficeContentNode {
+    return { type, text: node.text, children: node.children, bounds: node.bounds, metadata: { type: 'default' } };
+}
 
-    for (let i = 0; i < keysA.length; i++) {
-        const key = keysA[i] as keyof TextFormatting;
-        if (keysA[i] !== keysB[i]) return false;
-        if (a[key] !== b[key]) return false;
+/** Encodes/OCRs one image and returns its positioned image node (or null when nothing was emitted). */
+async function emitImage(
+    img: PdfImage, pageNumber: number, index: number, config: FullOfficeParserConfig,
+    attachments: OfficeAttachment[], page: PageContext, pdfCfg: PdfLayoutConfig,
+): Promise<OfficeContentNode | null> {
+    if (!config.extractAttachments) return null;
+    const attachmentName = `pdf_image_p${pageNumber}_${index}.png`;
+    try {
+        const rgba = convertToRgbaBuffer(img.data, img.pixelWidth, img.pixelHeight, img.kind);
+        const png = encodePng(img.pixelWidth, img.pixelHeight, new Uint8Array(rgba));
+        const attachment = createAttachment(attachmentName, png);
+        attachment.mimeType = 'image/png';
+        if (config.ocr && img.pixelWidth >= 10 && img.pixelHeight >= 10) {
+            try { attachment.ocrText = (await performOcr(png, { ...config.ocrConfig })).trim(); }
+            catch (e) { logWarning(OfficeWarningType.OCR_FAILED, config, attachmentName, e); }
+        }
+        attachments.push(attachment);
+        const metadata: ImageMetadata = { attachmentName };
+        const node: OfficeContentNode = { type: 'image', text: attachment.ocrText || '', metadata };
+        if (pdfCfg.includePositions) node.bounds = roundBounds(rotateBoundsToRendered(img.bounds, page.rotation, page.authoredW, page.authoredH));
+        return node;
+    } catch (e) {
+        logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, attachmentName, e);
+        return null;
     }
-
-    return true;
 }

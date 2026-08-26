@@ -93,7 +93,20 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxZipEntries: 10000,
         maxTableCells: 1000000
     },
-    htmlParserConfig: { preserveAttributes: false, preserveIframes: false }
+    htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
+    ignorePositions: false,
+    pdfParserConfig: {
+        password: '',
+        onPassword: () => undefined,
+        useTags: true,
+        detectColumns: true,
+        mergeHyphenatedWords: true,
+        lineToleranceFactor: 0.35,
+        spaceToleranceFactor: 0.25,
+        headingDetection: 'auto',
+        pageRange: '',
+        disableTextNormalization: false
+    }
 };
 
 /**
@@ -318,7 +331,7 @@ function loadGeneratorBaseline(srcExt: string, destFmt: string): GeneratedMetric
 // METRICS EXTRACTION
 // ============================================================================
 
-function extractRoundtripMetrics(ast: OfficeParserAST): RoundtripMetrics {
+async function extractRoundtripMetrics(ast: OfficeParserAST): Promise<RoundtripMetrics> {
     let contentNodes = 0, headings = 0, tables = 0, lists = 0, images = 0;
     let headerCells = 0, embeds = 0, highlightedText = 0, captions = 0;
 
@@ -341,7 +354,7 @@ function extractRoundtripMetrics(ast: OfficeParserAST): RoundtripMetrics {
     }
     traverse(ast.content);
 
-    const textLength = ast.toText().length;
+    const textLength = (await ast.to('text')).value.length;
     return { contentNodes, textLength, headings, tables, lists, images, headerCells, embeds, highlightedText, captions };
 }
 
@@ -1002,7 +1015,7 @@ async function testRoundtrip(srcFmt: string): Promise<GenFeatureTest[]> {
     try {
         // Step 1: Parse original file
         const ast1 = await OfficeParser.parseOffice(srcPath, PARSER_CONFIG);
-        const metrics1 = extractRoundtripMetrics(ast1);
+        const metrics1 = await extractRoundtripMetrics(ast1);
 
         // Step 2: Generate to same format
         const genResult = await OfficeGenerator.generate(ast1 as any, destFmt as any);
@@ -1014,7 +1027,7 @@ async function testRoundtrip(srcFmt: string): Promise<GenFeatureTest[]> {
 
         try {
             const ast2 = await OfficeParser.parseOffice(tmpPath, { ...PARSER_CONFIG, fileType: srcFmt as any });
-            const metrics2 = extractRoundtripMetrics(ast2);
+            const metrics2 = await extractRoundtripMetrics(ast2);
 
             results.push(...compareRoundtripASTs(srcFmt, destFmt, metrics1, metrics2));
         } finally {
@@ -1055,7 +1068,7 @@ async function testCsvRoundtrip(): Promise<GenFeatureTest[]> {
 
     try {
         const ast1 = await OfficeParser.parseOffice(srcPath, { ...PARSER_CONFIG, fileType: 'csv' });
-        const text1 = ast1.toText();
+        const text1 = (await ast1.to('text')).value;
         const lines1 = text1.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
 
         const genResult = await OfficeGenerator.generate(ast1 as any, 'csv', { csvConfig: { mergeSheets: true } } as any);
@@ -1065,7 +1078,7 @@ async function testCsvRoundtrip(): Promise<GenFeatureTest[]> {
 
         try {
             const ast2 = await OfficeParser.parseOffice(tmpPath, { ...PARSER_CONFIG, fileType: 'csv' });
-            const text2 = ast2.toText();
+            const text2 = (await ast2.to('text')).value;
             const lines2 = text2.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
 
             const textRatio = text1.length > 0 ? text2.length / text1.length : 1;
@@ -1550,11 +1563,10 @@ async function runEpubDeterminismTests(): Promise<GenFeatureTest[]> {
 
 /**
  * Regression tests for a reported bug: `.to('text')`/`.to('md')` stripped a document's genuine
- * leading whitespace via an unconditional `.trim()` on the whole accumulated output, while the
- * deprecated synchronous `.toText()` (each parser's hand-rolled toTextSync) never trimmed at all -
- * so migrating from `toText()` to `.to('text')` (the documented replacement) silently changed
- * content. Fixed by trimming only the trailing-newline artifact the block-joining logic produces
- * (TextGenerator.ts / MarkdownGenerator.ts), not the whole string.
+ * leading whitespace via an unconditional `.trim()` on the whole accumulated output. Fixed by
+ * trimming only the trailing-newline artifact the block-joining logic produces (TextGenerator.ts /
+ * MarkdownGenerator.ts), not the whole string. These tests assert the resulting `.to('text')`
+ * behavior directly.
  */
 async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
     const results: GenFeatureTest[] = [];
@@ -1570,13 +1582,11 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
         { type: 'paragraph', children: [{ type: 'text', text: leadingWhitespaceText }] } as OfficeContentNode,
     ];
     const parserConfig: OfficeParserConfig = { newlineDelimiter: '\n' };
-    const toTextSync = () => leadingWhitespaceText;
-    const ast = createAST('docx', {}, content, [], parserConfig, undefined, toTextSync);
+    const ast = createAST('docx', {}, content, [], parserConfig, undefined);
 
-    // --- .to('text') must match the deprecated toText() exactly ---
-    const legacyText = ast.toText();
+    // --- .to('text') emits the paragraph's text verbatim, leading whitespace and all ---
     const { value: newText } = await ast.to('text');
-    results.push(mk('text', 'toText() vs .to(text) leading whitespace parity', JSON.stringify(legacyText), JSON.stringify(newText), newText === legacyText, '.to(text) is documented as the replacement for toText() and must produce the same content'));
+    results.push(mk('text', '.to(text) emits the block text verbatim', JSON.stringify(leadingWhitespaceText), JSON.stringify(newText), newText === leadingWhitespaceText, 'a single-paragraph document should render to exactly its text with no added or stripped characters'));
     results.push(mk('text', '.to(text) preserves leading whitespace', 'starts with "   "', newText.startsWith('   '), newText.startsWith('   '), 'a full trim() would silently strip this as if it were a generation artifact'));
 
     // --- .to('md') must not strip genuine leading whitespace either (defense in depth - see the
@@ -1590,7 +1600,7 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
     const noTrailingJunkContent: OfficeContentNode[] = [
         { type: 'paragraph', children: [{ type: 'text', text: 'No trailing junk please' }] } as OfficeContentNode,
     ];
-    const cleanAst = createAST('docx', {}, noTrailingJunkContent, [], parserConfig, undefined, () => '');
+    const cleanAst = createAST('docx', {}, noTrailingJunkContent, [], parserConfig, undefined);
     const { value: cleanText } = await cleanAst.to('text');
     results.push(mk('text', '.to(text) still strips the block-joiner\'s trailing newline', 'no trailing newline', !cleanText.endsWith('\n'), !cleanText.endsWith('\n'), 'trimEnd() must still clean up the artifact trim() was originally added for'));
 
@@ -1599,7 +1609,7 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
     const trailingSpacesContent: OfficeContentNode[] = [
         { type: 'paragraph', children: [{ type: 'text', text: 'Trailing spaces are content   ' }] } as OfficeContentNode,
     ];
-    const trailingSpacesAst = createAST('docx', {}, trailingSpacesContent, [], parserConfig, undefined, () => '');
+    const trailingSpacesAst = createAST('docx', {}, trailingSpacesContent, [], parserConfig, undefined);
     const { value: trailingSpacesValue } = await trailingSpacesAst.to('text');
     results.push(mk('text', '.to(text) preserves genuine trailing spaces', 'ends with "   "', trailingSpacesValue.endsWith('   '), trailingSpacesValue.endsWith('   '), 'only a run of the exact newline delimiter is a generator artifact - other trailing whitespace is real content'));
 
@@ -1607,9 +1617,9 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
     // The reported symptom was ".to('text') strips leading whitespace" for a Word document that
     // begins with whitespace. In Word that is almost always a leading blank-but-not-empty
     // paragraph, which is a different code path from an indented first line: the generator
-    // discarded any block whose children trimmed to '', while every parser's own toTextSync
-    // filters on `!== ''`. Both readings of the report are covered here.
-    const wordLikeToText = (content: OfficeContentNode[]) => content
+    // discarded any block whose children trimmed to '', when it should keep any block whose text is
+    // not the empty string. Both readings of the report are covered here.
+    const expectedText = (content: OfficeContentNode[]) => content
         .map(c => (c.children || []).map(k => k.text || '').join(''))
         .filter(t => t != '')
         .join('\n');
@@ -1633,33 +1643,33 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
     ];
 
     for (const [label, content] of issue102Cases) {
-        const caseAst = createAST('docx', {}, content, [], parserConfig, undefined, () => wordLikeToText(content));
-        const legacy = caseAst.toText();
+        const caseAst = createAST('docx', {}, content, [], parserConfig, undefined);
+        const expected = expectedText(content);
         const { value: modern } = await caseAst.to('text');
-        results.push(mk('text', `#102: ${label}`, JSON.stringify(legacy), JSON.stringify(modern), legacy === modern,
-            'toText() is the documented equivalent of .to(text); a whitespace-only block must not vanish from one and not the other'));
+        results.push(mk('text', `#102: ${label}`, JSON.stringify(expected), JSON.stringify(modern), modern === expected,
+            'a whitespace-only block is content and must survive; a genuinely empty block must still be dropped'));
     }
 
     // --- Nodes that carry their content in `text` with no children must not vanish ---
     // TextGenerator rendered only `childrenOutput`, so a `chart` (whose entire data series lives in
-    // `text`) and a CSV `comment` were emitted as nothing at all - while the deprecated toText(),
-    // which reads node.text directly, kept both. The fix is generic rather than per-type, so assert
-    // it that way: any leaf-with-text must survive, not just the two we happened to find.
+    // `text`) and a CSV `comment` were emitted as nothing at all. The fix reads node.text as a
+    // fallback, generically rather than per-type, so assert it that way: any leaf-with-text must
+    // survive, not just the two we happened to find.
     const leafTextTypes: Array<OfficeContentNodeType> = ['chart', 'comment'];
     for (const leafType of leafTextTypes) {
         const marker = `SERIES-${leafType.toUpperCase()}-42`;
         const leafAst = createAST('docx', {}, [{ type: leafType, text: marker } as OfficeContentNode],
-            [], parserConfig, undefined, () => marker);
+            [], parserConfig, undefined);
         const { value: leafOut } = await leafAst.to('text');
         results.push(mk('text', `leaf '${leafType}' node text is not dropped`,
             marker, JSON.stringify(leafOut), leafOut.includes(marker),
-            'a node carrying its content in text with no children was rendered as empty; toText() kept it, so following the documented migration lost content'));
+            'a node carrying its content in text with no children must not be rendered as empty'));
     }
     // Children still win when both are present - the fallback must not double-render.
     const bothAst = createAST('docx', {}, [{
         type: 'chart', text: 'RAW-FALLBACK',
         children: [{ type: 'text', text: 'CHILD-TEXT' }],
-    } as OfficeContentNode], [], parserConfig, undefined, () => 'CHILD-TEXT');
+    } as OfficeContentNode], [], parserConfig, undefined);
     const { value: bothOut } = await bothAst.to('text');
     results.push(mk('text', 'node text is a fallback, not an addition',
         'CHILD-TEXT only', JSON.stringify(bothOut),
@@ -1800,7 +1810,7 @@ async function runAllTests(): Promise<void> {
     allResults.push(...dialectResults);
     console.log(dialectResults.filter(r => r.result.status === 'FAIL').length > 0 ? ' ✗' : ' ✓');
 
-    // Whitespace fidelity tests (toText() vs .to('text')/.to('md') parity)
+    // Whitespace fidelity tests (.to('text') / .to('md') parity)
     process.stdout.write('  whitespace fidelity...');
     const whitespaceResults = await runWhitespaceFidelityTests();
     allResults.push(...whitespaceResults);

@@ -31,6 +31,8 @@ const ERROR_MESSAGES: Record<OfficeErrorType, string | ((...args: any[]) => stri
     [OfficeErrorType.IMPROPER_BUFFERS]: `Auto-detection of file type from buffer failed. This can happen if the format lacks magic bytes (like md, html, or csv) or if the detection library is incompatible with your Node.js version. Please provide the 'fileType' hint in your configuration (e.g., { fileType: 'docx' }) to proceed.`,
     [OfficeErrorType.INVALID_INPUT]: `Invalid input type: Expected a Buffer or a valid file path`,
     [OfficeErrorType.PDF_WORKER_MISSING]: `Missing PDF worker configuration. PDF parsing in browser environments requires a worker source. Please provide "pdfWorkerSrc" in your configuration.`,
+    [OfficeErrorType.PDF_PASSWORD_REQUIRED]: `This PDF is password-protected. Provide the password via pdfParserConfig.password to parse it.`,
+    [OfficeErrorType.PDF_PASSWORD_INCORRECT]: `The password provided in pdfParserConfig.password is incorrect for this PDF.`,
     [OfficeErrorType.FEATURE_NOT_SUPPORTED_IN_BROWSER]: (feature: string) => `'${feature}' is not supported in the browser. Browser users must pass file content as Buffer or ArrayBuffer directly.`,
     [OfficeErrorType.INVALID_STYLE_MAPPING]: (mapping: string) => `Invalid style mapping string: ${mapping}`,
     [OfficeErrorType.INVALID_SELECTOR]: (selector: string) => `Invalid selector: ${selector}`,
@@ -72,7 +74,8 @@ const WARNING_MESSAGES: Record<OfficeWarningType, string | ((...args: any[]) => 
     [OfficeWarningType.METADATA_NOT_REPRESENTABLE]: (info: { keys: string[], format: string }) => `Custom metadata ${info.keys.map(k => `'${k}'`).join(', ')} could not be written to ${info.format} output: the format has a fixed metadata vocabulary with no place for caller-defined keys. The named metadata fields (title, author, etc.) were still applied.`,
     [OfficeWarningType.NO_WORKSHEETS_FOUND]: `Workbook contains no worksheet parts (xl/worksheets/). If the workbook holds only chartsheets this is expected and there is simply no cell text to extract; otherwise the file may be incomplete.`,
     [OfficeWarningType.NO_SLIDES_FOUND]: `Presentation contains no slides (ppt/slides/). A legitimately empty presentation produces this too, but if you expected content the file may be incomplete.`,
-    [OfficeWarningType.INVALID_STYLE_MAP_TAG]: (tag: string) => `styleMap output.tag ${JSON.stringify(tag)} is not an allowed element name and was ignored; the node's default tag was used instead. A tag name is written into both the opening and closing tag, so only a known-safe set of block, heading and inline elements is accepted.`
+    [OfficeWarningType.INVALID_STYLE_MAP_TAG]: (tag: string) => `styleMap output.tag ${JSON.stringify(tag)} is not an allowed element name and was ignored; the node's default tag was used instead. A tag name is written into both the opening and closing tag, so only a known-safe set of block, heading and inline elements is accepted.`,
+    [OfficeWarningType.PDF_STRUCT_TREE_UNRELIABLE]: (reason: string) => `PDF tagged-structure tree was not used${reason ? ` (${reason})` : ''}; recovered structure from page geometry instead.`
 };
 
 /**

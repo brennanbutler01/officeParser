@@ -1203,23 +1203,6 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
         }
     }
 
-    const toTextSync = () => content.map(c => {
-        // Recursive text extraction
-        const getText = (node: OfficeContentNode): string => {
-            let t = '';
-            if (node.children) {
-                t += node.children.map(getText).filter(t => t != '').join(!node.children[0]?.children ? '' : config.newlineDelimiter);
-            }
-            else if (node.type === 'break') {
-                t += config.newlineDelimiter;
-            }
-            else
-                t += node.text || '';
-            return t;
-        };
-        return getText(c);
-    }).filter(t => t != '').join(config.newlineDelimiter);
-
     const auxiliaryContent = (headers.length > 0 || footers.length > 0) ? {
         ...(headers.length > 0 ? { headers } : {}),
         ...(footers.length > 0 ? { footers } : {})
@@ -1232,6 +1215,5 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
         attachments,
         config,
         auxiliaryContent,
-        toTextSync
     );
 };

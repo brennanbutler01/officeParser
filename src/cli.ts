@@ -23,6 +23,9 @@
  *   --serializeRawContent     Include stringified XML in metadata (default: true)
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX only, default: false)
+ *   --ignorePositions         Omit per-node page-location data (default: false)
+ *   --pdfParserConfig.password=secret   Password for an encrypted PDF
+ *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
  *   --verbose                 Show full error stack traces and warning logs
  */
 
@@ -37,7 +40,6 @@ let fileArg: string | undefined;
 let showHelp = false;
 let toFlagOption: string | undefined;
 let formatFlagOption: string | undefined;
-let toTextOption: boolean | undefined;
 let verbose = false;
 let outputFile: string | undefined;
 
@@ -49,7 +51,13 @@ const generatorConfig: any = {};
 const knownParserBooleans = new Set([
     'ocr', 'extractAttachments', 'ignoreNotes', 'ignoreComments',
     'ignoreHeadersAndFooters', 'ignoreSlideMasters', 'ignoreInternalLinks',
-    'includeRawContent', 'serializeRawContent', 'preserveXmlWhitespace', 'includeBreakNodes'
+    'includeRawContent', 'serializeRawContent', 'preserveXmlWhitespace', 'includeBreakNodes',
+    'ignorePositions',
+    // Dotted boolean keys are listed so a bare `--group.flag` does not swallow the following file
+    // argument as its value (the isKnownBoolean check keys off the full dotted name).
+    'htmlParserConfig.preserveAttributes',
+    'pdfParserConfig.useTags', 'pdfParserConfig.detectColumns',
+    'pdfParserConfig.mergeHyphenatedWords', 'pdfParserConfig.disableTextNormalization',
 ]);
 
 const knownGeneratorBooleans = new Set([
@@ -63,7 +71,6 @@ const generatorPrefixes = [
 
 // Trackers to detect if deprecated/legacy options were used to log helpful warnings.
 let usedFormat = false;
-let usedToText = false;
 let usedOcrLanguage = false;
 let usedPutNotesAtLast = false;
 let usedOutputErrorToConsole = false;
@@ -99,7 +106,6 @@ for (let i = 0; i < args.length; i++) {
             const isKnownBoolean = knownParserBooleans.has(cleanKey) ||
                                    knownGeneratorBooleans.has(cleanKey) ||
                                    cleanKey === 'verbose' ||
-                                   cleanKey === 'toText' ||
                                    cleanKey === 'outputErrorToConsole';
             const isNextBool = i + 1 < args.length &&
                                (args[i + 1].toLowerCase() === 'true' || args[i + 1].toLowerCase() === 'false');
@@ -129,8 +135,8 @@ for (let i = 0; i < args.length; i++) {
         } else if (cleanKey === 'output') {
             outputFile = val;
         } else if (cleanKey === 'toText') {
-            toTextOption = boolValue !== undefined ? boolValue : true;
-            usedToText = true;
+            console.error('Error: --toText was removed in v8. Use --to=text instead.');
+            process.exit(1);
         } else if (cleanKey === 'verbose') {
             verbose = boolValue !== undefined ? boolValue : true;
         } else if (cleanKey === 'ocrLanguage') {
@@ -185,22 +191,17 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (fileArg && !showHelp) {
-    // Resolve output format prioritizing: --to > --format > --toText
+    // Resolve output format prioritizing: --to > --format
     let outputFormat: string | undefined;
     if (toFlagOption) {
         outputFormat = toFlagOption as UniversalGeneratorFormat;
     } else if (formatFlagOption) {
         outputFormat = formatFlagOption as UniversalGeneratorFormat;
-    } else if (toTextOption === true) {
-        outputFormat = 'text';
     }
 
     // Display warning messages for any deprecated CLI options used
     if (usedFormat) {
         console.warn('Warning: --format is deprecated. Use --to instead.');
-    }
-    if (usedToText) {
-        console.warn('Warning: --toText is deprecated. Use --to=text instead.');
     }
     if (usedOcrLanguage) {
         console.warn('Warning: --ocrLanguage is deprecated. Use --ocrConfig.language instead.');
@@ -313,10 +314,18 @@ if (fileArg && !showHelp) {
     console.log('  --serializeRawContent                       Serialize raw XML content (default: true)');
     console.log('  --preserveXmlWhitespace                     Keep raw formatting space (default: false)');
     console.log('  --includeBreakNodes                         Include break nodes (DOCX only, default: false)');
+    console.log('  --ignorePositions                           Omit per-node page-location data (default: false)');
     console.log('  --verbose                                   Show full error stack traces and warning logs');
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');
     console.log('  --htmlParserConfig.preserveIframes          Keep non-YouTube <iframe> embeds (dropped by default)');
+    console.log('');
+    console.log('PDF Parser Options (pdfParserConfig.*):');
+    console.log('  --pdfParserConfig.password=secret           Password for an encrypted PDF');
+    console.log('  --pdfParserConfig.useTags=false             Ignore the tagged-structure tree, use geometry only (default: true)');
+    console.log('  --pdfParserConfig.detectColumns=false       Disable multi-column reading-order detection (default: true)');
+    console.log('  --pdfParserConfig.pageRange=1-3,7           Parse only the given pages (default: all)');
+    console.log('  --pdfParserConfig.headingDetection=off      Heading detection: auto | font-size | off (default: auto)');
     console.log('');
     console.log('High-Value Generator Options:');
     console.log('  --includeFormatting                         Include font formatting like bold/italic (default: true)');

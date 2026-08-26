@@ -4,6 +4,35 @@ All notable changes to `officeParser` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.0] - 2026-08-27
+
+This release is a ground-up rewrite of PDF text extraction and drops one deprecated API.
+
+### Breaking
+- **`ast.toText()` was removed.** Use `(await ast.to('text')).value`, which produces the same content at its defaults and is configurable (layout, notes, image placeholders). The CLI's `--toText` flag was removed too and now errors with `--toText was removed in v8. Use --to=text instead.`
+- **PDF output changed shape and content by default.** The PDF parser now recovers real structure: tagged PDFs yield `heading` (with correct levels), `table`/`row`/`cell`, `list`, and `note` nodes, and one `paragraph` per paragraph rather than one per visual line. Consumers that relied on the old page-of-flat-paragraphs shape, or on the exact old text, will see different output. Word spacing, column reading order, hyphenation and super/subscripts are all fixed, so the plain text differs as well.
+- **Per-node page geometry is on by default.** PDF text runs, paragraphs, headings, tables, cells and images carry a `bounds` box, and page nodes carry `pageWidth`/`pageHeight`/`rotation`. This enlarges the JSON AST. Set `ignorePositions: true` to omit it and restore the smaller shape.
+- **`.to('text')` for PDFs is now layout-faithful by default.** With `textConfig.preserveLayout` (default true) and geometry present, each page renders as a spatial monospace grid so columns and tables line up like the source page. Set `preserveLayout: false` for flowing text.
+- **Node.js `>=22.13` is now required** (was `>=18`). This matches the bundled `pdfjs-dist`, whose own floor is `>=22.13`, so the previous claim was already unmet on the PDF path.
+
+### Added
+- **Tagged-PDF structure recovery.** When a PDF declares a structure tree and it passes reliability checks, headings, tables, lists and footnotes/endnotes come from the tags. Untagged PDFs fall back to geometric heuristics.
+- **Reading-order recovery** for multi-column and float-beside-text pages, via a recursive XY-cut, so columns and floating tables no longer interleave.
+- **`pdfParserConfig`** (mirrors `htmlParserConfig`): `password` (encrypted PDFs), `onPassword` (a callback to supply a password lazily or interactively, mirroring pdf.js's own hook), `useTags`, `detectColumns`, `mergeHyphenatedWords`, `lineToleranceFactor`, `spaceToleranceFactor`, `headingDetection` (`auto`/`font-size`/`off`), `pageRange` (e.g. `'1-3,7'`), and `disableTextNormalization`.
+- **`maxInlineImageBytes`** generator config (default 2000000): caps the base64 size an image is inlined as a `data:` URI in HTML/Markdown. Oversized images render their text (e.g. OCR text) or a name reference instead.
+- **`ignorePositions`** flat config flag to omit page geometry from the AST.
+- **`textConfig.pageSeparator`** to control the string between rendered PDF pages (default `'\n'`; set `'\f'` for pdftotext-style form feeds).
+- **`OfficeMetadata.language`**, populated from a PDF's `/Lang`; and `metadata.nativeProperties.tagged` plus the raw `markInfo`.
+- **`NodeBounds`** type and error/warning codes `PDF_PASSWORD_REQUIRED`, `PDF_PASSWORD_INCORRECT`, `PDF_STRUCT_TREE_UNRELIABLE`.
+- **`scripts/generate-pdf-fixtures.js`** producing the committed multi-column, rotated and encrypted PDF test fixtures.
+
+### Fixed
+- **Broken and glued PDF words.** Spacing is now inferred from the horizontal gap between text fragments, so runs split by a font or size change (like `super`+`script`) join into `superscript`, and genuinely separate words keep their space.
+- **`ignoreInternalLinks` is now honored for PDF** (internal-destination links were always emitted before), and internal destinations resolve to `#page=N` where cheaply possible.
+- **`ignoreHeadersAndFooters` is now meaningful for PDF**: running headers/footers marked as Artifacts route to `ast.auxiliary` or are dropped.
+- **A worker/memory leak per PDF parse** (the loading task was never destroyed) is fixed.
+- **A scanned PDF could crash downstream Markdown parsers.** PDF images are now encoded as PNG rather than uncompressed BMP (roughly an order of magnitude smaller, and still valid for OCR and embedding), and the HTML/Markdown generators no longer inline images above `maxInlineImageBytes`. A full-page scan previously became a multi-megabyte base64 `data:` URI on a single line, which overflowed the inline lexer in parsers such as `marked`. Oversized images now render their OCR text (Markdown/text) or a name reference (HTML) instead, so scanned documents also produce readable text rather than a giant image blob.
+
 ## [7.8.0] - 2026-08-18
 ### Added
 - **A standard Markdown form for embeds, selected by `mdConfig.dialect.embeds`.** `'html'` (default; the `<div data-youtube-video>` / `<iframe>` single-line block this library has always emitted and re-recognises), `'directive'` (a remark-directive leaf `::youtube[Label]{id=…}` / `::embed[Label]{src=…}`, both parsed and generated), `'link'` (a plain link), or `'thumbnail'` (a YouTube-only clickable preview). `::youtube` parses unconditionally (rendered from a validated id via a fixed template); `::embed` carries an arbitrary src, so it is gated behind `preserveIframes` (the trust input) and stays literal text otherwise. Unknown `::names` stay literal (no catch-all). The default stays `'html'`, so existing output is byte-identical.

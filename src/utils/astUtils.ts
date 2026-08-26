@@ -3,16 +3,15 @@ import { ConversionResult, GeneratorConfig, OfficeAttachment, OfficeAuxiliaryCon
 
 /**
  * Creates a fully-featured OfficeParserAST object with conversion methods.
- * 
- * This helper ensures that all ASTs returned by officeParser have the latest
- * conversion methods (.to()) and maintain backward compatibility (.toText()).
- * 
+ *
+ * This helper ensures that all ASTs returned by officeParser expose the `.to()` conversion method.
+ *
  * @param type - The detected file type
  * @param metadata - Document metadata
  * @param content - Parsed content nodes
  * @param attachments - Extracted attachments
  * @param config - Original parser configuration
- * @param toTextSync - Synchronous text extraction logic (for backward compatibility)
+ * @param auxiliary - Out-of-band content (headers, footers, slide masters)
  * @returns An object conforming to OfficeParserAST
  */
 export function createAST(
@@ -22,7 +21,6 @@ export function createAST(
     attachments: OfficeAttachment[],
     config: OfficeParserConfig,
     auxiliary: OfficeAuxiliaryContent | undefined,
-    toTextSync: () => string
 ): OfficeParserAST {
     return {
         config,
@@ -32,7 +30,6 @@ export function createAST(
         attachments,
         auxiliary,
         warnings: [],
-        toText: toTextSync,
         async to<T extends OfficeParserAST, D extends SupportedDestination<T['type']>>(
             this: T,
             destination: D,

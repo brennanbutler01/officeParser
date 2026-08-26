@@ -110,11 +110,5 @@ export const parseCsv = async (buffer: Buffer, config: FullOfficeParserConfig): 
         rawContent: config.includeRawContent ? textStr : undefined
     };
 
-    const toTextSync = () => {
-        return records.map((record: string[]) => record.filter(cell => cell.trim() !== '').join(config.newlineDelimiter))
-            .join(config.newlineDelimiter)
-            .replace(/\n{3,}/g, '\n\n');
-    };
-
-    return createAST('csv', { title: 'Sheet1' }, [sheetNode], [], config, undefined, toTextSync);
+    return createAST('csv', { title: 'Sheet1' }, [sheetNode], [], config, undefined);
 };

@@ -104,7 +104,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 // already separates cells, while MD/HTML/XLSX hold bare text that would otherwise
                 // collide. Appending unconditionally would push a stray tab onto the formats that
                 // were already correct - measured, not assumed: doing so moved DOCX from 6 to 178
-                // line-edits away from toText().
+                // line-edits away from the reference plain-text output.
                 if (childrenOutput === '' || childrenOutput.endsWith(newline)) return childrenOutput;
                 return childrenOutput + CELL_SEPARATOR;
             }
@@ -123,8 +123,8 @@ export class TextGenerator extends BaseGenerator<'text'> {
             if (blockTypes.includes(node.type)) {
                 // Drop a block only when it is genuinely empty, not merely whitespace. A paragraph
                 // containing spaces is content the document actually holds - discarding it silently
-                // deletes an author's blank-but-not-empty line, and disagreed with every parser's
-                // own toTextSync, which filters on `!== ''` rather than on trimmed emptiness.
+                // deletes an author's blank-but-not-empty line, so filter on `!== ''` rather than on
+                // trimmed emptiness.
                 if (childrenOutput === '') return '';
                 return childrenOutput + (childrenOutput.endsWith(newline) ? '' : newline);
             }
@@ -132,17 +132,25 @@ export class TextGenerator extends BaseGenerator<'text'> {
             // Fallback for node types with no explicit handling above. Prefer rendered children,
             // but fall back to the node's own text when it has none: a `chart` carries its whole
             // data series in `text` with zero child nodes, and a CSV `comment` likewise, so
-            // returning only `childrenOutput` silently dropped both. Every parser's own toTextSync
-            // reads `node.text`, so this is what the rest of the library already does - and it
-            // covers any future node type of the same shape rather than just the two known today.
+            // returning only `childrenOutput` silently dropped both. Reading `node.text` here covers
+            // any future node type of the same shape rather than just the two known today.
             if (!childrenOutput && node.text) {
                 return node.text + (node.text.endsWith(newline) ? '' : newline);
             }
             return childrenOutput;
         };
 
+        const pageSeparator = this.config.textConfig.pageSeparator;
+        let firstTopLevel = true;
         for (const node of this.ast.content) {
-            output += await this.processNodeRecursive(node, processor);
+            // PDF pages with geometry render as a spatial grid (preserveLayout); everything else flows.
+            const useLayout = node.type === 'page' && this.config.textConfig.preserveLayout && this.pageHasLayout(node);
+            const piece = useLayout
+                ? await this.renderPageLayout(node, processor, newline)
+                : await this.processNodeRecursive(node, processor);
+            if (!firstTopLevel && node.type === 'page' && piece) output += pageSeparator;
+            output += piece;
+            firstTopLevel = false;
         }
 
         if (this.collectedNotes.length > 0 && this.config.textConfig.renderNotes) {
@@ -168,6 +176,119 @@ export class TextGenerator extends BaseGenerator<'text'> {
             value: output.replace(leadingOrTrailingArtifact, ''),
             messages: this.messages
         };
+    }
+
+    /** True when a page carries the geometry needed for spatial layout rendering. */
+    private pageHasLayout(page: OfficeContentNode): boolean {
+        if (!(page.metadata as any)?.pageWidth) return false;
+        let found = false;
+        const check = (n: OfficeContentNode) => {
+            if (found) return;
+            if (n.type === 'text' && n.bounds && (n.text || '').trim()) { found = true; return; }
+            for (const c of n.children || []) check(c);
+        };
+        check(page);
+        return found;
+    }
+
+    /**
+     * Renders one PDF page as a spatial monospace grid: each text run is placed at the column its
+     * page x maps to, so columns and tables line up much like the original page (pdftotext -layout).
+     * Falls back to flowing the page's children when the geometry is too degenerate to grid.
+     */
+    private async renderPageLayout(page: OfficeContentNode, processor: any, newline: string): Promise<string> {
+        const override = await this.handleOnNode(page);
+        if (override === false) return '';
+        if (typeof override === 'string') return override + (override.endsWith(newline) ? '' : newline);
+
+        interface Atom { text: string; x: number; y: number; w: number; h: number; }
+        const atoms: Atom[] = [];
+        const collect = async (n: OfficeContentNode): Promise<void> => {
+            const ov = await this.handleOnNode(n);
+            if (ov === false) return;
+            if (typeof ov === 'string') {
+                if (n.bounds && ov) atoms.push({ text: ov, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
+                return;
+            }
+            if (n.type === 'text' && n.bounds && (n.text || '').length) {
+                atoms.push({ text: n.text!, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
+            } else if (n.type === 'image') {
+                if (this.config.includeImages && n.bounds) {
+                    const m = n.metadata as any;
+                    atoms.push({ text: `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
+                }
+                return;
+            }
+            for (const c of n.children || []) await collect(c);
+        };
+        for (const c of page.children || []) await collect(c);
+
+        // Fall back to flow when there is nothing to place or the character width is degenerate.
+        const flowFallback = async (): Promise<string> => {
+            let s = '';
+            for (const c of page.children || []) s += await this.processNodeRecursive(c, processor);
+            return s;
+        };
+        if (!atoms.length) return flowFallback();
+
+        const charWidths = atoms.filter(a => a.text.trim().length >= 3).map(a => a.w / a.text.length);
+        const charW = TextGenerator.median(charWidths);
+        if (!(charW >= 2 && charW <= 20)) return flowFallback();
+
+        const sortedX = atoms.map(a => a.x).sort((p, q) => p - q);
+        const marginX = sortedX[Math.floor(0.02 * sortedX.length)] ?? sortedX[0];
+        const pageWidth = (page.metadata as any).pageWidth as number;
+        const maxCols = Math.ceil(pageWidth / charW) * 2;
+
+        // Cluster atoms into rows by vertical band overlap.
+        atoms.sort((a, b) => a.y - b.y || a.x - b.x);
+        const rows: Atom[][] = [];
+        for (const a of atoms) {
+            const row = rows[rows.length - 1];
+            if (row) {
+                const ref = row[0];
+                const centerA = a.y + a.h / 2;
+                const centerRef = ref.y + ref.h / 2;
+                if (Math.abs(centerA - centerRef) < 0.6 * Math.min(a.h, ref.h)) { row.push(a); continue; }
+            }
+            rows.push([a]);
+        }
+
+        const rowStrings = rows.map(row => {
+            row.sort((a, b) => a.x - b.x);
+            let line = '';
+            for (const a of row) {
+                let col = Math.round((a.x - marginX) / charW);
+                if (col < 0) col = 0;
+                if (col > maxCols) col = maxCols;
+                if (col > line.length) line += ' '.repeat(col - line.length);
+                else if (line.length > 0) line += ' ';
+                line += a.text;
+            }
+            return line.replace(/\s+$/, '');
+        });
+
+        const centers = rows.map(r => r[0].y + r[0].h / 2);
+        const deltas: number[] = [];
+        for (let i = 1; i < centers.length; i++) deltas.push(centers[i] - centers[i - 1]);
+        const pitch = TextGenerator.median(deltas) || 12;
+
+        let out = '';
+        for (let i = 0; i < rowStrings.length; i++) {
+            if (i > 0) {
+                out += newline;
+                if (centers[i] - centers[i - 1] > 1.8 * pitch) out += newline;
+            }
+            out += rowStrings[i];
+        }
+        return out + newline;
+    }
+
+    /** Median of a numeric list (0 for empty). */
+    private static median(values: number[]): number {
+        if (!values.length) return 0;
+        const s = [...values].sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
     }
 
     private async renderTable(node: OfficeContentNode, processor: any, newline: string): Promise<string> {

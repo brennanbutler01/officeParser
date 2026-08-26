@@ -35,7 +35,6 @@ function astWith(content: any[]): OfficeParserAST {
         metadata: { title: 'Security Test' },
         attachments: [],
         content,
-        toText: () => '',
         getImages: () => []
     } as any;
 }
@@ -834,7 +833,7 @@ async function odfRepeatExpansionTests() {
         `</office:spreadsheet>`);
     const gWarns: any[] = [];
     const gAst = await OfficeParser.parseOffice(garbage, { fileType: 'ods', onWarning: (w: any) => gWarns.push(w), decompressionLimits: { maxTableCells: LIMIT } } as any);
-    const gText = gAst.toText();
+    const gText = (await gAst.to('text')).value;
     check('odf: a garbage repeat does not drain the budget', gText.includes('LEGIT'),
         'a non-numeric repeat count consumed the budget and dropped a later legitimate cell');
     check('odf: a garbage repeat does not spuriously warn',
@@ -1115,16 +1114,16 @@ async function missingMainPartTests() {
         'word/document.xml': zipEnc('<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello docx</w:t></w:r></w:p></w:body></w:document>'),
     }));
     const docxAst = await OfficeParser.parseOffice(docx, { fileType: 'docx', ...QUIET } as any);
-    check('missing part: a minimal complete docx still parses', docxAst.toText().includes('Hello docx'),
-        `got ${JSON.stringify(docxAst.toText())}`);
+    check('missing part: a minimal complete docx still parses', (await docxAst.to('text')).value.includes('Hello docx'),
+        `got ${JSON.stringify((await docxAst.to('text')).value)}`);
 
     const pptx = Buffer.from(zipSync({
         'ppt/presentation.xml': zipEnc('<p:presentation/>'),
         'ppt/slides/slide1.xml': zipEnc('<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello slide</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>'),
     }));
     const pptxAst = await OfficeParser.parseOffice(pptx, { fileType: 'pptx', ...QUIET } as any);
-    check('missing part: a minimal complete pptx still parses', pptxAst.toText().includes('Hello slide'),
-        `got ${JSON.stringify(pptxAst.toText())}`);
+    check('missing part: a minimal complete pptx still parses', (await pptxAst.to('text')).value.includes('Hello slide'),
+        `got ${JSON.stringify((await pptxAst.to('text')).value)}`);
     // ppt/presentation.xml is extracted for the check above, and the slide loop treats every
     // unrecognized file as a slide, so it must be skipped explicitly or it becomes an extra
     // empty slide in the deck.
@@ -1136,8 +1135,8 @@ async function missingMainPartTests() {
         'content.xml': zipEnc('<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>Hello odt</text:p></office:text></office:body></office:document-content>'),
     }));
     const odtAst = await OfficeParser.parseOffice(odt, { fileType: 'odt', ...QUIET } as any);
-    check('missing part: a minimal complete odt still parses', odtAst.toText().includes('Hello odt'),
-        `got ${JSON.stringify(odtAst.toText())}`);
+    check('missing part: a minimal complete odt still parses', (await odtAst.to('text')).value.includes('Hello odt'),
+        `got ${JSON.stringify((await odtAst.to('text')).value)}`);
 }
 
 async function incompleteArchiveWarningTests() {
@@ -1187,8 +1186,8 @@ async function odfTypeResolutionTests() {
     const hinted = await OfficeParser.parseOffice(noMimetype, { fileType: 'ods', ...QUIET } as any);
     check('odf type: a caller hint resolves a spreadsheet with no mimetype entry', hinted.type === 'ods',
         `got type ${hinted.type}`);
-    check('odf type: that spreadsheet\'s cells are actually parsed', hinted.toText().includes('CellValue'),
-        `got ${JSON.stringify(hinted.toText())}`);
+    check('odf type: that spreadsheet\'s cells are actually parsed', (await hinted.to('text')).value.includes('CellValue'),
+        `got ${JSON.stringify((await hinted.to('text')).value)}`);
 
     // When the archive declares its own type, that stays authoritative over the hint.
     const withMimetype = Buffer.from(zipSync({ mimetype: zipEnc(ODS_MIME), 'content.xml': spreadsheetBody }));
@@ -1203,8 +1202,8 @@ async function odfTypeResolutionTests() {
     try {
         const fromPath = await OfficeParser.parseOffice(tmp, QUIET);
         check('odf type: the file extension resolves a spreadsheet with no mimetype entry',
-            fromPath.type === 'ods' && fromPath.toText().includes('CellValue'),
-            `got type ${fromPath.type}, text ${JSON.stringify(fromPath.toText())}`);
+            fromPath.type === 'ods' && (await fromPath.to('text')).value.includes('CellValue'),
+            `got type ${fromPath.type}, text ${JSON.stringify((await fromPath.to('text')).value)}`);
     } finally { fs.unlinkSync(tmp); }
 
     // Supplying that type must not write it back into the caller's config, or every later parse
@@ -1227,8 +1226,8 @@ async function odfTypeResolutionTests() {
         reused.fileType === null, `caller config fileType became ${JSON.stringify(reused.fileType)}`);
     const afterOdt = await OfficeParser.parseOffice(docx, { ...reused, fileType: 'docx' });
     check('odf type: a reused config still routes a later docx to the Word parser',
-        afterOdt.type === 'docx' && afterOdt.toText().includes('Word doc'),
-        `got type ${afterOdt.type}, text ${JSON.stringify(afterOdt.toText())}`);
+        afterOdt.type === 'docx' && (await afterOdt.to('text')).value.includes('Word doc'),
+        `got type ${afterOdt.type}, text ${JSON.stringify((await afterOdt.to('text')).value)}`);
 }
 
 async function configOwnershipTests() {
