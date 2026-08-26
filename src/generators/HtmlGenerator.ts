@@ -768,6 +768,11 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     // event handler, and a CSS `url(...)` would fetch a remote resource.
                     const safeWidth = sanitizeCssValue(meta.width);
                     if (safeWidth) imgStyleParts.push(`width: ${safeWidth}`);
+                } else if (node.bounds && node.bounds.width > 0) {
+                    // PDF images carry their on-page size in points; use it so a high-DPI scanned page
+                    // does not render at its intrinsic pixel size. Only PDF-sourced nodes have bounds,
+                    // so images from other formats are unaffected.
+                    imgStyleParts.push(`width: ${Math.round(node.bounds.width)}pt`, 'max-width: 100%');
                 }
                 if (meta?.align) {
                     imgDataAttrs += ` data-align="${this.escape(meta.align)}"`;
@@ -1190,7 +1195,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             case 'page': {
                 const meta = node.metadata as PageMetadata;
                 const pageNum = this.escape(String(meta?.pageNumber || ''));
-                return `${extraAnchors}<section class="page" data-page-num="${pageNum}"${idAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</section>`;
+                // Emit an id of `page=N` so internal links from parsed PDFs (`href="#page=N"`) resolve
+                // in the generated HTML and printed PDF. If the section already has an id, add a
+                // separate leading anchor instead of overwriting it.
+                const pageAnchor = idAttr ? `<a id="page=${pageNum}"></a>` : '';
+                const pageIdAttr = idAttr || ` id="page=${pageNum}"`;
+                return `${extraAnchors}${pageAnchor}<section class="page" data-page-num="${pageNum}"${pageIdAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</section>`;
             }
             case 'note': {
                 const meta = node.metadata as NoteMetadata;

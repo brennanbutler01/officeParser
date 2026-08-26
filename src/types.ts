@@ -25,6 +25,8 @@ export enum OfficeErrorType {
     PDF_PASSWORD_REQUIRED = 'PDF_PASSWORD_REQUIRED',
     /** The supplied password did not decrypt the PDF */
     PDF_PASSWORD_INCORRECT = 'PDF_PASSWORD_INCORRECT',
+    /** PDF generation failed (e.g. the puppeteer engine is unavailable or rendering errored) */
+    PDF_GENERATION_FAILED = 'PDF_GENERATION_FAILED',
     /** Attempted to use Node.js-only features in a browser environment */
     FEATURE_NOT_SUPPORTED_IN_BROWSER = 'FEATURE_NOT_SUPPORTED_IN_BROWSER',
     /** Style mapping string is malformed */
@@ -1109,6 +1111,17 @@ export interface HtmlGeneratorConfig {
  * Maps closely to Puppeteer's PDF options.
  */
 export interface PdfGeneratorConfig {
+    /**
+     * Emit a tagged (accessible / PDF-UA-friendly) PDF, so screen readers can follow the document
+     * structure. Passed through to the rendering engine; ignored by engines that do not support it.
+     * Defaults to true.
+     */
+    tagged?: boolean;
+    /**
+     * Emit a bookmark outline built from the document's headings (experimental in the rendering
+     * engine). Defaults to false.
+     */
+    outline?: boolean;
     /** Paper format. Defaults to 'A4'. */
     format?: 'letter' | 'legal' | 'tabloid' | 'ledger' | 'a0' | 'a1' | 'a2' | 'a3' | 'a4' | 'a5' | 'a6' | 'Letter' | 'Legal' | 'Tabloid' | 'Ledger' | 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5' | 'A6';
     /** Paper width, accepts values labeled with units (e.g., '5in', '3cm') or numbers (in pixels). */

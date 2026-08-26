@@ -125,6 +125,8 @@ const DEFAULT_HTML_GENERATOR_CONFIG: DeepRequired<HtmlGeneratorConfig> = {
  * Default configuration for PDF generation.
  */
 const DEFAULT_PDF_GENERATOR_CONFIG: DeepRequired<PdfGeneratorConfig> = {
+    tagged: true,
+    outline: false,
     format: 'A4',
     width: '',
     height: '',

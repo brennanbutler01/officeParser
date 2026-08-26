@@ -1,6 +1,6 @@
-import { ConversionResult, GeneratorConfig, OfficeParserAST, OfficeWarningType } from '../types.js';
+import { ConversionResult, GeneratorConfig, OfficeErrorType, OfficeParserAST, OfficeWarningType } from '../types.js';
 import { isBrowser } from '../utils/envUtils.js';
-import { getAbortError } from '../utils/errorUtils.js';
+import { getAbortError, getOfficeError } from '../utils/errorUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { HtmlGenerator } from './HtmlGenerator.js';
 
@@ -148,6 +148,10 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
                 displayHeaderFooter: pdfConfig.displayHeaderFooter,
                 headerTemplate: pdfConfig.headerTemplate,
                 footerTemplate: pdfConfig.footerTemplate,
+                // Emit a tagged (accessible) PDF and, optionally, a bookmark outline from the
+                // document headings. Ignored by older Puppeteer versions that lack these options.
+                tagged: pdfConfig.tagged,
+                outline: pdfConfig.outline,
             });
 
             await browser.close();
@@ -173,15 +177,9 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
             if (signal?.aborted) {
                 throw getAbortError();
             }
-            if (err.message && (err.message.includes('timeout') || err.message.includes('Timeout'))) {
-                this.warn(OfficeWarningType.PAGE_LOAD_FAILED, `PDF generation timed out: ${err.message}`);
-            } else {
-                this.warn(OfficeWarningType.DEPENDENCY_LOAD_FAILED, `puppeteer. Please install it with 'npm install puppeteer'. Error: ${err.message}`);
-            }
-            return {
-                value: new Uint8Array(),
-                messages: this.messages
-            };
+            // Never return an empty PDF: a zero-byte buffer looks like success to callers who don't
+            // inspect `messages` and silently produces broken files. Fail loudly with a typed error.
+            throw getOfficeError(OfficeErrorType.PDF_GENERATION_FAILED, this.ast.config, err?.message || String(err));
         } finally {
             if (signal) {
                 signal.removeEventListener('abort', onAbort);
