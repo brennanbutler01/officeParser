@@ -760,6 +760,16 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     // can tell "genuinely empty" from "font could not be decoded" and reach for OCR.
     warnIfEncodingSuspect(allRuns, config);
 
+    // Warn when a document yields essentially no text and OCR is off: it is very likely scanned, and
+    // silent empty output is otherwise indistinguishable from a genuine failure. Only when OCR is off,
+    // since with OCR the caller is already handling image-only content.
+    if (!config.ocr) {
+        const textChars = allRuns.reduce((sum, r) => sum + r.text.replace(/\s/g, '').length, 0);
+        if (numPages > 0 && textChars < Math.max(10, numPages)) {
+            logWarning(OfficeWarningType.PDF_NO_TEXT_EXTRACTED, config, numPages);
+        }
+    }
+
     // Tagged-structure trust: the document must declare it is tagged and not flag it as suspect.
     const docTagged = !!(markInfo && markInfo.Marked);
     const docTrusted = docTagged && !markInfo.Suspects;

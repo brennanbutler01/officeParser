@@ -109,7 +109,9 @@ export enum OfficeWarningType {
     /** A PDF's tagged-structure tree was absent, incomplete, or flagged unreliable; heuristics were used instead */
     PDF_STRUCT_TREE_UNRELIABLE = 'PDF_STRUCT_TREE_UNRELIABLE',
     /** A PDF page yielded mostly unmappable glyphs (broken/missing ToUnicode); extracted text is likely garbage */
-    PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT'
+    PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT',
+    /** A PDF yielded essentially no text; it is very likely a scanned/image-only document needing OCR */
+    PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED'
 }
 
 /**

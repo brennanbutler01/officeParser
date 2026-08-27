@@ -215,6 +215,39 @@ function classifyListType(label: string): 'ordered' | 'unordered' {
     return 'unordered';
 }
 
+/** Converts a roman numeral to its integer value, or 0 if it is not a valid roman numeral. */
+function romanToInt(s: string): number {
+    const map: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+    const t = s.toLowerCase();
+    let total = 0, prev = 0;
+    for (let i = t.length - 1; i >= 0; i--) {
+        const v = map[t[i]];
+        if (!v) return 0;
+        total += v < prev ? -v : v;
+        prev = v;
+    }
+    return total;
+}
+
+/**
+ * Parses the number an ordered-list label represents: decimal ("3."), multi-level decimal ("1.2.",
+ * uses the last component), roman ("iii."), or single alpha ("c." -> 3). Returns null when the label
+ * carries no recognizable number.
+ */
+function parseListNumber(label: string): number | null {
+    const t = label.trim();
+    if (!t) return null;
+    // All-decimal (possibly multi-level like "1.2."): use the last numeric component.
+    if (/^[\d.()\[\]\s]+$/.test(t)) {
+        const parts = t.match(/\d+/g);
+        if (parts && parts.length) return parseInt(parts[parts.length - 1], 10);
+    }
+    const core = t.replace(/^[(\[]+/, '').replace(/[.)\]\s]+$/, '');
+    if (/^[ivxlcdm]+$/i.test(core)) { const n = romanToInt(core); return n > 0 ? n : null; }
+    if (/^[a-z]$/i.test(core)) return core.toLowerCase().charCodeAt(0) - 96; // a -> 1
+    return null;
+}
+
 function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeContentNode[] {
     const items: OfficeContentNode[] = [];
     const listId = `pdf-list-${++ctx.listCounter.n}`;
@@ -245,12 +278,22 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
                 nested.push(...buildList(part, ctx, indent + 1));
             }
         }
+        const listType = classifyListType(label);
+        // Number ordered items from the label the PDF actually rendered (decimal "3.", roman "iii.",
+        // or alpha "c.") rather than the positional index, so a list interrupted by a paragraph and
+        // split into two <L> elements resumes its numbering (3, 4) instead of restarting at 1. Falls
+        // back to the position when the label carries no parseable number.
+        let itemIndex = idx;
+        if (listType === 'ordered') {
+            const n = parseListNumber(label);
+            if (n !== null && n >= 1) itemIndex = n - 1;
+        }
         const meta: ListMetadata = {
-            listType: classifyListType(label),
+            listType,
             indentation: indent,
             alignment: 'left',
             listId,
-            itemIndex: idx,
+            itemIndex,
         };
         const item: OfficeContentNode = {
             type: 'list',
