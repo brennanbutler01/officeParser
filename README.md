@@ -1397,7 +1397,7 @@ const ast = await officeParser.parseOffice(pdfArrayBuffer);
 
 // Or specify your own:
 const ast = await officeParser.parseOffice(pdfArrayBuffer, {
-    pdfWorkerSrc: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs'
+    pdfWorkerSrc: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs'
 });
 ```
 
