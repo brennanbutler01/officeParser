@@ -402,9 +402,18 @@ async function collectPage(
     const textContent = await page.getTextContent({ includeMarkedContent: true, disableNormalization: pdfCfg.disableTextNormalization });
     const styles: Record<string, any> = textContent.styles || {};
 
-    // Resolve every font on the page once (document-scoped cache).
+    // Resolve every font on the page once (document-scoped cache). Real font objects (with their
+    // names, from which bold/italic are derived) only populate `page.commonObjs` during
+    // `getOperatorList()`, never during `getTextContent()`, so fetch the operator list first when a
+    // page introduces a not-yet-resolved font. Fonts are document-scoped, so in practice only the
+    // first page or two pay this; the list is reused for image extraction below.
     const seen = new Set<string>();
     for (const item of textContent.items) if (isTextItem(item) && item.fontName) seen.add(item.fontName);
+    const needFonts = [...seen].some(k => !fontCache.has(k));
+    let ops: any = null;
+    if (needFonts || config.extractAttachments || config.ocr) {
+        try { ops = await page.getOperatorList(); } catch { ops = null; }
+    }
     for (const key of seen) if (!fontCache.has(key)) fontCache.set(key, await resolveFont(key, page.commonObjs, styles));
 
     const links = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache);
@@ -457,7 +466,7 @@ async function collectPage(
     }
 
     const images = (config.extractAttachments || config.ocr)
-        ? await collectImages(pdfjs, page, layoutViewport, config, pageNumber)
+        ? await collectImages(pdfjs, page, layoutViewport, config, pageNumber, ops)
         : [];
 
     let structTree: unknown | null = null;
@@ -471,10 +480,10 @@ async function collectPage(
 }
 
 /** Extracts images from a page's operator list, positioned in layout-viewport space. */
-async function collectImages(pdfjs: any, page: any, viewport: any, config: FullOfficeParserConfig, pageNumber: number): Promise<PdfImage[]> {
+async function collectImages(pdfjs: any, page: any, viewport: any, config: FullOfficeParserConfig, pageNumber: number, prefetchedOps?: any): Promise<PdfImage[]> {
     const images: PdfImage[] = [];
     try {
-        const ops = await page.getOperatorList();
+        const ops = prefetchedOps || await page.getOperatorList();
         const fnArray = ops.fnArray;
         const argsArray = ops.argsArray;
         for (let j = 0; j < fnArray.length; j++) {
