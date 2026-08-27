@@ -294,6 +294,30 @@ async function resolveDest(dest: string | unknown[], pdfDocument: any, cache: Ma
     return '#internal';
 }
 
+/**
+ * Splits an item's character range into segments by the annotation rects that overlap it, assigning
+ * each character the link whose rect contains its (proportionally-estimated) centre. Adjacent
+ * same-link characters coalesce, so a link covers only the text it spans rather than the whole run.
+ */
+function segmentByLinks(x: number, width: number, yTop: number, height: number, len: number, links: ResolvedLink[]): { start: number; end: number; link?: TextMetadata }[] {
+    const charLink: (TextMetadata | undefined)[] = new Array(len).fill(undefined);
+    for (const l of links) {
+        const [lx1, ly1, lx2, ly2] = l.rect;
+        if (!(yTop < ly2 && yTop + height > ly1)) continue; // require vertical overlap
+        for (let i = 0; i < len; i++) {
+            if (charLink[i]) continue;
+            const cx = x + ((i + 0.5) / len) * width;
+            if (cx >= lx1 && cx <= lx2) charLink[i] = l.meta;
+        }
+    }
+    const segs: { start: number; end: number; link?: TextMetadata }[] = [];
+    let s = 0;
+    for (let i = 1; i <= len; i++) {
+        if (i === len || charLink[i] !== charLink[s]) { segs.push({ start: s, end: i, link: charLink[s] }); s = i; }
+    }
+    return segs;
+}
+
 /** Finds the hyperlink metadata for a run by intersecting its box with the page's link rects. */
 function linkForBox(x: number, yTop: number, w: number, h: number, links: ResolvedLink[]): TextMetadata | undefined {
     const minX = x, maxX = x + w, minY = yTop, maxY = yTop + h;
@@ -449,20 +473,33 @@ async function collectPage(
         }
 
         const dir = (item.dir === 'rtl' || item.dir === 'ttb') ? item.dir : 'ltr';
-        const link = linkForBox(box.x, box.yTop, box.width, box.height, links);
+        const angle = box.angle === -1 ? 0 : box.angle;
 
-        runs.push({
-            text: item.str,
-            x: box.x, yTop: box.yTop, yBaseline: box.yBaseline, width: box.width, height: box.height,
-            fontSize: box.fontSize,
-            fontKey: item.fontName,
-            dir,
-            hasEOL: !!item.hasEOL,
-            angle: box.angle === -1 ? 0 : box.angle,
-            mcid, inArtifact,
-            formatting,
-            link,
-        });
+        // Split the item at annotation x-boundaries so a link only covers the characters it actually
+        // spans, instead of the whole phrase run it merely grazes. Adjacent unlinked segments re-merge
+        // in the line builder. Only horizontal runs are split; others are tagged whole.
+        const len = item.str.length;
+        const segments = (angle === 0 && len > 0)
+            ? segmentByLinks(box.x, box.width, box.yTop, box.height, len, links)
+            : [{ start: 0, end: len, link: linkForBox(box.x, box.yTop, box.width, box.height, links) }];
+        for (const seg of segments) {
+            const segText = item.str.slice(seg.start, seg.end);
+            if (!segText) continue;
+            const segX = box.x + (len ? (seg.start / len) * box.width : 0);
+            const segW = len ? ((seg.end - seg.start) / len) * box.width : box.width;
+            runs.push({
+                text: segText,
+                x: segX, yTop: box.yTop, yBaseline: box.yBaseline, width: segW, height: box.height,
+                fontSize: box.fontSize,
+                fontKey: item.fontName,
+                dir,
+                hasEOL: !!item.hasEOL && seg.end === len,
+                angle,
+                mcid, inArtifact,
+                formatting,
+                link: seg.link,
+            });
+        }
     }
 
     const images = (config.extractAttachments || config.ocr)

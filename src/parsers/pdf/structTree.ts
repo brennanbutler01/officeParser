@@ -336,6 +336,21 @@ function buildNote(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
         children.push(p);
     }
     const meta: NoteMetadata = { noteType: 'footnote' };
+    // Strip the leading marker glyph the PDF renders inside the note body ("1 In paged media…") so it
+    // is not duplicated next to the generated citation ("[^1]: 1 In paged…"); keep it as the note id.
+    const markerRe = /^\s*([0-9]+|[ivxlcdm]+|[a-z]|[*†‡§])[.)]?\s+/i;
+    const firstText = children.map(n => n.text || '').join(' ').trim();
+    const mk = firstText.match(markerRe);
+    if (mk) {
+        meta.noteId = mk[1];
+        const strip = (n: OfficeContentNode): boolean => {
+            if (n.type === 'text' && n.text) { const m = n.text.match(markerRe); if (m) { n.text = n.text.slice(m[0].length); return true; } return false; }
+            if (n.text) { const m = n.text.match(markerRe); if (m) n.text = n.text.slice(m[0].length); }
+            for (const c of n.children || []) if (strip(c)) return true;
+            return false;
+        };
+        for (const child of children) if (strip(child)) break;
+    }
     const note: OfficeContentNode = { type: 'note', text: children.map(n => n.text || '').join(' ').trim(), children, metadata: meta };
     const b = unionAll(children.map(n => n.bounds));
     if (b) note.bounds = b;
