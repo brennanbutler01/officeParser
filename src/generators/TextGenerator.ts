@@ -62,7 +62,12 @@ export class TextGenerator extends BaseGenerator<'text'> {
             if (node.type === 'image') {
                 if (!this.config.includeImages) return '';
                 const meta = node.metadata as any;
-                return `[Image: ${meta?.altText || meta?.attachmentName || 'Untitled'}]${newline}`;
+                const label = `[Image: ${meta?.altText || meta?.attachmentName || 'Untitled'}]`;
+                // Surface a PDF image's OCR text so a scanned page produces readable text instead of
+                // only a placeholder. Scoped to PDF via `bounds` (only PDF images carry it), so images
+                // from other formats are unaffected.
+                const ocr = node.bounds ? (node.text || '').trim() : '';
+                return ocr ? `${label}${newline}${ocr}${newline}` : `${label}${newline}`;
             }
 
             if (node.type === 'embed') {
