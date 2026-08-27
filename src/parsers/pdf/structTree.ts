@@ -79,6 +79,13 @@ function walkNode(node: StructNode, ctx: WalkCtx, sectionDepth: number): OfficeC
     switch (r) {
         case 'H': return blockWithNotes(node, ctx, Math.min(6, Math.max(1, sectionDepth)));
         case 'P': case 'Caption': case 'Title': case 'Lbl': case 'LBody': return blockWithNotes(node, ctx, 0);
+        // A table-of-contents entry (TOCI) wraps a Link + Span + leader dots + page number; emit it as
+        // one paragraph instead of letting the default recursion shatter each content leaf into its own.
+        case 'TOCI': {
+            const nodes = blockWithNotes(node, ctx, 0);
+            for (const n of nodes) stripDotLeaders(n);
+            return nodes;
+        }
         case 'Table': { const t = buildTable(node, ctx); return t ? [t] : []; }
         case 'L': return buildList(node, ctx, 0);
         case 'Note': case 'FENote': {
@@ -211,8 +218,19 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
 /** Classifies a list marker label into an ordered/unordered list type. */
 function classifyListType(label: string): 'ordered' | 'unordered' {
     const t = label.trim();
-    if (/^\(?\d+[.)]?$/.test(t) || /^[a-zA-Z][.)]$/.test(t) || /^[ivxlcdmIVXLCDM]+[.)]$/.test(t)) return 'ordered';
+    // Decimal (incl. multilevel "1.1."), single alpha "a.", or roman "iii." markers are ordered.
+    if (/^\(?\d+(\.\d+)*[.)]?$/.test(t) || /^[a-zA-Z][.)]$/.test(t) || /^[ivxlcdmIVXLCDM]+[.)]$/.test(t)) return 'ordered';
     return 'unordered';
+}
+
+/** Collapses TOC dot-leaders ("Title ...... 3" -> "Title 3") in a node's text and text-run children. */
+function stripDotLeaders(node: OfficeContentNode): void {
+    const clean = (s: string | undefined) => (s || '').replace(/\s*\.{4,}\s*/g, ' ');
+    if (node.text) node.text = clean(node.text).trim();
+    for (const c of node.children || []) {
+        if (c.type === 'text') c.text = clean(c.text);
+        else stripDotLeaders(c);
+    }
 }
 
 /** Converts a roman numeral to its integer value, or 0 if it is not a valid roman numeral. */

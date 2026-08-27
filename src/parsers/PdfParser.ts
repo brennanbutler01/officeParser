@@ -649,7 +649,10 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
         title: info?.Title as string | undefined,
         author: info?.Author as string | undefined,
         subject: info?.Subject as string | undefined,
-        description: info?.Keywords as string | undefined,
+        // PDF /Subject is the document description; /Keywords are the keywords (previously /Keywords
+        // was wrongly used as the description and keywords were dropped).
+        description: info?.Subject as string | undefined,
+        keywords: info?.Keywords as string | undefined,
         created: parseOfficeDate(info?.CreationDate as string | undefined),
         modified: parseOfficeDate(info?.ModDate as string | undefined),
     };

@@ -190,8 +190,12 @@ function clusterToLine(clusterRuns: RawRun[], cfg: PdfLayoutConfig): PdfLine {
         const fmt: TextFormatting = { ...r.formatting };
         const off = baseline - r.yBaseline; // >0 raised, <0 lowered
         const rel = lineFontSize ? Math.abs(off) / lineFontSize : 0;
-        if (r.fontSize <= 0.75 * lineFontSize && rel >= 0.15 && rel <= 0.7) {
-            if (off > 0) fmt.superscript = true; else fmt.subscript = true;
+        // A small-font run offset from the baseline is super/subscript. Real producers lower a
+        // subscript far less than they raise a superscript (often ~0.04em vs ~0.3em), so use a much
+        // smaller threshold for the downward case.
+        if (r.fontSize <= 0.75 * lineFontSize && rel <= 0.7) {
+            if (off > 0 && rel >= 0.15) fmt.superscript = true;
+            else if (off < 0 && rel >= 0.03) fmt.subscript = true;
         }
 
         let lead = '';
@@ -217,13 +221,16 @@ function clusterToLine(clusterRuns: RawRun[], cfg: PdfLayoutConfig): PdfLine {
         prev = r;
     }
     if (fragments.length) fragments[0].text = fragments[0].text.replace(/^\s+/, '');
+    // Drop fragments left empty after trimming (e.g. a bullet-glyph run), so generators do not emit
+    // stray formatting markers such as an empty `` ` `` for a zero-length monospace run.
+    const keptFragments = fragments.filter(f => f.text.length > 0);
 
-    const bounds = unionAll(fragments.map(f => f.bounds))!;
-    const visible = fragments.map(f => f.text).join('').replace(/\s+$/, '');
+    const bounds = unionAll((keptFragments.length ? keptFragments : fragments).map(f => f.bounds))!;
+    const visible = keptFragments.map(f => f.text).join('').replace(/\s+$/, '');
     const endsWithHyphen = /[-­]$/.test(visible);
 
     return {
-        fragments, dir, baseline, fontSize: lineFontSize,
+        fragments: keptFragments, dir, baseline, fontSize: lineFontSize,
         bold: totalChars > 0 && boldChars * 2 > totalChars,
         endsWithHyphen,
         x: bounds.x, yTop: bounds.y, width: bounds.width, height: bounds.height,
