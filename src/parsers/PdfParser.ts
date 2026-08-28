@@ -64,6 +64,28 @@ interface ResolvedHighlight {
     color: string;
 }
 
+/** An internal destination: the 0-based target page and its top y in PDF user space (y-up), if any. */
+interface SectionTarget {
+    pageIndex: number;
+    /** Target top in PDF user space (y grows up), or null when the destination is whole-page (Fit). */
+    pdfY: number | null;
+}
+
+/**
+ * Collects internal-link destinations during the single collection pass so a later pass, once every
+ * page's headings and their positions are known, can point each link at the nearest heading (falling
+ * back to the page). `register` hands back a transient href that the post-pass rewrites in place, so
+ * the placeholder never escapes into the returned AST.
+ */
+class SectionLinks {
+    readonly targets: SectionTarget[] = [];
+    register(target: SectionTarget): string {
+        const k = this.targets.length;
+        this.targets.push(target);
+        return `#__pdfsec_${k}`;
+    }
+}
+
 /** Precomputed CRC-32 table (polynomial 0xEDB88320) for PNG chunk checksums. */
 const CRC32_TABLE = (() => {
     const table = new Uint32Array(256);
@@ -285,7 +307,8 @@ function highlightRects(viewport: any, annot: any): [number, number, number, num
  * they cover gets a `backgroundColor`. Both come from the single `getAnnotations()` call.
  */
 async function resolveAnnotations(
-    page: any, viewport: any, pdfDocument: any, config: FullOfficeParserConfig, destCache: Map<string, string | null>,
+    page: any, viewport: any, pdfDocument: any, config: FullOfficeParserConfig,
+    destCache: Map<string, SectionTarget | null>, sectionLinks: SectionLinks,
 ): Promise<{ links: ResolvedLink[]; highlights: ResolvedHighlight[] }> {
     const links: ResolvedLink[] = [];
     const highlights: ResolvedHighlight[] = [];
@@ -312,8 +335,8 @@ async function resolveAnnotations(
             meta = { link: url, linkType: internal ? 'internal' : 'external' };
         } else if (annot.dest) {
             if (config.ignoreInternalLinks) continue;
-            const href = await resolveDest(annot.dest, pdfDocument, destCache);
-            meta = { link: href, linkType: 'internal' };
+            const target = await resolveDestFull(annot.dest, pdfDocument, destCache);
+            meta = { link: target ? sectionLinks.register(target) : '#internal', linkType: 'internal' };
         }
         if (meta) links.push({ rect: toViewportRect(viewport, annot.rect), meta });
     }
@@ -330,27 +353,44 @@ function highlightForBox(x: number, yTop: number, w: number, h: number, highligh
     return undefined;
 }
 
-/** Resolves an internal destination to `#page=N` when cheaply possible, else `#internal`. */
-async function resolveDest(dest: string | unknown[], pdfDocument: any, cache: Map<string, string | null>): Promise<string> {
+/** Extracts a destination's top y (PDF user space) from its explicit array, per its fit type; null if none. */
+function destTopY(explicit: any[]): number | null {
+    const fit = explicit[1];
+    const name: string | undefined = typeof fit === 'string' ? fit : fit?.name;
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    // [pageRef, /XYZ, left, top, zoom] | [.., /FitH|/FitBH, top] | [.., /FitR, left, bottom, right, top]
+    if (name === 'XYZ') return num(explicit[3]);
+    if (name === 'FitH' || name === 'FitBH') return num(explicit[2]);
+    if (name === 'FitR') return num(explicit[5]);
+    return null; // Fit / FitB / FitV / FitBV: whole-page, no meaningful top
+}
+
+/**
+ * Resolves an internal destination to its target page (0-based) and top y, or null when it cannot be
+ * resolved cheaply. Named destinations are resolved via `getDestination` and cached.
+ */
+async function resolveDestFull(
+    dest: string | unknown[], pdfDocument: any, cache: Map<string, SectionTarget | null>,
+): Promise<SectionTarget | null> {
     try {
         let explicit = dest;
         if (typeof dest === 'string') {
-            if (cache.has(dest)) { const c = cache.get(dest); return c ?? '#internal'; }
-            if (cache.size >= 2000) return '#internal';
+            if (cache.has(dest)) return cache.get(dest) ?? null;
+            if (cache.size >= 2000) return null;
             explicit = await pdfDocument.getDestination(dest);
-            if (!explicit) { cache.set(dest, null); return '#internal'; }
+            if (!explicit) { cache.set(dest, null); return null; }
         }
         if (Array.isArray(explicit) && explicit[0]) {
-            const idx = await pdfDocument.getPageIndex(explicit[0]);
-            const href = `#page=${idx + 1}`;
-            if (typeof dest === 'string') cache.set(dest, href);
-            return href;
+            const pageIndex = await pdfDocument.getPageIndex(explicit[0]);
+            const target: SectionTarget = { pageIndex, pdfY: destTopY(explicit) };
+            if (typeof dest === 'string') cache.set(dest, target);
+            return target;
         }
     } catch {
         // fall through
     }
     if (typeof dest === 'string') cache.set(dest, null);
-    return '#internal';
+    return null;
 }
 
 /**
@@ -438,7 +478,7 @@ function listOptionalContentLayers(oc: any): { name: string; visible: boolean }[
 
 /** Builds the document outline (bookmarks) as a tree of `list` nodes carrying destination links. */
 async function buildOutline(
-    pdfDocument: any, destCache: Map<string, string | null>, config: FullOfficeParserConfig,
+    pdfDocument: any, destCache: Map<string, SectionTarget | null>, sectionLinks: SectionLinks, config: FullOfficeParserConfig,
 ): Promise<OfficeContentNode[] | undefined> {
     let outline: any[] | null;
     try { outline = await pdfDocument.getOutline(); } catch { return undefined; }
@@ -451,7 +491,11 @@ async function buildOutline(
             let link: string | undefined;
             let linkType: 'internal' | 'external' | undefined;
             if (item?.url) { link = item.url; linkType = 'external'; }
-            else if (item?.dest != null) { link = await resolveDest(item.dest, pdfDocument, destCache); linkType = 'internal'; }
+            else if (item?.dest != null) {
+                const target = await resolveDestFull(item.dest, pdfDocument, destCache);
+                link = target ? sectionLinks.register(target) : '#internal';
+                linkType = 'internal';
+            }
             const nested = Array.isArray(item?.items) && item.items.length ? await convert(item.items, depth + 1) : [];
             const label: OfficeContentNode = { type: 'text', text: title };
             if (link) label.metadata = { link, linkType };
@@ -469,10 +513,105 @@ async function buildOutline(
     return nodes.length ? nodes : undefined;
 }
 
+/** Lowercases and hyphenates text into a URL-fragment-safe anchor slug (Unicode letters/digits kept). */
+function slugify(text: string): string {
+    return text.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+}
+
+/**
+ * Points each collected internal link at the nearest heading on its target page, so a PDF
+ * cross-reference or bookmark jumps to the actual section rather than the top of the page. The
+ * referenced heading is given a stable anchor id (via its `anchorIds`), and every transient
+ * `#__pdfsec_k` placeholder emitted during collection is rewritten to that anchor - or to `#page=N`
+ * when no heading matches (whole-page destinations, rotated pages, or a target far from any heading).
+ * Only headings actually referenced are given ids, so unreferenced ones are left untouched.
+ */
+function resolveSectionLinks(
+    content: OfficeContentNode[], extracts: PageExtract[], sectionLinks: SectionLinks, rewriteRoots: OfficeContentNode[][],
+): void {
+    if (!sectionLinks.targets.length) return;
+
+    const pageInfo = new Map<number, { authoredH: number; rotation: number }>();
+    for (const e of extracts) pageInfo.set(e.pageNumber, { authoredH: e.authoredH, rotation: e.rotation });
+
+    // Headings per page (top-to-bottom, with their rendered top y when known), plus a document-wide
+    // count of each heading's base slug so a referenced heading can be disambiguated from same-text
+    // headings elsewhere in the document.
+    const headingsByPage = new Map<number, { node: OfficeContentNode; y: number | undefined }[]>();
+    const slugCount = new Map<string, number>();
+    for (const pageNode of content) {
+        if (pageNode.type !== 'page' || typeof pageNode.metadata?.pageNumber !== 'number') continue;
+        const hs: { node: OfficeContentNode; y: number | undefined }[] = [];
+        const walk = (n: OfficeContentNode) => {
+            if (n.type === 'heading') {
+                hs.push({ node: n, y: n.bounds?.y });
+                const s = slugify(n.text || '') || 'section';
+                slugCount.set(s, (slugCount.get(s) || 0) + 1);
+            }
+            for (const c of n.children || []) walk(c);
+        };
+        for (const c of pageNode.children || []) walk(c);
+        hs.sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+        headingsByPage.set(pageNode.metadata.pageNumber, hs);
+    }
+
+    // Assign a unique, stable anchor id to a heading the first time a link targets it.
+    const usedIds = new Set<string>();
+    const idFor = new Map<OfficeContentNode, string>();
+    const anchorFor = (h: OfficeContentNode): string => {
+        const existing = idFor.get(h);
+        if (existing) return existing;
+        const base = slugify(h.text || '') || 'section';
+        let id = base;
+        // The generator gives every same-text heading the bare slug, so when this base is shared (or
+        // already taken) use a suffixed id the generator never emits, so the link lands on THIS one.
+        if ((slugCount.get(base) || 0) > 1 || usedIds.has(base)) {
+            let i = 2;
+            id = `${base}-${i}`;
+            while (usedIds.has(id) || (slugCount.get(id) || 0) > 0) id = `${base}-${++i}`;
+        }
+        usedIds.add(id);
+        idFor.set(h, id);
+        const meta = (h.metadata ?? (h.metadata = { level: 1 })) as { anchorIds?: string[] };
+        meta.anchorIds = [id, ...(meta.anchorIds || [])];
+        return id;
+    };
+
+    const resolved = sectionLinks.targets.map((t): string => {
+        const pnum = t.pageIndex + 1;
+        const info = pageInfo.get(pnum);
+        const hs = headingsByPage.get(pnum);
+        // Match to the nearest heading only when geometry is present. Under `ignorePositions` every
+        // heading y is undefined, so fall back to the page anchor rather than binding every link to
+        // the first heading (which a y=0 tie would otherwise do).
+        if (t.pdfY != null && info && info.rotation === 0 && hs) {
+            const positioned = hs.filter((h): h is { node: OfficeContentNode; y: number } => h.y !== undefined);
+            if (positioned.length) {
+                const targetY = info.authoredH - t.pdfY; // PDF user space (y-up) -> rendered viewport (y-down)
+                let best: OfficeContentNode | null = null, bestD = Infinity;
+                for (const h of positioned) { const d = Math.abs(h.y - targetY); if (d < bestD) { bestD = d; best = h.node; } }
+                if (best && bestD <= info.authoredH * 0.5) return `#${anchorFor(best)}`;
+            }
+        }
+        return `#page=${pnum}`;
+    });
+
+    const rewrite = (n: OfficeContentNode) => {
+        const meta = n.metadata as { link?: string } | undefined;
+        if (meta && typeof meta.link === 'string') {
+            const m = /^#__pdfsec_(\d+)$/.exec(meta.link);
+            if (m) meta.link = resolved[Number(m[1])] ?? '#internal';
+        }
+        for (const c of n.children || []) rewrite(c);
+    };
+    for (const roots of rewriteRoots) for (const n of roots) rewrite(n);
+}
+
 /** Collects one page's text runs, images and annotations into a PageExtract. */
 async function collectPage(
     pdfjs: any, pdfDocument: any, pageNumber: number, config: FullOfficeParserConfig,
-    pdfCfg: PdfLayoutConfig, fontCache: Map<string, ResolvedFont>, destCache: Map<string, string | null>,
+    pdfCfg: PdfLayoutConfig, fontCache: Map<string, ResolvedFont>, destCache: Map<string, SectionTarget | null>,
+    sectionLinks: SectionLinks,
 ): Promise<PageExtract> {
     const page = await pdfDocument.getPage(pageNumber);
     const rotation = ((page.rotate % 360) + 360) % 360;
@@ -504,7 +643,7 @@ async function collectPage(
         ? makeColorLookup(collectColorMarks(ops, layoutViewport.transform, pdfjs.OPS))
         : null;
 
-    const { links, highlights } = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache);
+    const { links, highlights } = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache, sectionLinks);
 
     // Walk items, tracking the marked-content stack for mcid / Artifact scope.
     const stack: { id: string | null; tag: string | null }[] = [];
@@ -865,12 +1004,13 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     // --- Single collection pass ---
     const pageNumbers = parsePageRange(config.pdfParserConfig?.pageRange, numPages);
     const fontCache = new Map<string, ResolvedFont>();
-    const destCache = new Map<string, string | null>();
+    const destCache = new Map<string, SectionTarget | null>();
+    const sectionLinks = new SectionLinks();
     const extracts: PageExtract[] = [];
     for (const pageNum of pageNumbers) {
         checkAbortSignal(config.abortSignal);
         try {
-            extracts.push(await collectPage(pdfjs, pdfDocument, pageNum, config, pdfCfg, fontCache, destCache));
+            extracts.push(await collectPage(pdfjs, pdfDocument, pageNum, config, pdfCfg, fontCache, destCache, sectionLinks));
         } catch (e: any) {
             logWarning(OfficeWarningType.PAGE_LOAD_FAILED, config, pageNum, e);
         }
@@ -979,7 +1119,11 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     }
 
     // Document outline (bookmarks / TOC), when present, into auxiliary.
-    const outline = config.ignoreInternalLinks ? undefined : await buildOutline(pdfDocument, destCache, config);
+    const outline = config.ignoreInternalLinks ? undefined : await buildOutline(pdfDocument, destCache, sectionLinks, config);
+
+    // Now that every page's headings and their positions are known, point each internal link at the
+    // nearest heading on its target page (falling back to the page itself), rather than a page jump.
+    resolveSectionLinks(content, extracts, sectionLinks, [content, auxHeaders, auxFooters, outline ?? []]);
 
     const auxiliary = (auxHeaders.length || auxFooters.length || outline)
         ? { headers: auxHeaders, footers: auxFooters, ...(outline ? { outline } : {}) }
