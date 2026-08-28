@@ -463,6 +463,49 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     /**
      * Processes an array of nodes, handling list grouping and nesting.
      */
+    /**
+     * Renders a table's rows with an HTML grid-occupancy model, so a cell's `rowSpan` reserves its
+     * column in the rows below rather than letting the plain per-row gap-filler shift the cells that
+     * sit under it. Returns one `<tr>…</tr>` string per row (row 0's `<td>`s are promoted to `<th>`
+     * when `headerFirst`). Only invoked for tables that actually contain a rowSpan.
+     */
+    private async renderRowsWithRowspans(rows: OfficeContentNode[], headerFirst: boolean): Promise<string[]> {
+        const out: string[] = [];
+        // grid column -> number of rows it stays occupied by a rowspan started above this row.
+        const carry = new Map<number, number>();
+        for (let r = 0; r < rows.length; r++) {
+            const cells = (rows[r].children || []).filter(c => c.type === 'cell');
+            const newCarry = new Map<number, number>();
+            let col = 0;
+            let ci = 0;
+            let tr = '';
+            while (ci < cells.length) {
+                while ((carry.get(col) || 0) > 0) col++;               // skip columns held by a rowspan
+                const cell = cells[ci];
+                const meta = cell.metadata as CellMetadata;
+                const target = typeof meta?.col === 'number' ? meta.col : col;
+                while (col < target) {                                  // genuine empty gaps
+                    if ((carry.get(col) || 0) > 0) { col++; continue; }
+                    tr += '<td></td>';
+                    col++;
+                }
+                let cellHtml = await this.processNodeRecursive(cell, this.nodeProcessor.bind(this));
+                if (headerFirst && r === 0) cellHtml = cellHtml.replace(/^<td/, '<th').replace(/<\/td>$/, '</th>');
+                tr += cellHtml;
+                const cSpan = (meta?.colSpan && meta.colSpan > 1) ? meta.colSpan : 1;
+                const rSpan = (meta?.rowSpan && meta.rowSpan > 1) ? meta.rowSpan : 1;
+                if (rSpan > 1) for (let cc = col; cc < col + cSpan; cc++) newCarry.set(cc, rSpan - 1);
+                col += cSpan;
+                ci++;
+            }
+            // Age existing carries by one row, then fold in rowspans this row started.
+            for (const [c, v] of [...carry.entries()]) { if (v > 1) carry.set(c, v - 1); else carry.delete(c); }
+            for (const [c, v] of newCarry) carry.set(c, v);
+            out.push(`<tr>${tr}</tr>`);
+        }
+        return out;
+    }
+
     private async processNodeArray(nodes: OfficeContentNode[]): Promise<string> {
         let html = '';
         // Stack to track active lists. `liClose` is the currently-open item's deferred closing
@@ -944,6 +987,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 // Smart Table Header Detection
                 let finalChildren = childrenOutput;
                 const rows = node.children || [];
+                let firstRowIsHeader = false;
                 if (rows.length > 0 && rows[0].type === 'row') {
                     const firstRow = rows[0];
                     const firstRowCells = firstRow.children || [];
@@ -956,8 +1000,27 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     const allBold = firstRowCells.length > 0 && firstRowCells.every(c =>
                         c.children?.every(child => child.formatting?.bold === true)
                     );
+                    firstRowIsHeader = !!(isHeaderStyle || allBold);
+                }
 
-                    if (isHeaderStyle || allBold) {
+                // When any cell spans rows, the plain per-row path (which only fills horizontal gaps)
+                // would shift the cells sitting under a rowspan. Render with an HTML grid-occupancy
+                // model instead, so a rowspan reserves its column in the rows below. Scoped to tables
+                // that actually contain a rowspan, so every other table renders exactly as before.
+                const hasRowSpan = rows.some(r => r.type === 'row' &&
+                    (r.children || []).some(c => c.type === 'cell' && ((c.metadata as CellMetadata)?.rowSpan || 1) > 1));
+                if (hasRowSpan) {
+                    const rowNodes = rows.filter(r => r.type === 'row');
+                    const trs = await this.renderRowsWithRowspans(rowNodes, firstRowIsHeader);
+                    // A rowspan started in the header row cannot cross an HTML <thead>/<tbody>
+                    // boundary, so only split off a <thead> when the header row has no downward span.
+                    const firstRowSpansDown = (rowNodes[0]?.children || []).some(c => c.type === 'cell' && ((c.metadata as CellMetadata)?.rowSpan || 1) > 1);
+                    finalChildren = (firstRowIsHeader && !firstRowSpansDown && trs.length)
+                        ? `<thead>${trs[0]}</thead><tbody>${trs.slice(1).join('')}</tbody>`
+                        : trs.join('');
+                } else if (rows.length > 0 && rows[0].type === 'row') {
+                    const firstRow = rows[0];
+                    if (firstRowIsHeader) {
                         // Re-process the first row as header cells, wrapped in a <tr>. Without the
                         // <tr>, the header cells sit directly under <thead> (`<thead><th>…`), which
                         // is invalid HTML that HtmlParser does not read back as a table row - so a

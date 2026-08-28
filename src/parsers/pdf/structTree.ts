@@ -244,6 +244,70 @@ function inferColSpans(rows: OfficeContentNode[]): void {
     }
 }
 
+/**
+ * Recovers vertical cell merges (rowSpan) the tag tree padded with empty placeholder cells. pdf.js
+ * does not expose the `/RowSpan` attribute, so a merge appears as a tall non-empty cell with empty
+ * placeholders in the rows below it, at the same grid column. When a non-empty cell's box extends
+ * well past the top of the next row's band and the cell directly below (same grid column) is an
+ * empty placeholder, that placeholder is absorbed: it is dropped and `rowSpan` grows. Only detects
+ * merges whose spanning cell has content tall enough to reach into the rows it covers - a vertically
+ * merged cell with a single centred line is invisible to geometry and left as a full grid (correct,
+ * just not marked as merged). Runs on the grid keyed by the positional `col`, which the tag tree
+ * keeps rectangular, so it stays aligned with {@link inferColSpans}.
+ */
+function inferRowSpans(rows: OfficeContentNode[]): void {
+    if (rows.length < 2) return;
+    const byCol: Map<number, OfficeContentNode>[] = [];
+    const rowTop: number[] = [];
+    for (const row of rows) {
+        const m = new Map<number, OfficeContentNode>();
+        let top = Infinity;
+        for (const cell of row.children || []) {
+            const col = (cell.metadata as CellMetadata)?.col;
+            if (typeof col === 'number' && !m.has(col)) m.set(col, cell);
+            if (cell.bounds) top = Math.min(top, cell.bounds.y);
+        }
+        byCol.push(m);
+        rowTop.push(Number.isFinite(top) ? top : NaN);
+    }
+    // Typical row pitch drives the coverage margin, so a cell must clearly enter the next band
+    // (not merely touch its top, which every ordinary cell does) to count as spanning.
+    const pitches: number[] = [];
+    for (let r = 1; r < rowTop.length; r++) {
+        if (Number.isFinite(rowTop[r]) && Number.isFinite(rowTop[r - 1])) pitches.push(rowTop[r] - rowTop[r - 1]);
+    }
+    const pitch = medianOf(pitches.filter(p => p > 0));
+    if (!(pitch > 0)) return;
+    const margin = 0.4 * pitch;
+
+    const toRemove = new Set<OfficeContentNode>();
+    for (let r = 0; r < rows.length; r++) {
+        for (const [col, cell] of byCol[r]) {
+            if (toRemove.has(cell) || isEmptyCell(cell) || !cell.bounds) continue;
+            const cSpan = (cell.metadata as CellMetadata)?.colSpan || 1;
+            const bottom = cell.bounds.y + cell.bounds.height;
+            let span = 1;
+            for (let k = 1; r + k < rows.length; k++) {
+                const below = byCol[r + k].get(col);
+                if (!below || !isEmptyCell(below)) break;
+                if (!Number.isFinite(rowTop[r + k]) || bottom < rowTop[r + k] + margin) break;
+                toRemove.add(below);
+                // A 2-D merge (this cell also spans columns) leaves placeholders under every column
+                // it covers in the rows below; absorb those too, or they render as a phantom column.
+                for (let cc = col + 1; cc < col + cSpan; cc++) {
+                    const extra = byCol[r + k].get(cc);
+                    if (extra && isEmptyCell(extra)) toRemove.add(extra);
+                }
+                span++;
+            }
+            if (span > 1 && cell.metadata) (cell.metadata as CellMetadata).rowSpan = span;
+        }
+    }
+    if (toRemove.size) {
+        for (const row of rows) row.children = (row.children || []).filter(c => !toRemove.has(c));
+    }
+}
+
 function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     const rows: OfficeContentNode[] = [];
     let rowIdx = 0;
@@ -275,8 +339,10 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
         rowIdx++;
     }
     if (!rows.length) return null;
-    // Recover merged cells the tags padded with empty placeholders (needs geometry).
-    if (ctx.doc.cfg.includePositions) inferColSpans(rows);
+    // Recover merged cells the tags padded with empty placeholders (needs geometry). Column spans
+    // run first, on the still-rectangular grid (they use positional indices); row spans run after,
+    // keyed by the geometry-stable `col`, so they tolerate the placeholders columns already dropped.
+    if (ctx.doc.cfg.includePositions) { inferColSpans(rows); inferRowSpans(rows); }
     const table: OfficeContentNode = { type: 'table', children: rows, text: rows.map(r => r.text || '').join('\n') };
     const tb = unionAll(rows.map(r => r.bounds));
     if (tb) table.bounds = tb;
