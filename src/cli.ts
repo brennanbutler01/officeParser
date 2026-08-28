@@ -175,6 +175,10 @@ for (let i = 0; i < args.length; i++) {
             else {
                 if (boolValue !== undefined) {
                     target[path] = boolValue;
+                } else if (path === 'includeImages') {
+                    // includeImages also accepts an ImageMode string (e.g. --includeImages=image+ocrtext);
+                    // it stays in knownGeneratorBooleans so a bare flag is true and never eats a positional.
+                    target[path] = val;
                 } else if (knownParserBooleans.has(path) || (isGeneratorOption && knownGeneratorBooleans.has(path))) {
                     console.warn(`Invalid boolean value for --${cleanKey}: ${val}. Using default.`);
                 } else {

@@ -741,19 +741,23 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 return this.formatText(node, node.text || '');
 
             case 'image': {
-                if (!this.config.includeImages) return '';
+                const mode = this.imageMode();
+                if (mode === 'none') return '';
                 const meta = node.metadata as ImageMetadata;
                 const attachmentName = meta?.attachmentName;
-                let src = meta?.url || attachmentName || '';
+                const ocr = (node.text || '').trim();
 
+                // ocrtext-only: emit the recognized text as a visible block, no <img>.
+                if (mode === 'ocrtext-only') return ocr ? `${extraAnchors}<div${idAttr}>${this.escape(ocr)}</div>` : '';
+
+                let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
                     const attachment = this.ast.attachments.find(a => a.name === attachmentName);
                     if (attachment && (attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
                         src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                     }
                     // Oversized attachments (e.g. a scanned PDF page) are not inlined as a
-                    // multi-megabyte data URI; src stays the attachment name reference. Any OCR text
-                    // is still carried on the img `alt`. Mirrors MarkdownGenerator's inline cap.
+                    // multi-megabyte data URI; src stays the attachment name reference.
                 }
                 // Match CustomImage's exact data-width/data-align + style contract so a loaded
                 // image re-hydrates the editor node without losing size/alignment.
@@ -783,8 +787,13 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const imgStyleAttr = imgStyleParts.length > 0 ? ` style="${imgStyleParts.join('; ')}"` : '';
 
                 const imgTitle = meta?.title ? ` title="${this.escape(meta.title)}"` : '';
-                const img = `<img src="${sanitizeImageUrl(src)}" alt="${this.escape(node.text || meta?.altText || '')}"${imgTitle}${className}${mappedAttrs}${imgDataAttrs}${imgStyleAttr}>`;
-                const content = this.config.includeFormatting ? `<div class="image-container">${img}<div class="caption">${this.escape(attachmentName || '')}</div></div>` : img;
+                // alt is the descriptive alt text, not the OCR text: OCR text is surfaced visibly under
+                // 'image+ocrtext' rather than hidden in alt (where a broken/referenced image would leak
+                // it into the rendered page).
+                const img = `<img src="${sanitizeImageUrl(src)}" alt="${this.escape(meta?.altText || '')}"${imgTitle}${className}${mappedAttrs}${imgDataAttrs}${imgStyleAttr}>`;
+                let content = this.config.includeFormatting ? `<div class="image-container">${img}<div class="caption">${this.escape(attachmentName || '')}</div></div>` : img;
+                // image+ocrtext: the image, then its recognized text as a visible block.
+                if (mode === 'image+ocrtext' && ocr) content += `<div class="ocr-text">${this.escape(ocr)}</div>`;
                 return `${extraAnchors}<div${idAttr}>${content}</div>`;
             }
 

@@ -235,11 +235,16 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                 }
 
                 case 'image': {
-                    if (!this.config.includeImages) return '';
+                    const mode = this.imageMode();
+                    if (mode === 'none') return '';
                     const meta = node.metadata as any;
-                    const attachmentName = meta?.attachmentName;
-                    const attachment = this.ast.attachments.find(a => a.name === attachmentName);
-                    
+                    const ocr = (node.text || '').trim();
+                    const ocrRtf = ocr ? `${this.escapeRtf(ocr)}\\par\n` : '';
+                    // ocrtext-only: just the recognized text.
+                    if (mode === 'ocrtext-only') return ocrRtf;
+
+                    let pict = '';
+                    const attachment = this.ast.attachments.find(a => a.name === meta?.attachmentName);
                     if (attachment && attachment.data) {
                         const type = attachment.extension === 'png' ? 'pngblip' : 'jpegblip';
                         // Convert base64 to hex
@@ -250,11 +255,11 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                             hex += h.length === 1 ? '0' + h : h;
                             if (i % 64 === 63) hex += '\n'; // Add newlines for better RTF readability
                         }
-                        
                         // Default goals (approx 3 inches wide at 1440 twips per inch)
-                        return `{\\pict\\${type}\\picwgoal4320\\pichgoal3240\n${hex}\n}\n`;
+                        pict = `{\\pict\\${type}\\picwgoal4320\\pichgoal3240\n${hex}\n}\n`;
                     }
-                    return '';
+                    // image+ocrtext: the image, then its recognized text.
+                    return mode === 'image+ocrtext' ? pict + ocrRtf : pict;
                 }
 
                 case 'break': {

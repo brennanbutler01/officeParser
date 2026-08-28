@@ -753,6 +753,12 @@ export interface MetadataOverrides {
     custom?: Record<string, string | number | boolean | Date>;
 }
 
+/**
+ * How a generator renders an image node. See {@link CommonGeneratorConfig.includeImages}.
+ * "OCR text" is the image node's recognized text (populated for scanned PDF images).
+ */
+export type ImageMode = 'image-only' | 'image+ocrtext' | 'ocrtext-only' | 'none';
+
 export interface CommonGeneratorConfig {
     /**
      * Callback called for every node during generation.
@@ -851,10 +857,22 @@ export interface CommonGeneratorConfig {
      */
     ignoreDefaultStyleMap?: boolean;
     /**
-     * Whether to include images in the generated output.
-     * Defaults to true.
+     * How to render an image node in the generated output. Accepts a boolean for backward
+     * compatibility (`true` = `'image-only'`, `false` = `'none'`) or one of the {@link ImageMode}
+     * strings:
+     * - `'image-only'` (default): embed the image (inlined as a `data:` URI when under
+     *   `maxInlineImageBytes`, otherwise referenced by name); no OCR/recognized text.
+     * - `'image+ocrtext'`: embed the image, then its recognized (OCR) text below it.
+     * - `'ocrtext-only'`: only the recognized (OCR) text, no image.
+     * - `'none'`: omit the image entirely.
+     *
+     * Plain-text output cannot embed an image, so there `'image-only'`/`'image+ocrtext'` render an
+     * `[Image: name]` placeholder (plus the OCR text for `'image+ocrtext'`), `'ocrtext-only'` renders
+     * just the OCR text, and `'none'` renders nothing.
+     *
+     * Defaults to `true` (`'image-only'`).
      */
-    includeImages?: boolean;
+    includeImages?: boolean | ImageMode;
     /**
      * Maximum size, in base64 characters, of an image that HTML/Markdown will inline as a `data:`
      * URI. An attachment whose base64 exceeds this is not inlined: the image node renders its text

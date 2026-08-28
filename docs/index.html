@@ -2868,7 +2868,7 @@
                 { id: 'cfg_includeFormatting', label: 'Include Formatting', type: 'switch', default: true },
                 { id: 'cfg_generateIds', label: 'Generate IDs', type: 'switch', default: true },
                 { id: 'cfg_renderMetadata', label: 'Render Metadata', type: 'switch', default: false },
-                { id: 'cfg_includeImages', label: 'Include Images', type: 'switch', default: true },
+                { id: 'cfg_includeImages', label: 'Images', type: 'select', options: ['image-only', 'image+ocrtext', 'ocrtext-only', 'none'], names: ['Image only', 'Image + OCR text', 'OCR text only', 'None'], default: 'image-only', width: '130px' },
                 { id: 'cfg_includeCharts', label: 'Include Charts', type: 'switch', default: true },
                 { id: 'cfg_ignoreInternalLinks_generator', label: 'Ignore Internal Links', type: 'switch', default: false },
                 { id: 'cfg_ignoreDefaultStyleMap', label: 'Ignore Default Style Map', type: 'switch', default: false }
@@ -4753,7 +4753,7 @@
                     includeFormatting: document.getElementById('cfg_includeFormatting').checked,
                     generateIds: document.getElementById('cfg_generateIds').checked,
                     renderMetadata: document.getElementById('cfg_renderMetadata').checked,
-                    includeImages: document.getElementById('cfg_includeImages').checked,
+                    includeImages: document.getElementById('cfg_includeImages').value,
                     includeCharts: document.getElementById('cfg_includeCharts').checked,
                     ignoreDefaultStyleMap: document.getElementById('cfg_ignoreDefaultStyleMap').checked,
                     metadataOverrides: getMetadataOverrides(),

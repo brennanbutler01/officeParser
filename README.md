@@ -1012,7 +1012,7 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 | `generateIds` | `boolean` | `true` | Slug-based heading anchors: `id` attributes on HTML headings, and a `{#slug}` suffix on Markdown headings (`# Title {#title}`, kramdown/Pandoc). Set `false` to omit both — useful when the Markdown is rendered by GFM/CommonMark, which show `{#slug}` as literal text. Applies to all generator formats (it is a top-level option, not under `mdConfig`/`htmlConfig`). |
 | `renderMetadata` | `boolean` | `false` | Render title/author as visible header block |
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
-| `includeImages` | `boolean` | `true` | Include image nodes in output |
+| `includeImages` | `boolean \| 'image-only' \| 'image+ocrtext' \| 'ocrtext-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocrtext'` (image then its recognized/OCR text); `'ocrtext-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocrtext'`), or just the OCR text for `'ocrtext-only'` |
 | `maxInlineImageBytes` | `number` | `2000000` | Max base64 size an image is inlined as a `data:` URI (HTML/Markdown). Larger images render their text (e.g. OCR text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. `0` never inlines, `Infinity` always inlines |
 | `includeCharts` | `boolean` | `true` | Include interactive charts (HTML only) |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output |

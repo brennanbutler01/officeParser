@@ -52,10 +52,13 @@
             </tr>
             <tr>
                 <td><code>includeImages</code></td>
-                <td><code>boolean</code></td>
+                <td><code>boolean | 'image-only' | 'image+ocrtext' | 'ocrtext-only' | 'none'</code></td>
                 <td><code>true</code></td>
-                <td><strong>Resources</strong>: Whether to include <code>&lt;img&gt;</code> tags or Markdown image
-                    syntax in the output.</td>
+                <td><strong>Resources</strong>: How to render an image node. <code>true</code>=<code>'image-only'</code>
+                    (embed the image, no OCR text); <code>'image+ocrtext'</code> (image then its recognized/OCR text);
+                    <code>'ocrtext-only'</code> (OCR text, no image); <code>false</code>=<code>'none'</code> (omit). In
+                    plain-text output an image becomes an <code>[Image: name]</code> placeholder (plus OCR text for
+                    <code>'image+ocrtext'</code>), or just the OCR text for <code>'ocrtext-only'</code>.</td>
             </tr>
             <tr>
                 <td><code>maxInlineImageBytes</code></td>

@@ -60,14 +60,16 @@ export class TextGenerator extends BaseGenerator<'text'> {
             }
 
             if (node.type === 'image') {
-                if (!this.config.includeImages) return '';
+                const mode = this.imageMode();
+                if (mode === 'none') return '';
                 const meta = node.metadata as any;
+                const ocr = (node.text || '').trim();
+                // Plain text cannot embed the image: 'ocrtext-only' is just the recognized text,
+                // 'image+ocrtext' is the placeholder plus the text, and 'image-only' is the placeholder.
+                if (mode === 'ocrtext-only') return ocr ? `${ocr}${newline}` : '';
                 const label = `[Image: ${meta?.altText || meta?.attachmentName || 'Untitled'}]`;
-                // Surface a PDF image's OCR text so a scanned page produces readable text instead of
-                // only a placeholder. Scoped to PDF via `bounds` (only PDF images carry it), so images
-                // from other formats are unaffected.
-                const ocr = node.bounds ? (node.text || '').trim() : '';
-                return ocr ? `${label}${newline}${ocr}${newline}` : `${label}${newline}`;
+                if (mode === 'image+ocrtext' && ocr) return `${label}${newline}${ocr}${newline}`;
+                return `${label}${newline}`;
             }
 
             if (node.type === 'embed') {
@@ -139,7 +141,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
             // data series in `text` with zero child nodes, and a CSV `comment` likewise, so
             // returning only `childrenOutput` silently dropped both. Reading `node.text` here covers
             // any future node type of the same shape rather than just the two known today.
-            if (!childrenOutput && node.text) {
+            if (!childrenOutput && node.text && !node.children?.length) {
                 return node.text + (node.text.endsWith(newline) ? '' : newline);
             }
             return childrenOutput;
@@ -218,9 +220,12 @@ export class TextGenerator extends BaseGenerator<'text'> {
             if (n.type === 'text' && n.bounds && (n.text || '').length) {
                 atoms.push({ text: n.text!, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
             } else if (n.type === 'image') {
-                if (this.config.includeImages && n.bounds) {
+                const mode = this.imageMode();
+                if (mode !== 'none' && n.bounds) {
                     const m = n.metadata as any;
-                    atoms.push({ text: `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
+                    const ocr = (n.text || '').trim();
+                    const text = mode === 'ocrtext-only' ? ocr : `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`;
+                    if (text) atoms.push({ text, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
                 }
                 return;
             }

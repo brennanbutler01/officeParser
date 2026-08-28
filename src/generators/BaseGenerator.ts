@@ -1,4 +1,4 @@
-import { OfficeIssue, ConversionResult, FullGeneratorConfig, GeneratorConfig, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, StructuredStyleMapping, UniversalGeneratorFormat } from '../types.js';
+import { OfficeIssue, ConversionResult, FullGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, StructuredStyleMapping, UniversalGeneratorFormat } from '../types.js';
 import { resolveGeneratorConfig } from '../utils/configUtils.js';
 import { checkAbortSignal, getWarningMessage } from '../utils/errorUtils.js';
 import { StyleMapper } from '../utils/styleMapper.js';
@@ -18,6 +18,21 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
         this.config = resolveGeneratorConfig(destination, ast.config, config);
         this.ast = ast;
         this.styleMapper = new StyleMapper(this.config.styleMap, this.config.ignoreDefaultStyleMap);
+    }
+
+    /**
+     * Resolves `config.includeImages` (a boolean, a CLI-provided `'true'`/`'false'` string, or an
+     * {@link ImageMode}) to a single mode. Every generator's image handling must route through this
+     * rather than a truthy check, since a mode string like `'none'` is truthy.
+     */
+    protected imageMode(): ImageMode {
+        let v = this.config.includeImages as unknown;
+        if (v === 'true') v = true;
+        if (v === 'false') v = false;
+        if (v === false) return 'none';
+        if (v === true || v === undefined) return 'image-only';
+        if (v === 'image-only' || v === 'image+ocrtext' || v === 'ocrtext-only' || v === 'none') return v;
+        return 'image-only';
     }
 
     /**

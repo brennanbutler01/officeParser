@@ -76,7 +76,11 @@ export class OfficeConverter {
          * AUTOMATIC CONFIGURATION SYNC
          * We sync extractAttachments from the generator configuration.
          */
-        parserConfig.extractAttachments = (config?.generatorConfig?.includeImages !== false) || (config?.generatorConfig?.includeCharts !== false);
+        // Extract attachments when the generator will render an image or its OCR text (any
+        // includeImages mode except false/'none'), or when charts are included.
+        const im = config?.generatorConfig?.includeImages;
+        const wantsImageOrText = im !== false && im !== 'none';
+        parserConfig.extractAttachments = wantsImageOrText || (config?.generatorConfig?.includeCharts !== false);
 
         // 2. Parse the source document into the universal AST
         const ast = await OfficeParser.parseOffice(file, parserConfig);

@@ -501,36 +501,35 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                 }
 
                 case 'image': {
-                    if (!this.config.includeImages) return '';
+                    const mode = this.imageMode();
+                    if (mode === 'none') return '';
                     const meta = node.metadata as ImageMetadata;
-                    const alt = meta?.altText || 'image';
                     const anchors = this.renderAnchors(meta);
                     const anchorPrefix = anchors ? `${anchors}\n` : '';
-                    let src = meta?.url || meta?.attachmentName || '';
+                    const ocr = (node.text || '').trim();
 
-                    // Resolve attachment to data URI if no external URL is provided
+                    // ocrtext-only: emit just the recognized text, no image markup.
+                    if (mode === 'ocrtext-only') return ocr ? `${anchorPrefix}${markdownEscapeText(ocr)}` : '';
+
+                    // Build the image markup: inline as a data URI when small, otherwise reference by
+                    // name (never inline a multi-MB image, which would emit a single line that overflows
+                    // downstream Markdown parsers).
+                    let src = meta?.url || meta?.attachmentName || '';
                     if (!meta?.url && meta?.attachmentName && this.ast) {
                         const attachment = this.ast.attachments.find(a => a.name === meta.attachmentName);
-                        if (attachment) {
-                            if ((attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
-                                src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
-                            } else {
-                                // Too large to inline as a data URI (e.g. a scanned PDF page rendered
-                                // as one big image). Inlining it would emit a multi-megabyte single
-                                // line that can overflow downstream Markdown parsers. Prefer the node's
-                                // own text (OCR text, when present) so the content survives; otherwise
-                                // src stays the attachment name as a plain reference.
-                                const ocr = (node.text || '').trim();
-                                if (ocr) return `${anchorPrefix}${markdownEscapeText(ocr)}`;
-                            }
+                        if (attachment && (attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
+                            src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                         }
                     }
-
                     // Strip `[]` from alt (would close the `![...]`) and neutralize the URL scheme.
-                    const safeAlt = markdownEscapeText(alt).replace(/[[\]]/g, '');
+                    const safeAlt = markdownEscapeText(meta?.altText || 'image').replace(/[[\]]/g, '');
                     const safeSrc = sanitizeMarkdownUrl(src, { allowDataImage: true });
                     const imgTitle = meta?.title ? ` "${meta.title.replace(/"/g, '\\"')}"` : '';
-                    return `${anchorPrefix}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
+                    const imageMd = `${anchorPrefix}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
+
+                    // image+ocrtext: the image, then its recognized text.
+                    if (mode === 'image+ocrtext' && ocr) return `${imageMd}\n\n${markdownEscapeText(ocr)}`;
+                    return imageMd;
                 }
 
                 case 'table': {
