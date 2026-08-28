@@ -30,6 +30,7 @@ This release is a ground-up rewrite of PDF text extraction and drops one depreca
 - **Page labels** (`PageMetadata.pageLabel`, e.g. roman-numeral front matter), **document permissions**, **optional-content layer names**, and **AcroForm field values** are surfaced (the latter three under `metadata.nativeProperties`).
 - **Accessible PDF generation**: `PdfGeneratorConfig.tagged` (default true) emits a tagged PDF, and `outline` emits a heading-derived bookmark tree.
 - **`PDF_GENERATION_FAILED`** error and **`PDF_TEXT_ENCODING_SUSPECT`** warning codes. The latter fires when a page's text is dominated by unmappable glyphs (broken/missing ToUnicode), so "empty" is distinguishable from "undecodable".
+- **Print/PDF page-break fidelity.** The generated HTML's print stylesheet turns a page-break node (`<hr class="page-break">`) into a real page break rather than the on-screen dashed marker, repeats a table's `thead`/`tfoot` on every page the table spans, and keeps figures, blockquotes and code blocks from being split across pages. This applies to `to('pdf')` and to "Print to PDF" from the generated HTML.
 
 ### Fixed
 - **Internal PDF links now resolve in generated HTML/PDF.** Page sections carry `id="page=N"`, matching the `href="#page=N"` links the parser emits, so cross-references and the outline actually navigate.

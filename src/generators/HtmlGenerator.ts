@@ -1952,10 +1952,25 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     break-after: avoid !important;
                 }
 
-                table, tr, img, .chart-container, li, .image-container {
+                table, tr, img, .chart-container, li, .image-container, figure, blockquote, pre {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
                 }
+
+                /* Repeat a table's header (and footer) rows on every page it spans. */
+                thead { display: table-header-group !important; }
+                tfoot { display: table-footer-group !important; }
+
+                /* A page-break node (<hr class="page-break">) is a real page break here, not the
+                   decorative dashed rule it is on screen: force the break and hide the marker. */
+                .page-break {
+                    border: none !important;
+                    margin: 0 !important;
+                    height: 0 !important;
+                    page-break-after: always !important;
+                    break-after: page !important;
+                }
+                .page-break::after { content: none !important; display: none !important; }
 
                 a {
                     text-decoration: none !important;
