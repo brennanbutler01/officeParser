@@ -178,6 +178,72 @@ function collectRows(node: StructNode): StructNode[] {
     return out;
 }
 
+/** Median of a numeric list (robust to alignment jitter); 0 for an empty list. */
+function medianOf(values: number[]): number {
+    if (!values.length) return 0;
+    const s = [...values].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+}
+
+/**
+ * True when a cell is an empty placeholder: no text and no geometry. A tagged PDF pads the columns
+ * (and rows) a merged cell covers with exactly these, keeping the grid rectangular. They are the
+ * only cells span inference is ever allowed to absorb.
+ */
+function isEmptyCell(cell: OfficeContentNode): boolean {
+    return !cell.bounds && !(cell.text || '').trim();
+}
+
+/**
+ * Recovers horizontal cell merges (colSpan) that the tag tree padded with empty placeholder cells.
+ * pdf.js does not expose the `/ColSpan` attribute, so a merge appears as a wide non-empty cell
+ * followed by empty placeholders in the columns it visually covers. When a non-empty cell's box
+ * extends past the start of an adjacent empty column, that column is absorbed: the placeholder is
+ * dropped and `colSpan` is set. Because only *empty* neighbours a cell's own geometry covers are
+ * ever merged, a regular grid (whose cells sit inside their own column) is never given a spurious
+ * span. Positional `col` indices are left untouched so the generator rebuilds the grid from
+ * `col` + `colSpan`. No-op without geometry (cells then have no bounds to reason from).
+ */
+function inferColSpans(rows: OfficeContentNode[]): void {
+    // Representative left edge per grid column, from the non-empty cells that occupy it.
+    const colLefts: number[][] = [];
+    for (const row of rows) {
+        const cells = row.children || [];
+        for (let c = 0; c < cells.length; c++) {
+            const b = cells[c].bounds;
+            if (b) (colLefts[c] ||= []).push(b.x);
+        }
+    }
+    const colLeft = (c: number): number => {
+        const xs = colLefts[c];
+        return xs && xs.length ? medianOf(xs) : NaN;
+    };
+    for (const row of rows) {
+        const cells = row.children || [];
+        const kept: OfficeContentNode[] = [];
+        let c = 0;
+        while (c < cells.length) {
+            const cell = cells[c];
+            if (isEmptyCell(cell)) { kept.push(cell); c++; continue; }
+            const b = cell.bounds;
+            let span = 1;
+            if (b) {
+                const right = b.x + b.width;
+                // Absorb consecutive empty columns to the right whose start this cell's box passes.
+                while (c + span < cells.length && isEmptyCell(cells[c + span])) {
+                    const nextLeft = colLeft(c + span);
+                    if (!Number.isFinite(nextLeft) || right <= nextLeft + 1) break;
+                    span++;
+                }
+            }
+            if (span > 1 && cell.metadata) (cell.metadata as CellMetadata).colSpan = span;
+            kept.push(cell);
+            c += span;
+        }
+        row.children = kept;
+    }
+}
+
 function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     const rows: OfficeContentNode[] = [];
     let rowIdx = 0;
@@ -209,6 +275,8 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
         rowIdx++;
     }
     if (!rows.length) return null;
+    // Recover merged cells the tags padded with empty placeholders (needs geometry).
+    if (ctx.doc.cfg.includePositions) inferColSpans(rows);
     const table: OfficeContentNode = { type: 'table', children: rows, text: rows.map(r => r.text || '').join('\n') };
     const tb = unionAll(rows.map(r => r.bounds));
     if (tb) table.bounds = tb;
