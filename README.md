@@ -1320,6 +1320,7 @@ When `ocr: true` is set, `officeParser` maintains an intelligent **Smart Worker 
 | `workerPath` | `string` | `''` | Custom path to Tesseract worker script |
 | `corePath` | `string` | `''` | Custom path to Tesseract core script |
 | `langPath` | `string` | `''` | Custom path for language data files |
+| `preserveLayout` | `boolean` | `true` | Reconstruct the recognized text's 2-D page layout from Tesseract's per-word boxes (columns line up, right-hand text stays right), instead of flat reading-order text. Set `false` for the flat string |
 | `timeout` | `OcrTimeoutConfig` | `{}` | Consolidated timeouts: `autoTerminate`, `workerLoad`, `recognition` |
 | ~~`autoTerminateTimeout`~~ | `number` | `10000` | **Deprecated.** Use `timeout.autoTerminate` instead |
 

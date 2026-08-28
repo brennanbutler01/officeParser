@@ -38,9 +38,80 @@ interface ManagedWorker {
     activeJob?: OcrJob;
 }
 
+/** Median of a numeric list (0 for empty). */
+function median(values: number[]): number {
+    if (!values.length) return 0;
+    const s = [...values].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+}
+
+/**
+ * Reconstructs the two-dimensional page layout of a Tesseract result from its per-word bounding
+ * boxes, so recognized text reads spatially (columns line up, right-hand text stays right) instead
+ * of as one flat reading-order string. Each visual line's words are placed at a character column
+ * derived from their x position (using the page's median glyph width), the block is left-normalized
+ * so there is no large leading indent, lines keep their top-to-bottom order, and a wide vertical gap
+ * becomes a blank line. Falls back to the flat `page.text` when no word geometry is available.
+ */
+function layoutOcrText(page: any): string {
+    const blocks = page?.blocks;
+    const flat: string = typeof page?.text === 'string' ? page.text : '';
+    if (!Array.isArray(blocks) || !blocks.length) return flat;
+
+    interface OcrWord { text: string; x0: number; x1: number; }
+    interface OcrLine { words: OcrWord[]; y0: number; }
+    const lines: OcrLine[] = [];
+    for (const block of blocks) {
+        for (const para of block?.paragraphs || []) {
+            for (const line of para?.lines || []) {
+                const words: OcrWord[] = [];
+                for (const w of line?.words || []) {
+                    const text = (w?.text || '').trim();
+                    if (text) words.push({ text, x0: w.bbox?.x0 ?? 0, x1: w.bbox?.x1 ?? 0 });
+                }
+                if (words.length) lines.push({ words, y0: line.bbox?.y0 ?? line?.words?.[0]?.bbox?.y0 ?? 0 });
+            }
+        }
+    }
+    if (!lines.length) return flat;
+
+    // Character width unit: median per-glyph width across all words.
+    const glyphWidths: number[] = [];
+    for (const l of lines) for (const w of l.words) if (w.text.length) glyphWidths.push((w.x1 - w.x0) / w.text.length);
+    const charWidth = median(glyphWidths.filter(v => v > 0)) || 8;
+
+    // Left-normalize so the leftmost word sits at column 0 (no giant leading indent).
+    let minX = Infinity;
+    for (const l of lines) for (const w of l.words) minX = Math.min(minX, w.x0);
+    if (!Number.isFinite(minX)) minX = 0;
+
+    lines.sort((a, b) => a.y0 - b.y0);
+    const pitches: number[] = [];
+    for (let i = 1; i < lines.length; i++) pitches.push(lines[i].y0 - lines[i - 1].y0);
+    const linePitch = median(pitches.filter(v => v > 0)) || charWidth * 2;
+
+    const out: string[] = [];
+    let prevY: number | null = null;
+    for (const l of lines) {
+        if (prevY !== null && l.y0 - prevY > 1.8 * linePitch) out.push(''); // blank line for a big vertical gap
+        prevY = l.y0;
+        let s = '';
+        let col = 0;
+        for (const w of l.words) {
+            const target = Math.max(col, Math.round((w.x0 - minX) / charWidth));
+            if (target > col) { s += ' '.repeat(target - col); col = target; }
+            else if (s.length && !s.endsWith(' ')) { s += ' '; col += 1; } // always keep words apart
+            s += w.text;
+            col += w.text.length;
+        }
+        out.push(s.replace(/\s+$/, ''));
+    }
+    return out.join('\n');
+}
+
 /**
  * Wraps a promise in a timeout.
- * 
+ *
  * @param promise - The promise to wrap
  * @param ms - Timeout duration in milliseconds
  * @param errMsg - Error message to throw if timeout occurs
@@ -392,12 +463,17 @@ class OcrSchedulerManager {
         managed.activeJob = job;
 
         try {
-            const recognizePromise = managed.worker.recognize(job.image);
-            const { data: { text } } = recogTimeout > 0
+            // When preserving layout (default), ask Tesseract for the block/word tree so we can
+            // rebuild the 2-D page layout from per-word boxes; otherwise the flat text is enough.
+            const wantLayout = job.config.preserveLayout !== false;
+            const recognizePromise = wantLayout
+                ? managed.worker.recognize(job.image, {}, { text: true, blocks: true })
+                : managed.worker.recognize(job.image);
+            const { data } = recogTimeout > 0
                 ? await withTimeout(recognizePromise, recogTimeout, `OCR recognition timed out after ${recogTimeout}ms`)
                 : await recognizePromise;
 
-            job.resolve(text);
+            job.resolve(wantLayout ? layoutOcrText(data) : (data.text || ''));
         } catch (err: any) {
             // If it timed out, terminate and remove worker to avoid reusing a stuck process
             if (err.message?.includes('timed out')) {

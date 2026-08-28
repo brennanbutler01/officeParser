@@ -790,8 +790,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const attachmentName = meta?.attachmentName;
                 const ocr = (node.text || '').trim();
 
-                // ocrtext-only: emit the recognized text as a visible block, no <img>.
-                if (mode === 'ocrtext-only') return ocr ? `${extraAnchors}<div${idAttr}>${this.escape(ocr)}</div>` : '';
+                // ocrtext-only: emit the recognized text as a visible block, no <img>. A <pre>
+                // preserves the 2-D column layout the OCR reconstruction encodes with spaces.
+                if (mode === 'ocrtext-only') return ocr ? `${extraAnchors}<pre class="ocr-text"${idAttr}>${this.escape(ocr)}</pre>` : '';
 
                 let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
@@ -835,8 +836,8 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 // it into the rendered page).
                 const img = `<img src="${sanitizeImageUrl(src)}" alt="${this.escape(meta?.altText || '')}"${imgTitle}${className}${mappedAttrs}${imgDataAttrs}${imgStyleAttr}>`;
                 let content = this.config.includeFormatting ? `<div class="image-container">${img}<div class="caption">${this.escape(attachmentName || '')}</div></div>` : img;
-                // image+ocrtext: the image, then its recognized text as a visible block.
-                if (mode === 'image+ocrtext' && ocr) content += `<div class="ocr-text">${this.escape(ocr)}</div>`;
+                // image+ocrtext: the image, then its recognized text (a <pre> keeps the 2-D layout).
+                if (mode === 'image+ocrtext' && ocr) content += `<pre class="ocr-text">${this.escape(ocr)}</pre>`;
                 return `${extraAnchors}<div${idAttr}>${content}</div>`;
             }
 
@@ -1941,6 +1942,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
             .image-container { text-align: center; margin: 30px 0; }
             .caption { font-size: 0.8em; color: #636e72; margin-top: 8px; font-style: italic; }
+            .ocr-text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85em; line-height: 1.4; white-space: pre; overflow-x: auto; margin: 8px 0; color: #2d3436; }
             
             body { margin: 0; padding: 0; }
             

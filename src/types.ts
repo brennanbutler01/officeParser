@@ -211,6 +211,20 @@ export interface OcrConfig {
      */
     langPath?: string;
     /**
+     * Reconstruct the recognized text's two-dimensional page layout from Tesseract's per-word
+     * bounding boxes, instead of returning the flat, linearized string. Words keep their relative
+     * horizontal position (right-hand text stays on the right, columns line up) and lines/blocks keep
+     * their vertical order and gaps, so a scanned table, form or multi-column page reads spatially -
+     * the same idea as `textConfig.preserveLayout` for born-digital PDF text. The block is
+     * left-normalized so there is no large leading indent.
+     *
+     * Turn it off to get Tesseract's flat reading-order text (a single space between words, one line
+     * per line). Simple images (a logo, a caption) read almost identically either way.
+     *
+     * Default is true.
+     */
+    preserveLayout?: boolean;
+    /**
      * Consolidated timeout settings for all OCR operations.
      * 
      * Prefer this over the deprecated flat timeout properties.

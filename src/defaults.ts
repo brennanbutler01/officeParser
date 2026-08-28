@@ -30,6 +30,7 @@ const DEFAULT_OCR_CONFIG: DeepRequired<OcrConfig> = {
     workerPath: '',
     corePath: '',
     langPath: '',
+    preserveLayout: true,
     // Preferred: consolidated timeout object.  New code should always read from here.
     timeout: DEFAULT_OCR_TIMEOUT,
     // Kept for backward compatibility.  When timeout.autoTerminate is set (as above),
