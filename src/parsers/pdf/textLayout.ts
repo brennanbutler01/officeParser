@@ -11,7 +11,7 @@
  * @module parsers/pdf/textLayout
  */
 
-import { NodeBounds, OfficeContentNode, TextFormatting, TextMetadata } from '../../types.js';
+import { ListMetadata, NodeBounds, OfficeContentNode, TextFormatting, TextMetadata } from '../../types.js';
 import { rotateBoundsToRendered, roundBounds, unionAll, unionBounds } from './geometry.js';
 import { PdfLayoutConfig, PdfLine, RawRun, TextFragment } from './pdfTypes.js';
 
@@ -328,6 +328,8 @@ export interface DocContext {
     /** Heading level (1..6) for a rounded font size, or 0 when that size is body text. */
     headingLevelForSize: (roundedSize: number) => number;
     newlineDelimiter: string;
+    /** Monotonic counter giving each reconstructed geometric list a unique `listId`. */
+    listCounter: { n: number };
 }
 
 /** Per-page facts needed to place bounds in rendered space. */
@@ -362,6 +364,7 @@ export function computeDocContext(allRuns: RawRun[], cfg: PdfLayoutConfig, newli
     return {
         cfg, bodyFontSize, newlineDelimiter,
         headingLevelForSize: (s: number) => levelForSize.get(s) ?? 0,
+        listCounter: { n: 0 },
     };
 }
 
@@ -408,15 +411,192 @@ function finishGroup(lines: PdfLine[]): ParaGroup {
     return { lines, fontSize: size, bold: totalChars > 0 && boldChars * 2 > totalChars };
 }
 
+// ── geometric list detection ─────────────────────────────────────────────────
+
+/** A recognized list marker at the start of a paragraph group. */
+interface ListMarker {
+    type: 'ordered' | 'unordered';
+    /** The exact leading token (incl. trailing whitespace) to strip from the item text. */
+    raw: string;
+    /** The ordinal an ordered marker represents (1-based), or null for unordered/unparseable. */
+    number: number | null;
+    /** True for a real bullet glyph (•, ◦, ▪ …) rather than the ambiguous "-"/"*" forms. */
+    strongBullet: boolean;
+}
+
+const BULLET_GLYPHS = '•◦▪‣·○●■□∙-';
+const UNORDERED_RE = new RegExp(`^([${BULLET_GLYPHS}]|\\*)[ \\t\\u00a0]+`);
+const ORDERED_RE = /^\(?([0-9]{1,3}|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,7})[.)][ \t ]+/;
+
+/** Escapes a literal string for safe insertion into a RegExp. */
+function escapeRe(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function romanValue(s: string): number {
+    const map: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+    const t = s.toLowerCase();
+    let total = 0, prev = 0;
+    for (let i = t.length - 1; i >= 0; i--) {
+        const v = map[t[i]];
+        if (!v) return 0;
+        total += v < prev ? -v : v;
+        prev = v;
+    }
+    return total;
+}
+
+/** Detects a list marker at the start of a group's first line, or null. */
+function detectListMarker(group: ParaGroup): ListMarker | null {
+    const first = (group.lines[0]?.fragments[0]?.text ?? '').replace(/^\s+/, '');
+    if (!first) return null;
+    const u = UNORDERED_RE.exec(first);
+    if (u) return { type: 'unordered', raw: u[0], number: null, strongBullet: u[1] !== '-' && u[1] !== '*' };
+    const o = ORDERED_RE.exec(first);
+    if (o) {
+        const core = o[1];
+        let n: number | null = null;
+        if (/^[0-9]+$/.test(core)) n = parseInt(core, 10);
+        else if (/^[ivxlcdm]+$/i.test(core)) { const r = romanValue(core); n = r > 0 ? r : null; }
+        else if (/^[a-z]$/i.test(core)) n = core.toLowerCase().charCodeAt(0) - 96;
+        return { type: 'ordered', raw: o[0], number: n, strongBullet: false };
+    }
+    return null;
+}
+
+/** Buckets marker left-edges into 0-based indent levels (each distinct column ~a nesting level). */
+function indentLevels(lefts: number[]): (x: number) => number {
+    const sorted = [...new Set(lefts.map(x => Math.round(x)))].sort((a, b) => a - b);
+    const levels: number[] = [];
+    for (const x of sorted) {
+        if (!levels.length || x - levels[levels.length - 1] > 12) levels.push(x);
+    }
+    return (x: number) => {
+        let lvl = 0;
+        for (let i = 0; i < levels.length; i++) if (x >= levels[i] - 6) lvl = i;
+        return lvl;
+    };
+}
+
+/** Removes a list marker (e.g. "•", "1.", "(a)") plus its trailing space from a node's aggregate
+ *  text and its first text run. */
+function stripMarkerFrom(node: OfficeContentNode, raw: string): void {
+    const re = new RegExp('^\\s*' + escapeRe(raw.trim()) + '[ \\t\\u00a0]*');
+    if (node.text) node.text = node.text.replace(re, '');
+    const strip = (n: OfficeContentNode): boolean => {
+        if (n.type === 'text' && typeof n.text === 'string' && re.test(n.text)) { n.text = n.text.replace(re, ''); return true; }
+        for (const c of n.children || []) if (strip(c)) return true;
+        return false;
+    };
+    for (const c of node.children || []) if (strip(c)) break;
+}
+
+/** A marker that stands alone as its own atom (e.g. "1.1.1.", "i.", "•"), split from its item text. */
+const STANDALONE_MARKER_RE = /^(?:[•◦▪‣·○●■□∙]|\(?(?:\d+(?:\.\d+)*|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,7})[.)])$/;
+
+/** Parses a standalone marker token into a {@link ListMarker} (raw empty - nothing to strip). */
+function parseStandaloneMarker(t: string): ListMarker | null {
+    if (/^[•◦▪‣·○●■□∙]$/.test(t)) return { type: 'unordered', raw: '', number: null, strongBullet: true };
+    const m = /^\(?(\d+(?:\.\d+)*|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,7})[.)]$/.exec(t);
+    if (!m) return null;
+    const core = m[1];
+    const last = core.includes('.') ? (core.split('.').filter(Boolean).pop() ?? core) : core;
+    let num: number | null = null;
+    if (/^\d+$/.test(last)) num = parseInt(last, 10);
+    else if (/^[ivxlcdm]+$/i.test(last)) { const r = romanValue(last); num = r > 0 ? r : null; }
+    else if (/^[a-z]$/i.test(last)) num = last.toLowerCase().charCodeAt(0) - 96;
+    return { type: 'ordered', raw: '', number: num, strongBullet: false };
+}
+
+/** All the visible text of a paragraph group, concatenated and trimmed. */
+function groupText(g: ParaGroup): string {
+    return g.lines.flatMap(l => l.fragments.map(f => f.text)).join('').trim();
+}
+
 /**
- * Turns a block's lines into paragraph and heading nodes: joins lines (with hyphenation repair),
- * classifies headings per paragraph, and attaches per-line text runs plus bounds.
+ * Turns a block's lines into paragraph, heading and list nodes. Line groups are formed as
+ * paragraphs (with hyphenation repair), then two list shapes are recovered geometrically:
+ *
+ * 1. A marker that prefixes its item text ("• item", "1. item").
+ * 2. A marker drawn as its own atom in the hanging indent, with the item text a separate group on
+ *    the same baseline to its right ("1.1.1." | "Three") - the usual multi-level / roman-numeral case
+ *    a PDF producer emits.
+ *
+ * To keep prose safe, an ambiguous "-"/"*" prefix or a lone numbered prefix only counts as a list
+ * when a neighbour carries a compatible marker; an unambiguous bullet glyph, or a separate marker
+ * atom sitting beside its text, counts on its own. Nesting level comes from the marker's indent.
  */
 export function blockToNodes(block: PdfLine[], page: PageContext, doc: DocContext): OfficeContentNode[] {
+    const groups = groupParagraphs(block);
+    const N = groups.length;
+    const baseOf = (g: ParaGroup) => g.lines[0]?.baseline ?? 0;
+    const leftOf = (g: ParaGroup) => Math.min(...g.lines.map(l => l.x));
+
+    const dropped = new Array<boolean>(N).fill(false);
+    const attached: (ListMarker | null)[] = new Array(N).fill(null); // separate marker merged onto a group
+    const markerLeft: (number | null)[] = new Array(N).fill(null);   // the marker's own x (for nesting)
+
+    // Fold a standalone marker atom into the item-text group sharing its baseline, just to its right.
+    for (let i = 0; i < N; i++) {
+        if (dropped[i]) continue;
+        const t = groupText(groups[i]);
+        if (!STANDALONE_MARKER_RE.test(t)) continue;
+        const mk = parseStandaloneMarker(t);
+        if (!mk) continue;
+        const yb = baseOf(groups[i]), xr = leftOf(groups[i]), fs = groups[i].fontSize || 12;
+        let best = -1, bestDx = Infinity;
+        for (let j = 0; j < N; j++) {
+            if (j === i || dropped[j] || attached[j]) continue;
+            if (Math.abs(baseOf(groups[j]) - yb) > 0.6 * fs) continue;
+            const dx = leftOf(groups[j]) - xr;
+            if (dx <= 0) continue; // the text must be to the marker's right
+            if (dx < bestDx) { bestDx = dx; best = j; }
+        }
+        if (best >= 0 && bestDx < 6 * fs) { attached[best] = mk; markerLeft[best] = xr; dropped[i] = true; }
+    }
+
+    const prefix: (ListMarker | null)[] = groups.map((g, i) => (dropped[i] || attached[i]) ? null : detectListMarker(g));
+    const effective: (ListMarker | null)[] = groups.map((_, i) => attached[i] || prefix[i]);
+    const isItem = effective.map((m, i) => {
+        if (dropped[i] || !m) return false;
+        if (attached[i] || m.strongBullet) return true;         // separate atom or real bullet: strong
+        const prev = effective[i - 1], next = effective[i + 1]; // else require a run of compatible markers
+        return (!!prev && prev.type === m.type) || (!!next && next.type === m.type);
+    });
+
+    const itemLefts = groups.map((g, i) => isItem[i] ? (markerLeft[i] ?? leftOf(g)) : null).filter((x): x is number => x != null);
+    const levelFor = indentLevels(itemLefts);
+
     const nodes: OfficeContentNode[] = [];
-    for (const group of groupParagraphs(block)) {
-        const node = paragraphNode(group, page, doc);
-        if (node && (node.text || '').trim().length) nodes.push(node);
+    let listId: string | null = null;
+    let itemInList = 0;
+    let prevWasItem = false;
+    for (let i = 0; i < N; i++) {
+        if (dropped[i]) continue;
+        if (!isItem[i]) {
+            listId = null; prevWasItem = false;
+            const node = paragraphNode(groups[i], page, doc);
+            if (node && (node.text || '').trim().length) nodes.push(node);
+            continue;
+        }
+        if (!prevWasItem) { listId = `pdf-geo-list-${++doc.listCounter.n}`; itemInList = 0; }
+        const marker = effective[i]!;
+        const p = paragraphNode(groups[i], page, doc, 0);
+        if (!p) { prevWasItem = false; continue; }
+        if (marker.raw) stripMarkerFrom(p, marker.raw);
+        if (!(p.text || '').trim().length) { prevWasItem = false; continue; }
+        const meta: ListMetadata = {
+            listType: marker.type,
+            indentation: levelFor(markerLeft[i] ?? leftOf(groups[i])),
+            alignment: 'left',
+            listId: listId!,
+            // Number ordered items from the marker the PDF rendered (so an interrupted list resumes);
+            // fall back to the running position within this list.
+            itemIndex: marker.type === 'ordered' && marker.number != null && marker.number >= 1 ? marker.number - 1 : itemInList,
+        };
+        itemInList++;
+        prevWasItem = true;
+        const item: OfficeContentNode = { type: 'list', text: p.text, children: p.children, metadata: meta };
+        if (p.bounds) item.bounds = p.bounds;
+        nodes.push(item);
     }
     return nodes;
 }
