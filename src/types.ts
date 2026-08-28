@@ -515,6 +515,21 @@ export interface PdfParserConfig {
      * Default is false.
      */
     disableTextNormalization?: boolean;
+    /**
+     * Extract each text run's fill color into `formatting.color` (hex `#rrggbb`). pdf.js exposes no
+     * color on its text content, so this is recovered from the page's operator list, which must then
+     * be fetched for every page - roughly doubling parse time on a text-heavy PDF. It is therefore
+     * off by default; turn it on when you need colored text and can afford the cost. Pure black
+     * (`#000000`) is treated as the default and left unset, so only genuinely colored text carries a
+     * `color`, mirroring how the DOCX/RTF parsers report it. Runs painted with a pattern, shading or
+     * transparent fill are left uncolored rather than guessed.
+     *
+     * Highlight annotations are unaffected by this flag: they populate `formatting.backgroundColor`
+     * regardless, since they come from the annotation list that is already read for hyperlinks.
+     *
+     * Default is false.
+     */
+    extractTextColor?: boolean;
 }
 
 /**

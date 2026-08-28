@@ -39,6 +39,7 @@ import { checkAbortSignal, getOfficeError, logWarning } from '../utils/errorUtil
 import { createAttachment } from '../utils/imageUtils.js';
 import { loadPdfJs } from '../utils/moduleLoader.js';
 import { performOcr } from '../utils/ocrUtils.js';
+import { collectColorMarks, ColorLookup, makeColorLookup } from './pdf/pdfColor.js';
 import { computeRunBox, roundBounds, rotateBoundsToRendered, unionAll } from './pdf/geometry.js';
 import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
 import { blockToNodes, buildLines, computeDocContext, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
@@ -54,6 +55,13 @@ interface ResolvedLink {
     /** Rect in layout (rotation-0) viewport space: [minX, minY, maxX, maxY]. */
     rect: [number, number, number, number];
     meta: TextMetadata;
+}
+
+/** A highlight annotation quad matched to text by geometric overlap; `color` is a hex string. */
+interface ResolvedHighlight {
+    /** Rect in layout (rotation-0) viewport space: [minX, minY, maxX, maxY]. */
+    rect: [number, number, number, number];
+    color: string;
 }
 
 /** Precomputed CRC-32 table (polynomial 0xEDB88320) for PNG chunk checksums. */
@@ -173,6 +181,7 @@ function resolvePdfLayoutConfig(config: FullOfficeParserConfig): PdfLayoutConfig
         spaceToleranceFactor: num(p.spaceToleranceFactor, 0.25),
         headingDetection: p.headingDetection ?? 'auto',
         disableTextNormalization: !!p.disableTextNormalization,
+        extractTextColor: !!p.extractTextColor,
         includePositions: !config.ignorePositions,
     };
 }
@@ -241,19 +250,59 @@ function toViewportRect(viewport: any, rect: number[]): [number, number, number,
     return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
 }
 
-/** Resolves a page's Link annotations into geometry + hyperlink metadata (honoring config flags). */
+/** True for a color at or extremely close to black (the default text fill), so it is not reported. */
+function isNearBlack(hex: string): boolean {
+    const h = hex.replace(/^#/, '');
+    if (h.length !== 6) return hex === '#000000';
+    return parseInt(h.slice(0, 2), 16) <= 8 && parseInt(h.slice(2, 4), 16) <= 8 && parseInt(h.slice(4, 6), 16) <= 8;
+}
+
+/** Converts an [r,g,b] byte triple (pdf.js annotation color) to a lowercase `#rrggbb` hex string. */
+function rgbArrayToHex(c: ArrayLike<number> | null | undefined): string | undefined {
+    if (!c || c.length < 3) return undefined;
+    const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+    return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
+}
+
+/** Maps a highlight annotation's quadPoints (or its rect) to per-quad viewport rects. */
+function highlightRects(viewport: any, annot: any): [number, number, number, number][] {
+    const qp: ArrayLike<number> | undefined = annot.quadPoints;
+    if (qp && qp.length >= 8) {
+        const rects: [number, number, number, number][] = [];
+        for (let i = 0; i + 8 <= qp.length; i += 8) {
+            const xs = [qp[i], qp[i + 2], qp[i + 4], qp[i + 6]];
+            const ys = [qp[i + 1], qp[i + 3], qp[i + 5], qp[i + 7]];
+            rects.push(toViewportRect(viewport, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]));
+        }
+        return rects;
+    }
+    return annot.rect ? [toViewportRect(viewport, annot.rect)] : [];
+}
+
+/**
+ * Resolves a page's Link and Highlight annotations. Links become geometry + hyperlink metadata
+ * (honoring config flags); highlights become per-quad viewport rects carrying their color, so a run
+ * they cover gets a `backgroundColor`. Both come from the single `getAnnotations()` call.
+ */
 async function resolveAnnotations(
     page: any, viewport: any, pdfDocument: any, config: FullOfficeParserConfig, destCache: Map<string, string | null>,
-): Promise<ResolvedLink[]> {
-    const out: ResolvedLink[] = [];
+): Promise<{ links: ResolvedLink[]; highlights: ResolvedHighlight[] }> {
+    const links: ResolvedLink[] = [];
+    const highlights: ResolvedHighlight[] = [];
     let annots: any[];
     try {
         annots = await page.getAnnotations();
     } catch (e) {
         logWarning(OfficeWarningType.ANNOTATION_EXTRACTION_FAILED, config, page.pageNumber, e);
-        return out;
+        return { links, highlights };
     }
     for (const annot of annots) {
+        if (annot.subtype === 'Highlight') {
+            // A highlight with no /C renders yellow (pdf.js synthesizes that appearance), so mirror it.
+            const color = rgbArrayToHex(annot.color) ?? '#ffff00';
+            for (const rect of highlightRects(viewport, annot)) highlights.push({ rect, color });
+            continue;
+        }
         if (annot.subtype !== 'Link' || !annot.rect) continue;
         const url: string | undefined = annot.url || annot.unsafeUrl || annot.data?.url;
         let meta: TextMetadata | undefined;
@@ -266,9 +315,19 @@ async function resolveAnnotations(
             const href = await resolveDest(annot.dest, pdfDocument, destCache);
             meta = { link: href, linkType: 'internal' };
         }
-        if (meta) out.push({ rect: toViewportRect(viewport, annot.rect), meta });
+        if (meta) links.push({ rect: toViewportRect(viewport, annot.rect), meta });
     }
-    return out;
+    return { links, highlights };
+}
+
+/** Finds the highlight color covering a run: its vertical midpoint inside a quad with horizontal overlap. */
+function highlightForBox(x: number, yTop: number, w: number, h: number, highlights: ResolvedHighlight[]): string | undefined {
+    const midY = yTop + h / 2, minX = x, maxX = x + w;
+    for (const hl of highlights) {
+        const [lx1, ly1, lx2, ly2] = hl.rect;
+        if (midY >= ly1 && midY <= ly2 && minX < lx2 && maxX > lx1) return hl.color;
+    }
+    return undefined;
 }
 
 /** Resolves an internal destination to `#page=N` when cheaply possible, else `#internal`. */
@@ -435,12 +494,17 @@ async function collectPage(
     for (const item of textContent.items) if (isTextItem(item) && item.fontName) seen.add(item.fontName);
     const needFonts = [...seen].some(k => !fontCache.has(k));
     let ops: any = null;
-    if (needFonts || config.extractAttachments || config.ocr) {
+    if (needFonts || config.extractAttachments || config.ocr || pdfCfg.extractTextColor) {
         try { ops = await page.getOperatorList(); } catch { ops = null; }
     }
     for (const key of seen) if (!fontCache.has(key)) fontCache.set(key, await resolveFont(key, page.commonObjs, styles));
 
-    const links = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache);
+    // Per-run fill color (opt-in): recovered from the operator list, which is now fetched above.
+    const colorFor: ColorLookup | null = (pdfCfg.extractTextColor && ops)
+        ? makeColorLookup(collectColorMarks(ops, layoutViewport.transform, pdfjs.OPS))
+        : null;
+
+    const { links, highlights } = await resolveAnnotations(page, layoutViewport, pdfDocument, config, destCache);
 
     // Walk items, tracking the marked-content stack for mcid / Artifact scope.
     const stack: { id: string | null; tag: string | null }[] = [];
@@ -465,6 +529,16 @@ async function collectPage(
         if (font.bold) formatting.bold = true;
         if (font.italic) formatting.italic = true;
         formatting.size = String(Math.round(box.fontSize * 2) / 2);
+        // Fill color (opt-in): skip near-black, the default, so only real colors are reported.
+        if (colorFor) {
+            const color = colorFor(box.x, box.yBaseline, box.fontSize, box.width);
+            if (color && !isNearBlack(color)) formatting.color = color;
+        }
+        // Highlight background (always on; from the annotation list already read above).
+        if (highlights.length) {
+            const bg = highlightForBox(box.x, box.yTop, box.width, box.height, highlights);
+            if (bg) formatting.backgroundColor = bg;
+        }
 
         let mcid: string | null = null, inArtifact = false;
         for (let i = stack.length - 1; i >= 0; i--) {

@@ -121,6 +121,8 @@ export interface PdfLayoutConfig {
     spaceToleranceFactor: number;
     headingDetection: 'auto' | 'font-size' | 'off';
     disableTextNormalization: boolean;
+    /** Extract per-run fill color from the operator list into `formatting.color` (costs an op-list fetch per page). */
+    extractTextColor: boolean;
     /** When false, geometry is not written onto emitted nodes. */
     includePositions: boolean;
 }

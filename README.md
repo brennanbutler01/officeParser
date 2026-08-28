@@ -999,6 +999,7 @@ PDF-specific options, passed as `pdfParserConfig` on the parser config.
 | `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | Heading detection strategy on the geometric path |
 | `pageRange` | `string` | `''` (all) | Restrict to given pages, e.g. `'1-3,7'`. Output keeps original page numbers |
 | `disableTextNormalization` | `boolean` | `false` | Return un-normalized text (preserve ligatures, combining marks, original whitespace) |
+| `extractTextColor` | `boolean` | `false` | Extract each run's fill color into `formatting.color`. Recovered from the operator list (fetched per page), so it roughly doubles parse time; pure black is left unset. Highlight annotations set `formatting.backgroundColor` regardless of this flag |
 
 ---
 
