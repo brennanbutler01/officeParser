@@ -1,0 +1,482 @@
+/**
+ * A first-party PDF layout engine built directly on `pdf-lib`, an alternative to the default
+ * HTML-through-a-headless-browser route (`PdfGenerator`'s Puppeteer path).
+ *
+ * It walks the AST and paints it onto pages itself - text with inline bold/italic/size/color,
+ * headings, lists (bulleted and numbered, nested), grid tables with borders, embedded images, page
+ * breaks and horizontal rules - handling word wrapping and pagination as it goes. It needs no browser
+ * and runs unchanged in Node and the browser, so it is the way to produce a real PDF client-side (the
+ * browser Puppeteer path can only hand back HTML). Its trade-off is fidelity: it uses the Standard-14
+ * fonts (Helvetica / Times / Courier families) rather than the document's own, and its layout is a
+ * clean reflow, not a pixel match of the HTML renderer. Choose it with `pdfConfig.engine: 'native'`.
+ *
+ * `pdf-lib` is an optional peer dependency, imported lazily so it is only required when this engine
+ * is selected.
+ *
+ * @module generators/pdf/nativePdfEngine
+ */
+
+import { FullGeneratorConfig, OfficeContentNode, OfficeErrorType, OfficeParserAST, TextFormatting } from '../../types.js';
+import { getAbortError, getOfficeError } from '../../utils/errorUtils.js';
+
+/** Paper sizes in PDF points (1/72"), keyed by the lowercased `pdfConfig.format`. */
+const PAGE_SIZES: Record<string, [number, number]> = {
+    letter: [612, 792], legal: [612, 1008], tabloid: [792, 1224], ledger: [1224, 792],
+    a0: [2383.94, 3370.39], a1: [1683.78, 2383.94], a2: [1190.55, 1683.78], a3: [841.89, 1190.55],
+    a4: [595.28, 841.89], a5: [419.53, 595.28], a6: [297.64, 419.53],
+};
+
+/** Lazily loads `pdf-lib`, throwing a typed, actionable error when it is not installed. */
+async function loadPdfLib(config: OfficeParserAST['config']): Promise<any> {
+    try {
+        // @ts-ignore - optional peer dependency, resolved at runtime
+        return await import('pdf-lib');
+    } catch (e) {
+        throw getOfficeError(OfficeErrorType.PDF_GENERATION_FAILED, config,
+            "The native PDF engine requires the optional peer dependency 'pdf-lib'. Install it with `npm install pdf-lib`, or use the default engine (pdfConfig.engine: 'html').");
+    }
+}
+
+/** Resolves a numeric length from a pdf.js-style value that may be a number (px) or a unit string. */
+function toPoints(v: string | number | undefined, fallback: number): number {
+    if (typeof v === 'number' && Number.isFinite(v)) return v * 0.75; // css px -> pt
+    if (typeof v === 'string') {
+        const m = /^([\d.]+)\s*(pt|px|in|cm|mm)?$/.exec(v.trim());
+        if (m) {
+            const n = parseFloat(m[1]);
+            switch (m[2]) {
+                case 'in': return n * 72;
+                case 'cm': return n * 28.3465;
+                case 'mm': return n * 2.83465;
+                case 'pt': return n;
+                default: return n * 0.75; // px
+            }
+        }
+    }
+    return fallback;
+}
+
+/** A single word ready to place, carrying the font/size/color it should be drawn with. */
+interface Piece { text: string; font: any; size: number; color: any; underline: boolean; }
+
+/** The embedded Standard-14 fonts the engine draws with. */
+interface Fonts { regular: any; bold: any; italic: any; boldItalic: any; mono: any; }
+
+/**
+ * Stateful layout cursor: owns the pdf-lib document, the current page and the y position, and knows
+ * how to wrap text, paginate, and paint each node type.
+ */
+class NativeLayout {
+    private page: any;
+    /** Distance of the cursor from the top of the page, in points (converted to pdf-lib's y-up on draw). */
+    private y = 0;
+
+    constructor(
+        private readonly pdf: any,
+        private readonly lib: any,
+        private readonly fonts: Fonts,
+        private readonly pageW: number,
+        private readonly pageH: number,
+        private readonly margin: { top: number; right: number; bottom: number; left: number },
+        private readonly config: FullGeneratorConfig,
+        private readonly ast: OfficeParserAST,
+    ) {
+        this.newPage();
+    }
+
+    private get contentWidth(): number { return this.pageW - this.margin.left - this.margin.right; }
+    private get bottom(): number { return this.pageH - this.margin.bottom; }
+
+    /** Starts a fresh page and resets the cursor to the top margin. */
+    private newPage(): void {
+        this.page = this.pdf.addPage([this.pageW, this.pageH]);
+        this.y = this.margin.top;
+    }
+
+    /** Ensures `h` points of vertical space remain, starting a new page if not. */
+    private ensureSpace(h: number): void {
+        if (this.y + h > this.bottom) this.newPage();
+    }
+
+    /** Picks the font matching a run's formatting (mono for code, bold/italic variants otherwise). */
+    private fontFor(fmt: TextFormatting | undefined, mono: boolean): any {
+        if (mono) return this.fonts.mono;
+        const bold = !!fmt?.bold, italic = !!fmt?.italic;
+        if (bold && italic) return this.fonts.boldItalic;
+        if (bold) return this.fonts.bold;
+        if (italic) return this.fonts.italic;
+        return this.fonts.regular;
+    }
+
+    /** Parses a `#rrggbb` (or `#rgb`) hex color into a pdf-lib rgb color, or null. */
+    private color(hex: string | undefined): any {
+        if (!hex || typeof hex !== 'string') return null;
+        let h = hex.trim().replace(/^#/, '');
+        if (h.length === 3) h = h.split('').map(c => c + c).join('');
+        if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+        const n = parseInt(h, 16);
+        return this.lib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+    }
+
+    /** Flattens a node into inline text runs (text + formatting + link flag), recursing into children. */
+    private collectRuns(node: OfficeContentNode): { text: string; fmt: TextFormatting; link: boolean }[] {
+        const out: { text: string; fmt: TextFormatting; link: boolean }[] = [];
+        const walk = (n: OfficeContentNode, inherited: TextFormatting) => {
+            const fmt = { ...inherited, ...(n.formatting || {}) };
+            const link = !!(n.metadata as any)?.link;
+            if (n.type === 'text' || (!n.children?.length && n.text)) {
+                if (n.text) out.push({ text: n.text, fmt, link });
+                return;
+            }
+            for (const c of n.children || []) walk(c, fmt);
+        };
+        walk(node, {});
+        if (!out.length && node.text) out.push({ text: node.text, fmt: node.formatting || {}, link: false });
+        return out;
+    }
+
+    /**
+     * Wraps a set of inline runs into lines within `[left, left+width]` and draws them, paginating as
+     * needed. Returns nothing; advances the cursor to just below the last line.
+     */
+    private drawRuns(runs: { text: string; fmt: TextFormatting; link: boolean }[], left: number, width: number, mono = false): void {
+        // Expand runs into per-word pieces (a trailing-space flag lets us re-insert inter-word gaps).
+        const pieces: { p: Piece; space: boolean }[] = [];
+        for (const run of runs) {
+            const font = this.fontFor(run.fmt, mono);
+            const size = parseFontSize(run.fmt.size) ?? (mono ? 10 : 11);
+            const color = run.link ? this.lib.rgb(0.1, 0.32, 0.72) : (this.color(run.fmt.color) ?? this.lib.rgb(0.12, 0.12, 0.12));
+            const underline = !!(run.fmt.underline || run.link);
+            const words = run.text.split(/(\s+)/);
+            for (const w of words) {
+                if (w === '') continue;
+                if (/^\s+$/.test(w)) { if (pieces.length) pieces[pieces.length - 1].space = true; continue; }
+                // Split a word wider than the whole line at character boundaries so it wraps instead
+                // of running off the page (a long URL, a hash, a base64 token).
+                for (const chunk of splitToWidth(w, font, size, width)) {
+                    pieces.push({ p: { text: chunk, font, size, color, underline }, space: false });
+                }
+            }
+        }
+        if (!pieces.length) return;
+
+        const spaceWidth = (p: Piece) => p.font.widthOfTextAtSize(' ', p.size);
+        let line: { p: Piece; space: boolean; w: number }[] = [];
+        let lineWidth = 0;
+
+        const flush = () => {
+            if (!line.length) return;
+            const lh = Math.max(...line.map(it => it.p.size)) * 1.35;
+            this.ensureSpace(lh);
+            let x = left;
+            const baseline = this.pageH - this.y - Math.max(...line.map(it => it.p.size));
+            for (const it of line) {
+                this.page.drawText(it.p.text, { x, y: baseline, size: it.p.size, font: it.p.font, color: it.p.color });
+                if (it.p.underline) {
+                    this.page.drawLine({ start: { x, y: baseline - 1.5 }, end: { x: x + it.w, y: baseline - 1.5 }, thickness: 0.5, color: it.p.color });
+                }
+                x += it.w + (it.space ? spaceWidth(it.p) : 0);
+            }
+            this.y += lh;
+            line = [];
+            lineWidth = 0;
+        };
+
+        for (const piece of pieces) {
+            const w = piece.p.font.widthOfTextAtSize(piece.p.text, piece.p.size);
+            const gap = line.length ? spaceWidth(line[line.length - 1].p) : 0;
+            if (line.length && lineWidth + gap + w > width) flush();
+            line.push({ p: piece.p, space: piece.space, w });
+            lineWidth += (line.length > 1 ? gap : 0) + w;
+        }
+        flush();
+    }
+
+    /** Entry point: renders any node, dispatching by type. */
+    async render(node: OfficeContentNode): Promise<void> {
+        if (this.config.abortSignal?.aborted) throw getAbortError();
+        switch (node.type) {
+            case 'page':
+            case 'slide':
+            case 'sheet':
+            case 'header':
+            case 'footer':
+                for (const c of node.children || []) await this.render(c);
+                this.y += 4;
+                return;
+            case 'heading': return this.heading(node);
+            case 'paragraph': return this.paragraph(node);
+            case 'list': return this.listItem(node);
+            case 'table': return this.table(node);
+            case 'image': return this.image(node);
+            case 'code': return this.code(node);
+            case 'note': return this.note(node);
+            case 'break': return this.breakNode(node);
+            default:
+                if (node.children?.length) { for (const c of node.children) await this.render(c); }
+                else if (node.text) this.paragraph(node);
+                return;
+        }
+    }
+
+    private heading(node: OfficeContentNode): void {
+        const level = Math.min(6, Math.max(1, (node.metadata as any)?.level || 1));
+        const size = [24, 20, 16, 14, 12, 11][level - 1];
+        this.y += size * 0.6;
+        const runs = this.collectRuns(node).map(r => ({ ...r, fmt: { ...r.fmt, bold: true, size: `${size}pt` } }));
+        this.drawRuns(runs.length ? runs : [{ text: node.text || '', fmt: { bold: true, size: `${size}pt` }, link: false }], this.margin.left, this.contentWidth);
+        this.y += size * 0.35;
+    }
+
+    private paragraph(node: OfficeContentNode, indentLeft = 0): void {
+        const runs = this.collectRuns(node);
+        if (!runs.length) { this.y += 6; return; }
+        this.drawRuns(runs, this.margin.left + indentLeft, this.contentWidth - indentLeft);
+        this.y += 6;
+    }
+
+    private listItem(node: OfficeContentNode): void {
+        const meta = node.metadata as any;
+        const level = Math.max(0, meta?.indentation || 0);
+        const indent = 18 + level * 18;
+        const ordered = meta?.listType === 'ordered';
+        const marker = ordered ? `${(meta?.itemIndex ?? 0) + 1}.` : '•';
+        const size = 11;
+        this.ensureSpace(size * 1.35);
+        // Draw the marker, then the item body hanging-indented past it.
+        const markerX = this.margin.left + indent - 14;
+        const baseline = this.pageH - this.y - size;
+        this.page.drawText(marker, { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
+        // Body: the item's own text runs (its non-list children); nested list children render after.
+        const bodyRuns = this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
+        if (bodyRuns.length) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
+        else this.y += size * 1.35;
+        for (const c of (node.children || []).filter(c => c.type === 'list')) this.listItem(c);
+    }
+
+    private code(node: OfficeContentNode): void {
+        const size = 10, lh = size * 1.35;
+        this.y += 2;
+        // Draw each source line verbatim in a monospace font so leading indentation is preserved
+        // (word-splitting would trim it); over-wide lines wrap at character boundaries.
+        for (const raw of (node.text || '').split('\n')) {
+            const expanded = raw.replace(/\t/g, '    ');
+            const chunks = splitToWidth(expanded || ' ', this.fonts.mono, size, this.contentWidth - 12);
+            for (const chunk of (chunks.length ? chunks : [' '])) {
+                this.ensureSpace(lh);
+                this.page.drawText(chunk, { x: this.margin.left + 6, y: this.pageH - this.y - size, size, font: this.fonts.mono, color: this.lib.rgb(0.12, 0.12, 0.12) });
+                this.y += lh;
+            }
+        }
+        this.y += 6;
+    }
+
+    private note(node: OfficeContentNode): void {
+        const runs = this.collectRuns(node).map(r => ({ ...r, fmt: { ...r.fmt, size: '9pt' } }));
+        if (runs.length) this.drawRuns(runs, this.margin.left + 12, this.contentWidth - 12);
+        this.y += 4;
+    }
+
+    private breakNode(node: OfficeContentNode): void {
+        const t = (node.metadata as any)?.breakType;
+        if (t === 'page') { this.newPage(); return; }
+        if (t === 'thematic') {
+            this.ensureSpace(12);
+            this.y += 6;
+            const yy = this.pageH - this.y;
+            this.page.drawLine({ start: { x: this.margin.left, y: yy }, end: { x: this.pageW - this.margin.right, y: yy }, thickness: 0.5, color: this.lib.rgb(0.7, 0.7, 0.7) });
+            this.y += 6;
+        } else {
+            this.y += 8;
+        }
+    }
+
+    private async image(node: OfficeContentNode): Promise<void> {
+        const meta = node.metadata as any;
+        const name = meta?.attachmentName;
+        const attachment = name && this.ast.attachments.find(a => a.name === name);
+        if (!attachment?.data) { if (node.text) this.paragraph(node); return; }
+        try {
+            const bytes = base64ToBytes(attachment.data);
+            const isJpg = /jpe?g/i.test(attachment.extension || '') || attachment.mimeType === 'image/jpeg';
+            const img = isJpg ? await this.pdf.embedJpg(bytes) : await this.pdf.embedPng(bytes);
+            let w = node.bounds?.width ? node.bounds.width : img.width;
+            let h = node.bounds?.height ? node.bounds.height : img.height;
+            const scale = Math.min(1, this.contentWidth / w);
+            w *= scale; h *= scale;
+            if (h > this.bottom - this.margin.top) { const s = (this.bottom - this.margin.top) / h; w *= s; h *= s; }
+            this.ensureSpace(h + 6);
+            this.page.drawImage(img, { x: this.margin.left, y: this.pageH - this.y - h, width: w, height: h });
+            this.y += h + 6;
+        } catch {
+            if (node.text) this.paragraph(node);
+        }
+    }
+
+    private table(node: OfficeContentNode): void {
+        const rows = (node.children || []).filter(r => r.type === 'row');
+        if (!rows.length) return;
+        // Total columns = the widest grid extent any cell reaches (col + colSpan), falling back to
+        // the largest raw cell count when cells carry no `col`.
+        let cols = 0;
+        for (const row of rows) {
+            for (const cell of (row.children || []).filter(c => c.type === 'cell')) {
+                const col = (cell.metadata as CellMeta)?.col;
+                const span = (cell.metadata as CellMeta)?.colSpan || 1;
+                cols = Math.max(cols, (typeof col === 'number' ? col : 0) + span);
+            }
+        }
+        cols = Math.max(cols, ...rows.map(r => (r.children || []).filter(c => c.type === 'cell').length), 1);
+        const colW = this.contentWidth / cols;
+        const size = 10, pad = 4;
+        const border = this.lib.rgb(0.6, 0.6, 0.6);
+
+        this.y += 2;
+        // Grid occupancy: column -> rows still covered by a rowspan from above, so a spanning cell
+        // reserves its column(s) below instead of letting later rows slide left under it.
+        const carry = new Map<number, number>();
+        for (const row of rows) {
+            const cells = (row.children || []).filter(c => c.type === 'cell');
+            // Place each cell into a grid column: honour explicit `col`, otherwise the next free one.
+            let cursor = 0;
+            const placed: { col: number; span: number; lines: string[]; header: boolean }[] = [];
+            for (const cell of cells) {
+                const meta = cell.metadata as CellMeta;
+                const span = meta?.colSpan && meta.colSpan > 1 ? meta.colSpan : 1;
+                let col = typeof meta?.col === 'number' ? meta.col : -1;
+                if (col < 0) { while ((carry.get(cursor) || 0) > 0) cursor++; col = cursor; }
+                const cw = colW * span - 2 * pad;
+                placed.push({ col, span, lines: wrapPlain(cell.text || '', this.fonts.regular, size, Math.max(10, cw)), header: meta?.style === 'header' });
+                cursor = col + span;
+            }
+            const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * size * 1.35)) + 2 * pad;
+            this.ensureSpace(rowH);
+            const topY = this.pageH - this.y;
+            const newCarry = new Map<number, number>();
+            for (const p of placed) {
+                const x = this.margin.left + p.col * colW;
+                this.page.drawRectangle({ x, y: topY - rowH, width: colW * p.span, height: rowH, borderColor: border, borderWidth: 0.5, color: undefined });
+                const font = p.header ? this.fonts.bold : this.fonts.regular;
+                let ty = topY - pad - size;
+                for (const line of p.lines) { this.page.drawText(line, { x: x + pad, y: ty, size, font, color: this.lib.rgb(0.12, 0.12, 0.12) }); ty -= size * 1.35; }
+            }
+            // Record this row's rowspans, then age the carries by one row.
+            placed.forEach((p, i) => {
+                const rSpan = (cells[i].metadata as CellMeta)?.rowSpan;
+                if (rSpan && rSpan > 1) for (let c = p.col; c < p.col + p.span; c++) newCarry.set(c, rSpan - 1);
+            });
+            for (const [c, v] of [...carry]) { if (v > 1) carry.set(c, v - 1); else carry.delete(c); }
+            for (const [c, v] of newCarry) carry.set(c, v);
+            this.y += rowH;
+        }
+        this.y += 6;
+    }
+}
+
+/** Minimal shape of `CellMetadata` the native engine reads. */
+interface CellMeta { col?: number; colSpan?: number; rowSpan?: number; style?: string; }
+
+/** Parses a `TextFormatting.size` ("12pt", "14") into points, or null. */
+function parseFontSize(size: string | undefined): number | null {
+    if (!size) return null;
+    const m = /^([\d.]+)/.exec(String(size));
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Splits a single token into chunks each no wider than `width`, at character boundaries. Used so a
+ * word longer than the whole line (a long URL, hash or base64 blob) wraps instead of overflowing the
+ * page. Returns the token unchanged when it already fits.
+ */
+function splitToWidth(text: string, font: any, size: number, width: number): string[] {
+    if (width <= 0 || font.widthOfTextAtSize(text, size) <= width) return [text];
+    const chunks: string[] = [];
+    let cur = '';
+    for (const ch of text) {
+        if (cur && font.widthOfTextAtSize(cur + ch, size) > width) { chunks.push(cur); cur = ch; }
+        else cur += ch;
+    }
+    if (cur) chunks.push(cur);
+    return chunks.length ? chunks : [text];
+}
+
+/** Greedy word-wrap of plain text to a pixel width, returning the wrapped lines. */
+function wrapPlain(text: string, font: any, size: number, width: number): string[] {
+    const out: string[] = [];
+    for (const para of text.split('\n')) {
+        const words = para.split(/\s+/).filter(Boolean);
+        let line = '';
+        for (const w of words) {
+            const cand = line ? line + ' ' + w : w;
+            if (line && font.widthOfTextAtSize(cand, size) > width) { out.push(line); line = w; }
+            else line = cand;
+        }
+        out.push(line);
+    }
+    return out.length ? out : [''];
+}
+
+/** Decodes a base64 string to bytes in both Node and the browser. */
+function base64ToBytes(b64: string): Uint8Array {
+    if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(b64, 'base64'));
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+
+/** Writes the document metadata (title, author, dates, keywords) onto the pdf-lib document. */
+function applyMetadata(pdf: any, ast: OfficeParserAST, config: FullGeneratorConfig): void {
+    const m = ast.metadata || {};
+    const o = config.metadataOverrides || {};
+    const set = (fn: string, v: any) => { try { if (v != null && typeof pdf[fn] === 'function') pdf[fn](v); } catch { /* best effort */ } };
+    set('setTitle', o.title ?? m.title);
+    set('setAuthor', o.author ?? m.author);
+    set('setSubject', o.subject ?? (m as any).subject);
+    const kw = o.keywords ?? (m as any).keywords;
+    if (kw) set('setKeywords', String(kw).split(/[,;]\s*/).filter(Boolean));
+    set('setCreator', 'officeParser (native engine)');
+    set('setProducer', 'officeParser (pdf-lib)');
+    const created = o.created ?? m.created;
+    const modified = o.modified ?? m.modified;
+    if (created instanceof Date) set('setCreationDate', created);
+    if (modified instanceof Date) set('setModificationDate', modified);
+}
+
+/**
+ * Renders an AST to a PDF using the native pdf-lib layout engine.
+ *
+ * @returns the PDF as bytes.
+ */
+export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig): Promise<Uint8Array> {
+    const lib = await loadPdfLib(ast.config);
+    const pdf = await lib.PDFDocument.create();
+    applyMetadata(pdf, ast, config);
+
+    const fonts: Fonts = {
+        regular: await pdf.embedFont(lib.StandardFonts.Helvetica),
+        bold: await pdf.embedFont(lib.StandardFonts.HelveticaBold),
+        italic: await pdf.embedFont(lib.StandardFonts.HelveticaOblique),
+        boldItalic: await pdf.embedFont(lib.StandardFonts.HelveticaBoldOblique),
+        mono: await pdf.embedFont(lib.StandardFonts.Courier),
+    };
+
+    const pc = config.pdfConfig;
+    let [w, h] = PAGE_SIZES[String(pc.format || 'a4').toLowerCase()] || PAGE_SIZES.a4;
+    if (pc.width) w = toPoints(pc.width, w);
+    if (pc.height) h = toPoints(pc.height, h);
+    if (pc.landscape && w < h) [w, h] = [h, w];
+
+    // The resolved config default margin is 0 (correct for the HTML path, whose body carries its own
+    // padding); for the native engine 0 would glue text to the page edge, so treat 0 as "use default".
+    const mdef = 48; // ~0.67in
+    const mv = (v: string | number | undefined) => { const p = toPoints(v, mdef); return p > 0 ? p : mdef; };
+    const margin = { top: mv(pc.margin?.top), right: mv(pc.margin?.right), bottom: mv(pc.margin?.bottom), left: mv(pc.margin?.left) };
+
+    const layout = new NativeLayout(pdf, lib, fonts, w, h, margin, config, ast);
+    for (const node of ast.content) await layout.render(node);
+
+    return await pdf.save();
+}

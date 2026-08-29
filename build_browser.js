@@ -38,6 +38,9 @@ function getBrowserConfig(isSlim) {
             'fs': path.resolve(__dirname, 'scripts/browser-stubs/fs.js'),
             'fs/promises': path.resolve(__dirname, 'scripts/browser-stubs/fs.js'),
             'puppeteer': path.resolve(__dirname, 'scripts/browser-stubs/puppeteer.js'),
+            // pdf-lib (native PDF engine) is an optional peer dep: keep it out of the prebuilt
+            // bundle. A self-bundling consumer with pdf-lib installed resolves the real package.
+            'pdf-lib': path.resolve(__dirname, 'scripts/browser-stubs/pdf-lib.js'),
             // Left unresolved, this reaches the output as a bare Node built-in and a consumer's
             // bundler reports it as missing, even though the only code path that imports it is
             // gated on running under Node.

@@ -1163,6 +1163,21 @@ export interface HtmlGeneratorConfig {
  */
 export interface PdfGeneratorConfig {
     /**
+     * Which engine renders the PDF:
+     * - `'html'` (default): render the document to the library's HTML and rasterize/print it through
+     *   a headless browser (Puppeteer in Node; the browser's own print in a browser). Highest visual
+     *   fidelity, but needs the optional `puppeteer` peer dependency in Node, and in a browser it can
+     *   only hand back HTML rather than PDF bytes.
+     * - `'native'`: lay the AST out directly with `pdf-lib` (an optional peer dependency) - no
+     *   browser required, works identically in Node and the browser (so it can produce real PDF bytes
+     *   client-side), and is much lighter. The trade-off is fidelity: it uses the Standard-14 fonts
+     *   (Helvetica/Times/Courier) rather than the document's own and performs a clean reflow rather
+     *   than matching the HTML renderer pixel for pixel. `tagged`/`outline` do not apply to it.
+     *
+     * Defaults to `'html'`.
+     */
+    engine?: 'html' | 'native';
+    /**
      * Emit a tagged (accessible / PDF-UA-friendly) PDF, so screen readers can follow the document
      * structure. Passed through to the rendering engine; ignored by engines that do not support it.
      * Defaults to true.

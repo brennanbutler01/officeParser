@@ -126,6 +126,9 @@
   "peerDependenciesMeta": {
     "puppeteer": {
       "optional": true
+    },
+    "pdf-lib": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -138,6 +141,7 @@
     "esbuild-plugins-node-modules-polyfill": "^1.8.3",
     "eslint": "^10.9.1",
     "husky": "^9.1.7",
+    "pdf-lib": "^1.17.1",
     "postject": "^1.0.0-alpha.6",
     "process": "^0.11.10",
     "puppeteer": "^25.9.0",

@@ -1162,10 +1162,11 @@ Pass as `mdConfig` inside `GeneratorConfig`.
 
 ### PdfGeneratorConfig
 
-Pass as `pdfConfig` inside `GeneratorConfig`. Requires the optional `puppeteer` peer dependency.
+Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requires the optional `puppeteer` peer dependency; the `'native'` engine requires the optional `pdf-lib` peer dependency instead.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `engine` | `'html' \| 'native'` | `'html'` | `'html'`: render through a headless browser (Puppeteer in Node; native print in the browser) for maximum fidelity. `'native'`: lay the AST out directly with `pdf-lib` - no browser, runs in Node and the browser (real PDF bytes client-side), much lighter, but uses Standard-14 fonts and reflows rather than pixel-matching |
 | `format` | `string` | `'A4'` | Paper format (`'A4'`, `'Letter'`, `'Legal'`, etc.) |
 | `width` | `string \| number` | `''` | Paper width (e.g., `'5in'`, `'3cm'`) or pixels |
 | `height` | `string \| number` | `''` | Paper height (e.g., `'5in'`, `'3cm'`) or pixels |

@@ -3,6 +3,7 @@ import { isBrowser } from '../utils/envUtils.js';
 import { getAbortError, getOfficeError } from '../utils/errorUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { HtmlGenerator } from './HtmlGenerator.js';
+import { renderNativePdf } from './pdf/nativePdfEngine.js';
 
 /**
  * Generates high-fidelity PDF documents using a headless browser engine.
@@ -17,6 +18,20 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
     }
 
     async generate(): Promise<ConversionResult<'pdf'>> {
+
+        // Native engine: lay the AST out directly with pdf-lib, no browser required (works in Node
+        // and the browser alike). The default 'html' engine falls through to the browser path below.
+        if (this.config.pdfConfig.engine === 'native') {
+            if (this.config.abortSignal?.aborted) throw getAbortError();
+            try {
+                const value = await renderNativePdf(this.ast, this.config);
+                return { value, messages: this.messages };
+            } catch (err: any) {
+                if (this.config.abortSignal?.aborted) throw getAbortError();
+                if (err?.officeIssue) throw err;
+                throw getOfficeError(OfficeErrorType.PDF_GENERATION_FAILED, this.ast.config, err?.message || String(err));
+            }
+        }
 
         // Step 1: Generate high-fidelity HTML as the source for PDF rendering
         // We reuse the current configuration but ensure standalone mode is on for HTML
