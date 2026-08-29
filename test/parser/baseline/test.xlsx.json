@@ -8,6 +8,7 @@
       "workerPath": "",
       "corePath": "",
       "langPath": "",
+      "preserveLayout": true,
       "timeout": {
         "autoTerminate": 10000,
         "workerLoad": 0,
@@ -39,7 +40,21 @@
     },
     "htmlParserConfig": {
       "preserveAttributes": false,
-      "preserveIframes": false
+      "preserveIframes": false,
+      "embedFolkForms": false
+    },
+    "ignorePositions": false,
+    "pdfParserConfig": {
+      "password": "",
+      "useTags": true,
+      "detectColumns": true,
+      "mergeHyphenatedWords": true,
+      "lineToleranceFactor": 0.35,
+      "spaceToleranceFactor": 0.25,
+      "headingDetection": "auto",
+      "pageRange": "",
+      "disableTextNormalization": false,
+      "extractTextColor": true
     }
   },
   "type": "xlsx",
@@ -6802,7 +6817,7 @@
         },
         {
           "type": "image",
-          "text": "Bethe change\nthatyouwish to\nseein the world.",
+          "text": "Bethe change\nthatyouwish  to\nseein the world.",
           "children": [],
           "metadata": {
             "attachmentName": "image1.tmp",
@@ -8234,7 +8249,7 @@
       "name": "image1.tmp",
       "extension": "tmp",
       "altText": "165 Inspirational Quotes To Keep You Motivated In Life",
-      "ocrText": "Bethe change\nthatyouwish to\nseein the world."
+      "ocrText": "Bethe change\nthatyouwish  to\nseein the world."
     },
     {
       "type": "chart",

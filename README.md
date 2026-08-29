@@ -278,6 +278,17 @@ const ast = await officeParser.parseOffice('scanned_document.pdf', {
 > **Non-Fatal Timeout Recovery**
 > If `workerLoad` or `recognition` timeouts are exceeded, the parser will log a warning in `ast.warnings` and **continue parsing the rest of the document**. The overall promise resolves successfully with the text extracted from the document layers (rather than failing the entire parse).
 
+### OCR Layout Reconstruction
+
+By default (`ocrConfig.preserveLayout: true`) the recognized text keeps its two-dimensional page layout, rebuilt from Tesseract's per-word bounding boxes: a scanned table, form or multi-column page keeps its columns (right-hand text stays on the right, labels and values line up) instead of collapsing to a flat reading-order string. It is the OCR analogue of `textConfig.preserveLayout` for born-digital PDFs. Set it `false` for the plain, linearized text.
+
+```js
+const ast = await officeParser.parseOffice('scanned_invoice.pdf', {
+    ocr: true,
+    ocrConfig: { preserveLayout: true } // default; false = flat reading-order text
+});
+```
+
 ### `ast.to()`: Generate from AST
 
 The preferred way to convert a parsed AST to another format. Returns a `ConversionResult`.

@@ -453,6 +453,7 @@
 
             .image-container { text-align: center; margin: 30px 0; }
             .caption { font-size: 0.8em; color: #636e72; margin-top: 8px; font-style: italic; }
+            .ocr-text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85em; line-height: 1.4; white-space: pre; overflow-x: auto; margin: 8px 0; color: #2d3436; }
             
             body { margin: 0; padding: 0; }
             
@@ -527,10 +528,25 @@
                     break-after: avoid !important;
                 }
 
-                table, tr, img, .chart-container, li, .image-container {
+                table, tr, img, .chart-container, li, .image-container, figure, blockquote, pre {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
                 }
+
+                /* Repeat a table's header (and footer) rows on every page it spans. */
+                thead { display: table-header-group !important; }
+                tfoot { display: table-footer-group !important; }
+
+                /* A page-break node (<hr class="page-break">) is a real page break here, not the
+                   decorative dashed rule it is on screen: force the break and hide the marker. */
+                .page-break {
+                    border: none !important;
+                    margin: 0 !important;
+                    height: 0 !important;
+                    page-break-after: always !important;
+                    break-after: page !important;
+                }
+                .page-break::after { content: none !important; display: none !important; }
 
                 a {
                     text-decoration: none !important;
@@ -825,13 +841,9 @@
 
 </td><td><p>Two</p>
 
-</td></tr>
+</td></tr><tr><td><p>Four</p>
 
-<tr><td></td><td><p>Four</p>
-
-</td></tr>
-
-</table>
+</td></tr></table>
 
 <p class="empty-paragraph"><br></p>
 

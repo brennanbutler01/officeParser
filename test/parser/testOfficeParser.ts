@@ -96,6 +96,7 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         workerPath: '',
         corePath: '',
         langPath: '',
+        preserveLayout: true,
         // New consolidated timeout object — preferred over the deprecated flat fields below.
         // Generous (0 = unlimited) for workerLoad/recognition so the real-file tests are never
         // killed by the timeout machinery.  C8/C9 permutation tests override these to 1 ms.
@@ -145,7 +146,8 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         spaceToleranceFactor: 0.25,
         headingDetection: 'auto',
         pageRange: '',
-        disableTextNormalization: false
+        disableTextNormalization: false,
+        extractTextColor: true
     }
 };
 

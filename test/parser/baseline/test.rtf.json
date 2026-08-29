@@ -8,6 +8,7 @@
       "workerPath": "",
       "corePath": "",
       "langPath": "",
+      "preserveLayout": true,
       "timeout": {
         "autoTerminate": 10000,
         "workerLoad": 0,
@@ -39,7 +40,21 @@
     },
     "htmlParserConfig": {
       "preserveAttributes": false,
-      "preserveIframes": false
+      "preserveIframes": false,
+      "embedFolkForms": false
+    },
+    "ignorePositions": false,
+    "pdfParserConfig": {
+      "password": "",
+      "useTags": true,
+      "detectColumns": true,
+      "mergeHyphenatedWords": true,
+      "lineToleranceFactor": 0.35,
+      "spaceToleranceFactor": 0.25,
+      "headingDetection": "auto",
+      "pageRange": "",
+      "disableTextNormalization": false,
+      "extractTextColor": true
     }
   },
   "type": "rtf",

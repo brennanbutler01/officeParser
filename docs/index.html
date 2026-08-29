@@ -2840,12 +2840,14 @@
                 { id: 'cfg_fileType', label: 'File Type Hint', type: 'select', options: ['', 'docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'epub'], names: ['Auto', 'DOCX', 'XLSX', 'PPTX', 'PDF', 'RTF', 'CSV', 'Markdown', 'HTML', 'ODT', 'ODS', 'ODP', 'EPUB'], width: '100px' },
                 { id: 'cfg_extractAttachments', label: 'Extract Attachments', type: 'switch', default: true },
                 { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false },
+                { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true },
                 { id: 'cfg_ignoreInternalLinks_parser', label: 'Ignore Internal Links', type: 'switch', default: false },
                 { id: 'cfg_ignorePositions', label: 'Ignore Positions (PDF geometry)', type: 'switch', default: false },
                 { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true },
                 { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true },
                 { id: 'cfg_pdfPassword', label: 'PDF Password', type: 'text', default: '', width: '120px' },
                 { id: 'cfg_pdfPageRange', label: 'PDF Page Range', type: 'text', default: '', width: '80px' },
+                { id: 'cfg_pdfExtractTextColor', label: 'PDF Extract Text Color', type: 'switch', default: false },
                 { id: 'cfg_includeRawContent', label: 'Include Raw Source', type: 'switch', default: false },
                 { id: 'cfg_serializeRawContent', label: 'Serialize Raw XML', type: 'switch', default: true },
                 { id: 'cfg_preserveXmlWhitespace', label: 'Preserve XML Space', type: 'switch', default: false },
@@ -4776,8 +4778,10 @@
                         useTags: document.getElementById('cfg_pdfUseTags').checked,
                         detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,
                         password: document.getElementById('cfg_pdfPassword').value,
-                        pageRange: document.getElementById('cfg_pdfPageRange').value
+                        pageRange: document.getElementById('cfg_pdfPageRange').value,
+                        extractTextColor: document.getElementById('cfg_pdfExtractTextColor').checked
                     },
+                    ocrPreserveLayout: document.getElementById('cfg_ocrPreserveLayout').checked,
                     includeRawContent: document.getElementById('cfg_includeRawContent').checked,
                     serializeRawContent: document.getElementById('cfg_serializeRawContent').checked,
                     preserveXmlWhitespace: document.getElementById('cfg_preserveXmlWhitespace').checked,
@@ -5098,7 +5102,8 @@
                             useTags: document.getElementById('cfg_pdfUseTags').checked,
                             detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,
                             password: document.getElementById('cfg_pdfPassword').value,
-                            pageRange: document.getElementById('cfg_pdfPageRange').value
+                            pageRange: document.getElementById('cfg_pdfPageRange').value,
+                            extractTextColor: document.getElementById('cfg_pdfExtractTextColor').checked
                         },
                         includeRawContent: document.getElementById('cfg_includeRawContent').checked,
                         serializeRawContent: document.getElementById('cfg_serializeRawContent').checked,
@@ -5116,6 +5121,7 @@
                             maxZipEntries: parseInt(document.getElementById('cfg_maxZipEntries').value, 10)
                         },
                         ocrConfig: {
+                            preserveLayout: document.getElementById('cfg_ocrPreserveLayout').checked,
                             timeout: {
                                 autoTerminate: parseInt(document.getElementById('cfg_ocrAutoTerminate').value, 10) * 1000,
                                 workerLoad: parseInt(document.getElementById('cfg_ocrWorkerLoad').value, 10) * 1000,

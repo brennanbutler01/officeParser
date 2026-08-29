@@ -159,6 +159,14 @@
                 <td><strong>Language Training</strong>: Specifies Tesseract languages (e.g., 'eng+fra').</td>
             </tr>
             <tr>
+                <td><code>ocrConfig.preserveLayout</code></td>
+                <td><code>boolean</code></td>
+                <td><code>true</code></td>
+                <td><strong>2-D OCR Layout</strong>: Rebuild the recognized text's spatial page layout from per-word
+                    bounding boxes (columns line up, right-hand text stays on the right) instead of a flat
+                    reading-order string. Set <code>false</code> for the plain linearized text.</td>
+            </tr>
+            <tr>
                 <td><del><code>ocrConfig.autoTerminateTimeout</code></del></td>
                 <td><code>number</code></td>
                 <td><code>10000</code></td>

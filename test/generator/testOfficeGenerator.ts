@@ -70,7 +70,7 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     extractAttachments: true,
     ocr: false,
     ocrLanguage: 'eng',
-    ocrConfig: { language: 'eng', workerPath: '', corePath: '', langPath: '', timeout: { autoTerminate: 10000, workerLoad: 60000, recognition: 30000 }, autoTerminateTimeout: 10000, abortSignal: null },
+    ocrConfig: { language: 'eng', workerPath: '', corePath: '', langPath: '', preserveLayout: true, timeout: { autoTerminate: 10000, workerLoad: 60000, recognition: 30000 }, autoTerminateTimeout: 10000, abortSignal: null },
     includeRawContent: false,
     ignoreNotes: false,
     putNotesAtLast: false,
@@ -105,7 +105,8 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         spaceToleranceFactor: 0.25,
         headingDetection: 'auto',
         pageRange: '',
-        disableTextNormalization: false
+        disableTextNormalization: false,
+        extractTextColor: true
     }
 };
 

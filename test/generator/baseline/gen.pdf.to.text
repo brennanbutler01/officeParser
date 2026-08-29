@@ -9,18 +9,18 @@ Kindles or EPUB for other ebook readers, to see it in action.
     There is support for images, tables, lists, footnotes, endnotes, links, dropcaps and
 various types of text and paragraph level formatting.
     To see the DOCX conversion in action, simply add this file to calibre using the
-“Add Books” button and then click “Convert”. Set the output format in the top right
-corner of the conversion dialog to EPUB or AZW3 and click “OK”.
+“Add Books”   button and then click “ Convert”.  Set the output format in the top right
+corner of the conversion dialog to EPUB or AZW3 and click  “OK” .
 
                                  Text Formatting
 Inline formatting
     Here, we demonstrate various types of inline text formatting and the use of
 embedded fonts.
-    Here is some bold, italic, bold-italic, underlined and struck out text. Then, we
+    Here is some  bold,  italic,  bold-italic,  underlined and struck out text. Then, we
 have a super script  and a sub script . Now we see some red, green and blue text. Some text
 with a yellow highlight. Some text in a box. Some text in inverse video.
-    A paragraph with styled text: subtle emphasis followed by strong text and
-intense emphasis. This paragraph uses document wide styles for styling rather than
+    A paragraph with styled text:   subtle emphasis  followed by  strong text  and
+intense emphasis  . This paragraph uses document wide styles for styling rather than
 inline text properties as demonstrated in the previous paragraph — calibre can handle
 both with equal ease.
 Fun with fonts
@@ -31,7 +31,7 @@ be embedded in the output ebook during conversion.
 Paragraph level formatting
       You can do crazy things with paragraphs, if the urge strikes you. For instance this
     paragraph is right aligned and has a right border. It has also been given a light gray
-                                                                         background.
+                                                                          background.
 
 For the lovers of poetry amongst you, paragraphs with hanging indents, like this often
        come in handy. You can use hanging indents to ensure that a line of poetry
@@ -57,7 +57,7 @@ Town
     Point A           —
     Point B           87              —
     Point C           64              56             —
-    Point D           37              32             91             —
+    Point D           37              32             91              —
     Point E           93              35             54             43             —
 
     Next, we see a table with special formatting in various locations. Notice how the
@@ -72,7 +72,7 @@ formatting for the header row and sub header rows is preserved.
     Cedar University    24                    20                     +4
     Elm College         43                    53                    -10
     Total              998                   908                     90
-Source: Fictitious data, for illustration purposes only
+Source:  Fictitious data, for illustration purposes only
     Next, we have something a little more complex, a nested table, i.e. a table inside
 another table. Additionally, the inner table has some of its cells merged. The table is
 displayed horizontally centered.
@@ -105,46 +105,46 @@ fare well in ebooks.
               3         31
               0
 
-                                    Structural Elements
-     Miscellaneous structural elements you can add to your document, like footnotes,
+                             Structural Elements
+    Miscellaneous structural elements you can add to your document, like footnotes,
 endnotes, dropcaps and the like.
 Footnotes & Endnotes
-     Footnotes   1  and endnotes   i  are automatically recognized and both are converted to
+    Footnotes 1  and endnotes i  are automatically recognized and both are converted to
 endnotes, with backlinks for maximum ease of use in ebook devices.
 Dropcaps
-     D
-              rop caps are used to emphasize the leading paragraph at the start of a
-              section. In Word it is possible to specify how many lines of text a drop-cap
-              should use.
+    D
+           rop caps are used to emphasize the leading paragraph at the start of a
+           section. In Word it is possible to specify how many lines of text a drop-cap
+           should use.
 Links
-     Two kinds of links are possible, those that refer to an external website and those
+    Two kinds of links are possible, those that refer to an external website and those
 that refer to locations inside the document itself. Both are supported by calibre. For
-example, here is a link pointing to the      calibre download page. Then we have a link that
-points back to the section on      paragraph level formatting      in this document.
+example, here is a link pointing to the   calibre download page . Then we have a link that
+points back to the section on   paragraph level formatting  in this document.
 Table of Contents
-     You can see the Table of Contents created by calibre by clicking the Table of
+    You can see the Table of Contents created by calibre by clicking the Table of
 Contents button in whatever viewer you are using to view the converted ebook.
-     Demonstration of DOCX support in calibre    ................................................................ .............................. 1
-     Text Formatting  ................................................................................................................................ ................ 1
-       Inline formatting ................................................................................................................................ ............. 2
-       Fun with fonts ................................................................................................................................ ................. 2
-       Paragraph level formatting ................................................................................................ ........................... 2
-     Tables ................................................................................................................................................................ ... 2
-     Structural Elements ................................................................................................................................ ......... 4
-       Footnotes & Endnotes ................................................................................................................................ .... 5
-       Dropcaps ................................................................................................................................ .......................... 5
-       Links ................................................................................................................................................................ . 5
-       Table of Contents ................................................................................................................................ ........... 5
-1  In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a
+    Demonstration of DOCX support in calibre 1
+    Text Formatting 1
+      Inline formatting 2
+      Fun with fonts 2
+      Paragraph level formatting 2
+    Tables 2
+    Structural Elements 4
+      Footnotes & Endnotes 5
+      Dropcaps 5
+      Links 5
+      Table of Contents 5
+ In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a
 better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This
 conversion is handled automatically by calibre.
 
-Images       ................................................................................................................................................................ .. 6
-Lists    ................................................................................................................................................................ ...... 7
-     Bulleted List        ................................................................................................................................ .................... 8
-     Numbered List           ................................................................................................................................ ................. 8
-     Multi-level Lists         ................................................................................................................................ ............... 8
-     Continued Lists          ................................................................................................................................ ................ 8
+Images 6
+Lists 7
+Bulleted List 8
+Numbered List 8
+Multi-level Lists 8
+Continued Lists 8
 
                                        Images
     Centered images like this are useful for large pictures that should be a focus of
@@ -154,32 +154,32 @@ attention.
 
     There is no analogous technology in ebooks, so the conversion will usually end up
 placing the image either centered or floating close to the point in the text where it
-was inserted, not necessarily where it appears on the page in Word.
+was   inserted , not necessarily where it appears on the page in Word.
 
-                                   Lists
-   All types of lists are supported by the conversion, with the exception of lists that
+                                    Lists
+    All types of lists are supported by the conversion, with the exception of lists that
 use fancy bullets, these get converted to regular bullets.
 Bulleted List
-       One
-       Two
+         One
+         Two
 Numbered List
         One, with a very long line to demonstrate that the hanging indent for the
          list is working correctly
         Two
 Multi-level Lists
-    One
+     One
          Two
-                 Three
-                 Four with a very long line to demonstrate that the hanging indent
+                  Three
+                  Four with a very long line to demonstrate that the hanging indent
              for the list is working correctly.
-                 Five
-    Six
+                  Five
+     Six
    A Multi-level list with bullets:
-    One
-       Two
+      One
+         Two
          [Image: pdf_image_p8_2.png] This bullet uses an image as the bullet item
-              Four
-    Five
+               Four
+      Five
 Continued Lists
          One
          Two
@@ -187,6 +187,6 @@ Continued Lists
       relevant public service announcement.
          We now resume our normal programming
          Four
-   i  Endnotes are typically used for longer notes, they remain endnotes when converted into ebook
+    Endnotes are typically used for longer notes, they remain endnotes when converted into ebook
 form, except that they have an additional backlink to make it easy to return to the current position
 after reading the note.
