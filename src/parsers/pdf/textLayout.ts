@@ -489,6 +489,100 @@ function stripMarkerFrom(node: OfficeContentNode, raw: string): void {
     for (const c of node.children || []) if (strip(c)) break;
 }
 
+// ── geometric table detection ─────────────────────────────────────────────────
+
+/** Builds a table cell node from a single visual line (one row's cell). */
+function cellFromLine(line: PdfLine, row: number, col: number, page: PageContext, cfg: PdfLayoutConfig): OfficeContentNode {
+    const children: OfficeContentNode[] = [];
+    for (const f of line.fragments) {
+        const child: OfficeContentNode = { type: 'text', text: f.text, formatting: Object.keys(f.formatting).length ? f.formatting : undefined };
+        const b = emitBounds(f.bounds, page, cfg); if (b) child.bounds = b;
+        if (f.link) child.metadata = f.link;
+        children.push(child);
+    }
+    const cell: OfficeContentNode = { type: 'cell', text: line.fragments.map(f => f.text).join('').trim(), children, metadata: { row, col } };
+    const cb = emitBounds({ x: line.x, y: line.yTop, width: line.width, height: line.height }, page, cfg);
+    if (cb) cell.bounds = cb;
+    return cell;
+}
+
+/**
+ * Recovers grid tables from a page's lines *before* block/column segmentation, which would otherwise
+ * carve a table's columns into separate reading blocks. Lines are grouped into rows by baseline; a
+ * run of at least three consecutive rows that each carry two or more cells, whose cell left-edges
+ * cluster into three or more stable columns, and whose cells are short (median ≤ 25 characters)
+ * becomes a `table`. The short-cell and ≥3-column guards keep a multi-column article of long wrapped
+ * lines from being mistaken for a table. Returns each table with the y it should be spliced in at,
+ * plus the set of lines it consumed so the caller lays out the remaining lines normally.
+ */
+export function detectTables(lines: PdfLine[], page: PageContext, doc: DocContext): { tables: { node: OfficeContentNode; y: number }[]; consumed: Set<PdfLine> } {
+    const tables: { node: OfficeContentNode; y: number }[] = [];
+    const consumed = new Set<PdfLine>();
+    // Only short segments can be table cells: a long line is prose, and letting it join a row would
+    // bleed neighbouring text (and side-by-side tables) into the grid. So it never becomes a cell.
+    const lineLen = (l: PdfLine) => l.fragments.reduce((n, f) => n + f.text.trim().length, 0);
+    const items = lines.filter(l => l.fragments.length && lineLen(l) <= 40);
+    if (items.length < 6) return { tables, consumed };
+
+    // Group lines into rows by shared baseline; sort each row left-to-right.
+    const sorted = [...items].sort((a, b) => a.baseline - b.baseline || a.x - b.x);
+    const rows: PdfLine[][] = [];
+    for (const l of sorted) {
+        const last = rows[rows.length - 1];
+        const tol = 0.5 * (last ? Math.min(last[0].fontSize, l.fontSize) : l.fontSize);
+        if (last && Math.abs(last[0].baseline - l.baseline) <= tol) last.push(l);
+        else rows.push([l]);
+    }
+    for (const r of rows) r.sort((a, b) => a.x - b.x);
+
+    let i = 0;
+    while (i < rows.length) {
+        if (rows[i].length < 2) { i++; continue; }
+        let j = i;
+        while (j < rows.length && rows[j].length >= 2) j++;
+        const run = rows.slice(i, j);
+        i = j;
+        if (run.length < 3) continue;
+
+        const cells = run.flat();
+        // Cluster cell left-edges into columns.
+        const colStarts: number[] = [];
+        for (const x of cells.map(c => c.x).sort((a, b) => a - b)) {
+            if (!colStarts.length || x - colStarts[colStarts.length - 1] > 12) colStarts.push(x);
+        }
+        if (colStarts.length < 3) continue;
+        // Short-cell guard: long lines are prose columns, not table cells.
+        if (median(cells.map(c => c.fragments.reduce((n, f) => n + f.text.trim().length, 0))) > 25) continue;
+
+        const colOf = (x: number) => {
+            let best = 0, bd = Infinity;
+            for (let k = 0; k < colStarts.length; k++) { const d = Math.abs(x - colStarts[k]); if (d < bd) { bd = d; best = k; } }
+            return best;
+        };
+        const rowNodes: OfficeContentNode[] = run.map((r, ri) => {
+            // Assign columns strictly left-to-right and strictly increasing, so two cells (e.g. a
+            // right-aligned number whose left edge lands near a neighbour's column) never collide on
+            // one column, which would render as an extra shifted cell.
+            let lastCol = -1;
+            const cellNodes = r.map(line => {
+                const col = Math.max(colOf(line.x), lastCol + 1);
+                lastCol = col;
+                return cellFromLine(line, ri, col, page, doc.cfg);
+            });
+            const rowNode: OfficeContentNode = { type: 'row', children: cellNodes, text: cellNodes.map(c => c.text || '').join(' ').trim() };
+            const rb = unionAll(cellNodes.map(c => c.bounds)); if (rb) rowNode.bounds = rb;
+            return rowNode;
+        });
+        const table: OfficeContentNode = { type: 'table', children: rowNodes, text: rowNodes.map(r => r.text || '').join('\n') };
+        const tb = unionAll(rowNodes.map(r => r.bounds)); if (tb) table.bounds = tb;
+        tables.push({ node: table, y: run[0][0].yTop });
+        for (const l of cells) consumed.add(l);
+    }
+    return { tables, consumed };
+}
+
+// ── geometric list detection ─────────────────────────────────────────────────
+
 /** A marker that stands alone as its own atom (e.g. "1.1.1.", "i.", "•"), split from its item text. */
 const STANDALONE_MARKER_RE = /^(?:[•◦▪‣·○●■□∙]|\(?(?:\d+(?:\.\d+)*|[a-zA-Z]|[ivxlcdmIVXLCDM]{1,7})[.)])$/;
 
@@ -555,8 +649,13 @@ export function blockToNodes(block: PdfLine[], page: PageContext, doc: DocContex
 
     const prefix: (ListMarker | null)[] = groups.map((g, i) => (dropped[i] || attached[i]) ? null : detectListMarker(g));
     const effective: (ListMarker | null)[] = groups.map((_, i) => attached[i] || prefix[i]);
+    // A group starting with a number is not a list item when it is really a numbered heading (its font
+    // is heading-sized) or a table-of-contents entry (dot leaders "... 3"). Stripping the number there
+    // would corrupt a heading or TOC. Bullet glyphs are exempt (a heading rarely starts with one).
+    const headingSized = (g: ParaGroup) => doc.cfg.headingDetection !== 'off' && g.fontSize >= 1.25 * doc.bodyFontSize;
     const isItem = effective.map((m, i) => {
         if (dropped[i] || !m) return false;
+        if (m.type === 'ordered' && (headingSized(groups[i]) || /\.{4,}/.test(groupText(groups[i])))) return false;
         if (attached[i] || m.strongBullet) return true;         // separate atom or real bullet: strong
         const prev = effective[i - 1], next = effective[i + 1]; // else require a run of compatible markers
         return (!!prev && prev.type === m.type) || (!!next && next.type === m.type);

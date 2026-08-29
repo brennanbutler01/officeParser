@@ -42,7 +42,7 @@ import { performOcr } from '../utils/ocrUtils.js';
 import { collectColorMarks, ColorLookup, makeColorLookup } from './pdf/pdfColor.js';
 import { computeRunBox, roundBounds, rotateBoundsToRendered, unionAll } from './pdf/geometry.js';
 import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
-import { blockToNodes, buildLines, computeDocContext, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
+import { blockToNodes, buildLines, computeDocContext, detectTables, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
 import { buildTaggedNodes } from './pdf/structTree.js';
 
 /** Type guard for a pdf.js TextItem (marked-content items lack `str`/`transform`). */
@@ -1132,11 +1132,26 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     return createAST('pdf', metadata, content, attachments, config, auxiliary);
 }
 
-/** Runs the geometric (untagged) assembly path over a set of runs. */
-function geometricNodes(runs: RawRun[], pageCtx: PageContext, docCtx: DocContext, pdfCfg: PdfLayoutConfig): OfficeContentNode[] {
+/**
+ * Runs the geometric (untagged) assembly path over a set of runs. `detectGridTables` recovers grid
+ * tables from the lines before column segmentation (off for margin artifacts, which are never
+ * tables).
+ */
+function geometricNodes(runs: RawRun[], pageCtx: PageContext, docCtx: DocContext, pdfCfg: PdfLayoutConfig, detectGridTables = true): OfficeContentNode[] {
     const lines = buildLines(runs, pdfCfg);
+    const { tables, consumed } = detectGridTables
+        ? detectTables(lines, pageCtx, docCtx)
+        : { tables: [] as { node: OfficeContentNode; y: number }[], consumed: new Set<typeof lines[number]>() };
+    const remaining = consumed.size ? lines.filter(l => !consumed.has(l)) : lines;
+
     const out: OfficeContentNode[] = [];
-    for (const block of segmentIntoBlocks(lines, pdfCfg)) out.push(...blockToNodes(block, pageCtx, docCtx));
+    for (const block of segmentIntoBlocks(remaining, pdfCfg)) out.push(...blockToNodes(block, pageCtx, docCtx));
+    // Splice each detected table into the flow at its vertical position.
+    for (const t of tables) {
+        const ty = t.node.bounds?.y ?? Infinity;
+        const at = out.findIndex(n => (n.bounds?.y ?? Infinity) > ty);
+        if (at < 0) out.push(t.node); else out.splice(at, 0, t.node);
+    }
     // Rescue rotated text (90/180/270), which the horizontal line builder skips, so it is not
     // silently dropped. It is appended after the main flow, in the source content order (which is
     // usually the correct reading order); precise visual ordering of rotated text is a limitation.
@@ -1178,8 +1193,8 @@ function classifyArtifacts(
     const h = extract.authoredH;
     const headerRuns = runs.filter(r => r.yTop < 0.15 * h);
     const footerRuns = runs.filter(r => r.yTop > 0.85 * h);
-    for (const node of geometricNodes(headerRuns, pageCtx, docCtx, pdfCfg)) headers.push(retypeAsHeaderFooter(node, 'header'));
-    for (const node of geometricNodes(footerRuns, pageCtx, docCtx, pdfCfg)) footers.push(retypeAsHeaderFooter(node, 'footer'));
+    for (const node of geometricNodes(headerRuns, pageCtx, docCtx, pdfCfg, false)) headers.push(retypeAsHeaderFooter(node, 'header'));
+    for (const node of geometricNodes(footerRuns, pageCtx, docCtx, pdfCfg, false)) footers.push(retypeAsHeaderFooter(node, 'footer'));
 }
 
 /** Wraps a paragraph produced from margin artifacts as a header/footer node. */

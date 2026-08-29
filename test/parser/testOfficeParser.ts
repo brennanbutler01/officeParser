@@ -3265,12 +3265,13 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('test.pdf parse', false, 'parsed', e?.message || String(e));
     }
 
-    // --- useTags:false forces the geometric path (no tables), text still readable ---
+    // --- useTags:false forces the geometric path; grid tables and lists are recovered from geometry ---
     try {
         const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, pdfParserConfig: { useTags: false } });
-        let tables = 0;
-        ast.content.forEach((p: any) => walk(p, n => { if (n.type === 'table') tables++; }));
-        add('useTags:false yields no tables', tables === 0, 0, tables);
+        let tables = 0, lists = 0;
+        ast.content.forEach((p: any) => walk(p, n => { if (n.type === 'table') tables++; if (n.type === 'list') lists++; }));
+        add('useTags:false recovers grid tables geometrically', tables >= 3, '>=3 tables', tables);
+        add('useTags:false recovers lists geometrically', lists >= 5, '>=5 list items', lists);
         add('useTags:false still parses text', textOf(ast).includes('Demonstration of DOCX support'), 'title present', textOf(ast).includes('Demonstration of DOCX support') ? 'present' : 'missing');
     } catch (e: any) {
         add('useTags:false parse', false, 'parsed', e?.message || String(e));
