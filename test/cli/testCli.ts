@@ -554,7 +554,7 @@ async function runTests() {
         console.log(`\n⚡ FAST MODE - skipping parity for: ${FAST_MODE_SKIPPED_FORMATS.join(', ')}`);
         console.log('   Run \'npm run test:cli\' for full coverage before considering work done.\n');
     }
-    const extensions = ['docx', 'odt', 'xlsx', 'ods', 'pptx', 'odp', 'pdf', 'rtf', 'csv', 'html', 'md', 'epub'];
+    const extensions = ['docx', 'odt', 'xlsx', 'ods', 'pptx', 'odp', 'odg', 'pdf', 'rtf', 'csv', 'html', 'md', 'epub'];
     for (let idx = 0; idx < extensions.length; idx++) {
         const ext = extensions[idx];
         const testNum = 27 + idx;

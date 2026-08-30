@@ -2,7 +2,7 @@
 
 A robust, strictly-typed **Node.js and Browser** library for parsing office files into a rich **Abstract Syntax Tree (AST)** and generating high-fidelity output in multiple formats.
 
-**Parses:** [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`odt`](https://en.wikipedia.org/wiki/OpenDocument) · [`odp`](https://en.wikipedia.org/wiki/OpenDocument) · [`ods`](https://en.wikipedia.org/wiki/OpenDocument) · [`pdf`](https://en.wikipedia.org/wiki/PDF) · [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) · [`csv`](https://en.wikipedia.org/wiki/Comma-separated_values) · [`md`](https://en.wikipedia.org/wiki/Markdown) · [`html`](https://en.wikipedia.org/wiki/HTML) · [`epub`](https://en.wikipedia.org/wiki/EPUB)
+**Parses:** [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`odt`](https://en.wikipedia.org/wiki/OpenDocument) · [`odp`](https://en.wikipedia.org/wiki/OpenDocument) · [`ods`](https://en.wikipedia.org/wiki/OpenDocument) · [`odg`](https://en.wikipedia.org/wiki/OpenDocument) · [`pdf`](https://en.wikipedia.org/wiki/PDF) · [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) · [`csv`](https://en.wikipedia.org/wiki/Comma-separated_values) · [`md`](https://en.wikipedia.org/wiki/Markdown) · [`html`](https://en.wikipedia.org/wiki/HTML) · [`epub`](https://en.wikipedia.org/wiki/EPUB)
 
 **Generates:** `Markdown` · `HTML` · `CSV` · `RTF` · `PDF` · `EPUB` · `Plain Text` · `RAG Chunks`
 
@@ -115,7 +115,7 @@ npx officeparser my_document --fileType=docx --to=json
 |------|--------|---------|-------------|
 | `--to` | `json\|text\|md\|html\|csv\|rtf\|pdf\|epub\|chunks` | `json` | Output format |
 | `--output` | path | — | Write output to a file |
-| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
+| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
 | `--ocr` | boolean | `false` | Enable OCR for images |
 | `--extractAttachments` | boolean | `false` | Extract images/charts as Base64 |
 | `--ignoreNotes` | boolean | `false` | Ignore footnotes/endnotes/speaker notes |

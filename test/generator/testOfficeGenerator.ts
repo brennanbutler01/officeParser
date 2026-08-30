@@ -46,7 +46,7 @@ const ROUNDTRIP_FORMATS: GeneratorFormat[] = ['html', 'md', 'rtf'];
 
 /** Source baseline formats used to drive generation tests */
 const SOURCE_FORMATS = {
-    documents: ['docx', 'odt', 'pptx', 'odp', 'pdf', 'rtf', 'html', 'md', 'epub'] as const,
+    documents: ['docx', 'odt', 'pptx', 'odp', 'odg', 'pdf', 'rtf', 'html', 'md', 'epub'] as const,
     spreadsheets: ['xlsx', 'ods', 'csv'] as const,
 };
 

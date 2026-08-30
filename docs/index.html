@@ -2837,7 +2837,7 @@
 
         window.CONFIG_SCHEMAS = {
             parser: [
-                { id: 'cfg_fileType', label: 'File Type Hint', type: 'select', options: ['', 'docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'epub'], names: ['Auto', 'DOCX', 'XLSX', 'PPTX', 'PDF', 'RTF', 'CSV', 'Markdown', 'HTML', 'ODT', 'ODS', 'ODP', 'EPUB'], width: '100px' },
+                { id: 'cfg_fileType', label: 'File Type Hint', type: 'select', options: ['', 'docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'odg', 'epub'], names: ['Auto', 'DOCX', 'XLSX', 'PPTX', 'PDF', 'RTF', 'CSV', 'Markdown', 'HTML', 'ODT', 'ODS', 'ODP', 'ODG', 'EPUB'], width: '100px' },
                 { id: 'cfg_extractAttachments', label: 'Extract Attachments', type: 'switch', default: true },
                 { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false },
                 { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true },
@@ -4553,7 +4553,7 @@
             // --- Sample Document Picker ---
             const samplePickerGrid = document.getElementById('sample-picker-grid');
             if (samplePickerGrid) {
-                const sampleFormats = ['docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'epub'];
+                const sampleFormats = ['docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'odg', 'epub'];
                 sampleFormats.forEach(fmt => {
                     const btn = document.createElement('button');
                     btn.className = 'sample-btn';

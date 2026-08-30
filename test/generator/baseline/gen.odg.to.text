@@ -1,0 +1,11 @@
+Flowchart Demonstration Diagram
+Start: begin the process here
+Decision: is the condition satisfied?
+Grouped shape A with a descriptive label
+Grouped shape B beside it in the same group
+[Image: image1.png]
+
+
+| Name  | Value | Description                      | 
+| Alpha | 42    | The first data row of the table  | 
+| Beta  | 17    | The second data row of the table | 

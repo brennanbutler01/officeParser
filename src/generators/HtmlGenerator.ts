@@ -115,7 +115,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     async generate(): Promise<ConversionResult<'html'>> {
         this.isSpreadsheetMode = this.ast.content.some(n => n.type === 'sheet');
         const isPresentation = this.ast.content.some(n => n.type === 'slide');
-        const isPdf = this.ast.content.some(n => n.type === 'page');
+        // Key off the source format, not "has a page node": ODG (Draw) also emits `page` nodes but is
+        // not a PDF, so it should not get the PDF container class or premium PDF styles.
+        const isPdf = this.ast.type === 'pdf';
 
         let containerClass = 'container';
         if (this.isSpreadsheetMode) containerClass = 'spreadsheet-container';

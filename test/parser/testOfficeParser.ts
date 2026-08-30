@@ -24,7 +24,10 @@ const FILE_GROUPS = {
     // the natural "expected" reference for the epub parity comparison.
     documents: ['docx', 'odt', 'pdf', 'rtf', 'html', 'md', 'epub'],
     presentations: ['pptx', 'odp'],
-    spreadsheets: ['xlsx', 'ods', 'csv']
+    spreadsheets: ['xlsx', 'ods', 'csv'],
+    // Single-member: ODG (Draw) has no sibling graphics format, so it gets individual + baseline
+    // coverage but no cross-format parity comparator (there is nothing to compare it against).
+    graphics: ['odg']
 };
 
 /**
@@ -83,7 +86,8 @@ const BASELINE_STATUS = {
     csv: true,    // ✅ Complete
     html: true,   // ✅ Complete
     md: true,     // ✅ Complete
-    epub: true    // ✅ Complete
+    epub: true,   // ✅ Complete
+    odg: true     // ✅ Complete (OpenDocument Graphics / Draw)
 };
 
 /** Full config for maximum extraction */
@@ -2331,6 +2335,13 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
             parts: {
                 mimetype: encode('application/vnd.oasis.opendocument.presentation'),
                 'content.xml': odfContent('<office:presentation><draw:page xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" draw:name="p1"><draw:frame><draw:text-box><text:p>Detected odp</text:p></draw:text-box></draw:frame></draw:page></office:presentation>'),
+            },
+        },
+        {
+            ext: 'odg', marker: 'Detected odg',
+            parts: {
+                mimetype: encode('application/vnd.oasis.opendocument.graphics'),
+                'content.xml': odfContent('<office:drawing><draw:page xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" draw:name="p1"><draw:custom-shape><text:p>Detected odg</text:p></draw:custom-shape></draw:page></office:drawing>'),
             },
         },
     ];

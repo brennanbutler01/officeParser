@@ -1227,6 +1227,46 @@ async function testGeneratedOutput(): Promise<void> {
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
+/**
+ * ODG (OpenDocument Graphics / LibreOffice Draw): parse-only support. Verifies each draw:page
+ * becomes a `page` node, shape text (incl. custom-shapes and groups) and embedded tables/images are
+ * extracted, and that ODG is not misrouted through the PDF-specific HTML styling.
+ */
+async function testOdg(): Promise<void> {
+    const filePath = path.join(__dirname, 'files/test.odg');
+    const ast = await OfficeParser.parseOffice(filePath, { extractAttachments: true });
+    assert.strictEqual(ast.type, 'odg', 'ODG: ast.type is odg');
+
+    const all: any[] = [];
+    const walk = (n: any) => { all.push(n); (n.children || []).forEach(walk); };
+    ast.content.forEach(walk);
+
+    const pages = all.filter(n => n.type === 'page');
+    assert.strictEqual(pages.length, 2, `ODG: 2 page nodes, got ${pages.length}`);
+    assert.strictEqual((pages[0].metadata as any)?.pageName, 'Title Page', 'ODG: first page draw:name');
+    assert.strictEqual((pages[1].metadata as any)?.pageName, 'Data Page', 'ODG: second page draw:name');
+
+    const flat = all.filter(n => n.type === 'text').map(n => n.text).join(' ');
+    for (const w of ['Flowchart Demonstration', 'Start: begin', 'Decision: is the condition',
+        'Grouped shape A', 'Grouped shape B', 'Name', 'Value', 'Description', 'Alpha', '42', 'Beta']) {
+        assert.ok(flat.includes(w), `ODG: shape/table text "${w}" extracted`);
+    }
+
+    const tables = all.filter(n => n.type === 'table');
+    assert.strictEqual(tables.length, 1, `ODG: 1 embedded table, got ${tables.length}`);
+    const images = all.filter(n => n.type === 'image');
+    assert.strictEqual(images.length, 1, `ODG: 1 embedded image, got ${images.length}`);
+    assert.ok((ast.attachments?.length ?? 0) >= 1, 'ODG: image captured as attachment');
+    assert.strictEqual(ast.metadata.title, 'ODG Test Drawing', 'ODG: metadata.title from meta.xml');
+
+    // ODG has `page` nodes but must NOT be styled as a PDF (the isPdf inference keys off ast.type).
+    const html = String((await ast.to('html', { htmlConfig: { standalone: false } })).value);
+    assert.ok(!html.includes('pdf-container'), 'ODG: HTML is not given the PDF container class');
+    for (const w of ['Flowchart Demonstration', 'Alpha']) {
+        assert.ok(html.includes(w), `ODG: HTML output contains "${w}"`);
+    }
+}
+
 async function runTests(): Promise<void> {
     console.log('Starting exhaustive officeParser test suite...');
     let passed = 0;
@@ -1241,6 +1281,7 @@ async function runTests(): Promise<void> {
         ['BlobInput', testBlobInput],
         ['WordParagraphMark', testWordParagraphMarkFormatting],
         ['GeneratedOutput', testGeneratedOutput],
+        ['ODG', testOdg],
     ];
 
     for (const [name, fn] of tests) {

@@ -1,0 +1,45 @@
+[
+  {
+    "text": "Flowchart Demonstration Diagram",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 1
+    }
+  },
+  {
+    "text": "Start: begin the process here",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 1
+    }
+  },
+  {
+    "text": "Decision: is the condition satisfied?",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 1
+    }
+  },
+  {
+    "text": "Grouped shape A with a descriptive label",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 1
+    }
+  },
+  {
+    "text": "Grouped shape B beside it in the same group",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 1
+    }
+  },
+  {
+    "text": "| Name | Value | Description |\n| Alpha | 42 | The first data row of the table |\n| Beta | 17 | The second data row of the table |",
+    "metadata": {
+      "sourceType": "odg",
+      "pageNumber": 2,
+      "isTableChunk": true
+    }
+  }
+]

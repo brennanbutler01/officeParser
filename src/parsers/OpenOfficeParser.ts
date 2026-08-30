@@ -21,7 +21,7 @@
  * @module OpenOfficeParser
  */
 
-import { BreakMetadata, CellMetadata, ChartData, ChartMetadata, CodeMetadata, FullOfficeParserConfig, HeadingMetadata, ImageMetadata, ListMetadata, OfficeAttachment, OfficeContentNode, OfficeParserAST, OfficeParserConfig, OfficeWarningType, SheetMetadata, SlideMetadata, SupportedFileType, TextFormatting, TextMetadata } from '../types.js';
+import { BreakMetadata, CellMetadata, ChartData, ChartMetadata, CodeMetadata, FullOfficeParserConfig, HeadingMetadata, ImageMetadata, ListMetadata, OfficeAttachment, OfficeContentNode, OfficeParserAST, OfficeParserConfig, OfficeWarningType, PageMetadata, SheetMetadata, SlideMetadata, SupportedFileType, TextFormatting, TextMetadata } from '../types.js';
 import { createAST } from '../utils/astUtils.js';
 import { extractChartData } from '../utils/chartUtils.js';
 import { checkAbortSignal, logWarning } from '../utils/errorUtils.js';
@@ -133,7 +133,7 @@ const cleanAttachmentName = (href: string): string => {
 };
 
 /** The ODF document types this parser handles, used to validate a caller-supplied file type. */
-const ODF_FILE_TYPES: SupportedFileType[] = ['odt', 'odp', 'ods'];
+const ODF_FILE_TYPES: SupportedFileType[] = ['odt', 'odp', 'ods', 'odg'];
 
 /**
  * Parses an OpenOffice document (.odt, .odp, .ods) and extracts content.
@@ -182,6 +182,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
         const mime = mimetypeFile.content.toString().trim();
         if (mime.includes('spreadsheet')) fileType = 'ods';
         else if (mime.includes('presentation')) fileType = 'odp';
+        else if (mime.includes('graphics')) fileType = 'odg'; // covers .odg and the .otg template mimetype
         else if (mime.includes('text')) fileType = 'odt';
     }
 
@@ -1670,6 +1671,41 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
 
                 if (odpNotes.length > 0) {
                     content.push(...odpNotes);
+                }
+            }
+        }
+        // ODG: Drawing / graphics document (LibreOffice Draw). Each draw:page becomes a `page` node
+        // (the same primitive PDF uses), and its shapes are walked with the shared, format-agnostic
+        // `traverse` that the ODP branch already relies on for frames, text boxes, groups, tables
+        // and images.
+        else if (fileType === 'odg') {
+            const drawing = getFirstElementByTagName(body, "office:drawing");
+            if (drawing) {
+                const pages = getDirectChildren(drawing, "draw:page");
+                for (let i = 0; i < pages.length; i++) {
+                    const page = pages[i];
+                    const drawName = page.getAttribute("draw:name");
+                    const pageNode: OfficeContentNode = {
+                        type: 'page',
+                        children: [],
+                        metadata: {
+                            pageNumber: i + 1,
+                            ...(drawName ? { pageName: drawName } : {})
+                        } as PageMetadata
+                    };
+                    const pageChildren = page.childNodes;
+                    if (pageChildren) {
+                        for (let j = 0; j < pageChildren.length; j++) {
+                            const child = pageChildren[j];
+                            if (isElement(child)) {
+                                traverse(child as Element, pageNode.children!, false, xmlString);
+                            }
+                        }
+                    }
+                    if (config.includeRawContent) {
+                        pageNode.rawContent = getRawContent(page, xmlString, config);
+                    }
+                    content.push(pageNode);
                 }
             }
         }

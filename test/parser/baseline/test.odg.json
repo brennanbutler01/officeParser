@@ -1,0 +1,411 @@
+{
+  "config": {
+    "extractAttachments": true,
+    "ocr": true,
+    "ocrLanguage": "eng",
+    "ocrConfig": {
+      "language": "eng",
+      "workerPath": "",
+      "corePath": "",
+      "langPath": "",
+      "preserveLayout": true,
+      "timeout": {
+        "autoTerminate": 10000,
+        "workerLoad": 0,
+        "recognition": 0
+      },
+      "autoTerminateTimeout": 10000,
+      "abortSignal": null
+    },
+    "includeRawContent": true,
+    "ignoreNotes": false,
+    "putNotesAtLast": false,
+    "newlineDelimiter": "\n",
+    "outputErrorToConsole": true,
+    "pdfWorkerSrc": "",
+    "serializeRawContent": true,
+    "preserveXmlWhitespace": false,
+    "includeBreakNodes": true,
+    "ignoreInternalLinks": false,
+    "csvDelimiter": ",",
+    "fileType": "odg",
+    "abortSignal": null,
+    "ignoreComments": false,
+    "ignoreHeadersAndFooters": false,
+    "ignoreSlideMasters": false,
+    "decompressionLimits": {
+      "maxUncompressedBytes": 536870912,
+      "maxZipEntries": 10000,
+      "maxTableCells": 1000000
+    },
+    "htmlParserConfig": {
+      "preserveAttributes": false,
+      "preserveIframes": false,
+      "embedFolkForms": false
+    },
+    "ignorePositions": false,
+    "pdfParserConfig": {
+      "password": "",
+      "useTags": true,
+      "detectColumns": true,
+      "mergeHyphenatedWords": true,
+      "lineToleranceFactor": 0.35,
+      "spaceToleranceFactor": 0.25,
+      "headingDetection": "auto",
+      "pageRange": "",
+      "disableTextNormalization": false,
+      "extractTextColor": true
+    }
+  },
+  "type": "odg",
+  "metadata": {
+    "nativeProperties": {
+      "dc:title": "ODG Test Drawing",
+      "meta:initial-creator": "officeParser",
+      "dc:creator": "officeParser",
+      "meta:creation-date": "2024-01-01T00:00:00",
+      "dc:date": "2024-01-01T00:00:00"
+    },
+    "title": "ODG Test Drawing",
+    "author": "officeParser",
+    "created": "2023-12-31T23:00:00.000Z",
+    "modified": "2023-12-31T23:00:00.000Z",
+    "styleMap": {}
+  },
+  "content": [
+    {
+      "type": "page",
+      "children": [
+        {
+          "type": "paragraph",
+          "text": "Flowchart Demonstration Diagram",
+          "children": [
+            {
+              "type": "text",
+              "text": "Flowchart Demonstration Diagram",
+              "formatting": {}
+            }
+          ],
+          "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Flowchart Demonstration Diagram</text:p>"
+        },
+        {
+          "type": "paragraph",
+          "text": "Start: begin the process here",
+          "children": [
+            {
+              "type": "text",
+              "text": "Start: begin the process here",
+              "formatting": {}
+            }
+          ],
+          "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Start: begin the process here</text:p>"
+        },
+        {
+          "type": "paragraph",
+          "text": "Decision: is the condition satisfied?",
+          "children": [
+            {
+              "type": "text",
+              "text": "Decision: is the condition satisfied?",
+              "formatting": {}
+            }
+          ],
+          "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Decision: is the condition satisfied?</text:p>"
+        },
+        {
+          "type": "paragraph",
+          "text": "Grouped shape A with a descriptive label",
+          "children": [
+            {
+              "type": "text",
+              "text": "Grouped shape A with a descriptive label",
+              "formatting": {}
+            }
+          ],
+          "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Grouped shape A with a descriptive label</text:p>"
+        },
+        {
+          "type": "paragraph",
+          "text": "Grouped shape B beside it in the same group",
+          "children": [
+            {
+              "type": "text",
+              "text": "Grouped shape B beside it in the same group",
+              "formatting": {}
+            }
+          ],
+          "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Grouped shape B beside it in the same group</text:p>"
+        },
+        {
+          "type": "image",
+          "text": "",
+          "children": [],
+          "metadata": {
+            "attachmentName": "image1.png",
+            "anchorIds": [
+              "pic1"
+            ]
+          },
+          "rawContent": "<draw:frame xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" draw:name=\"pic1\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"13cm\" svg:width=\"3cm\" svg:height=\"3cm\"><draw:image xmlns:xlink=\"http://www.w3.org/1999/xlink\" xlink:href=\"Pictures/image1.png\" xlink:type=\"simple\"/></draw:frame>"
+        }
+      ],
+      "metadata": {
+        "pageNumber": 1,
+        "pageName": "Title Page"
+      },
+      "rawContent": "<draw:page xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" draw:name=\"Title Page\">\n <draw:frame draw:name=\"titlebox\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"1cm\" svg:width=\"12cm\" svg:height=\"2cm\"><draw:text-box><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Flowchart Demonstration Diagram</text:p></draw:text-box></draw:frame>\n <draw:custom-shape draw:name=\"start\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"4cm\" svg:width=\"6cm\" svg:height=\"2cm\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Start: begin the process here</text:p></draw:custom-shape>\n <draw:custom-shape draw:name=\"decide\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"7cm\" svg:width=\"6cm\" svg:height=\"2cm\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Decision: is the condition satisfied?</text:p></draw:custom-shape>\n <draw:g><draw:custom-shape xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"10cm\" svg:width=\"5cm\" svg:height=\"2cm\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Grouped shape A with a descriptive label</text:p></draw:custom-shape><draw:custom-shape xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"7cm\" svg:y=\"10cm\" svg:width=\"5cm\" svg:height=\"2cm\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Grouped shape B beside it in the same group</text:p></draw:custom-shape></draw:g>\n <draw:frame draw:name=\"pic1\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"13cm\" svg:width=\"3cm\" svg:height=\"3cm\"><draw:image xmlns:xlink=\"http://www.w3.org/1999/xlink\" xlink:href=\"Pictures/image1.png\" xlink:type=\"simple\"/></draw:frame>\n</draw:page>"
+    },
+    {
+      "type": "page",
+      "children": [
+        {
+          "type": "table",
+          "children": [
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "cell",
+                  "text": "Name",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "Name",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Name",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Name</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 0,
+                    "col": 0
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Name</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "Value",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "Value",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Value",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Value</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 0,
+                    "col": 1
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Value</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "Description",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "Description",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Description",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Description</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 0,
+                    "col": 2
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Description</text:p></table:table-cell>"
+                }
+              ],
+              "rawContent": "<table:table-row xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Name</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Value</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Description</text:p></table:table-cell></table:table-row>"
+            },
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "cell",
+                  "text": "Alpha",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "Alpha",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Alpha",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Alpha</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 1,
+                    "col": 0
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Alpha</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "42",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "42",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "42",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">42</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 1,
+                    "col": 1
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">42</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "The first data row of the table",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "The first data row of the table",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "The first data row of the table",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The first data row of the table</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 1,
+                    "col": 2
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The first data row of the table</text:p></table:table-cell>"
+                }
+              ],
+              "rawContent": "<table:table-row xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Alpha</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">42</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The first data row of the table</text:p></table:table-cell></table:table-row>"
+            },
+            {
+              "type": "row",
+              "children": [
+                {
+                  "type": "cell",
+                  "text": "Beta",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "Beta",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Beta",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Beta</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 2,
+                    "col": 0
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Beta</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "17",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "17",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "17",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">17</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 2,
+                    "col": 1
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">17</text:p></table:table-cell>"
+                },
+                {
+                  "type": "cell",
+                  "text": "The second data row of the table",
+                  "children": [
+                    {
+                      "type": "paragraph",
+                      "text": "The second data row of the table",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "The second data row of the table",
+                          "formatting": {}
+                        }
+                      ],
+                      "rawContent": "<text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The second data row of the table</text:p>"
+                    }
+                  ],
+                  "metadata": {
+                    "row": 2,
+                    "col": 2
+                  },
+                  "rawContent": "<table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The second data row of the table</text:p></table:table-cell>"
+                }
+              ],
+              "rawContent": "<table:table-row xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Beta</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">17</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The second data row of the table</text:p></table:table-cell></table:table-row>"
+            }
+          ],
+          "rawContent": "<table:table xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" table:name=\"DataTable\">\n  <table:table-column table:number-columns-repeated=\"3\"/>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Name</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Value</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Description</text:p></table:table-cell></table:table-row>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Alpha</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">42</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The first data row of the table</text:p></table:table-cell></table:table-row>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Beta</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">17</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The second data row of the table</text:p></table:table-cell></table:table-row>\n </table:table>"
+        }
+      ],
+      "metadata": {
+        "pageNumber": 2,
+        "pageName": "Data Page"
+      },
+      "rawContent": "<draw:page xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" draw:name=\"Data Page\">\n <draw:frame draw:name=\"datatable\" xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" svg:x=\"1cm\" svg:y=\"1cm\" svg:width=\"14cm\" svg:height=\"8cm\"><table:table xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" table:name=\"DataTable\">\n  <table:table-column table:number-columns-repeated=\"3\"/>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Name</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Value</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Description</text:p></table:table-cell></table:table-row>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Alpha</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">42</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The first data row of the table</text:p></table:table-cell></table:table-row>\n  <table:table-row><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">Beta</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">17</text:p></table:table-cell><table:table-cell xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" office:value-type=\"string\"><text:p xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">The second data row of the table</text:p></table:table-cell></table:table-row>\n </table:table></draw:frame>\n</draw:page>"
+    }
+  ],
+  "attachments": [
+    {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAE0lEQVR4nGM4QSIY1TCqYRhrAAD42lgfd92qjAAAAABJRU5ErkJggg==",
+      "name": "image1.png",
+      "extension": "png",
+      "ocrText": ""
+    }
+  ],
+  "warnings": []
+}

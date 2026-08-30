@@ -1829,7 +1829,7 @@ export interface OfficeChunk {
 /**
  * Supported file types for parsing.
  */
-export type SupportedFileType = 'docx' | 'pptx' | 'xlsx' | 'odt' | 'odp' | 'ods' | 'pdf' | 'rtf' | 'md' | 'html' | 'csv' | 'epub';
+export type SupportedFileType = 'docx' | 'pptx' | 'xlsx' | 'odt' | 'odp' | 'ods' | 'odg' | 'pdf' | 'rtf' | 'md' | 'html' | 'csv' | 'epub';
 
 /**
  * A structural stand-in for the web `Blob`/`File` so `parseOffice`/`convert` accept them in the
@@ -2275,6 +2275,13 @@ export interface PageMetadata {
      * @example "iv" for the fourth page of front matter
      */
     pageLabel?: string;
+    /**
+     * The drawing page's name from ODG's `draw:name` (e.g. "Slide 1", "Flowchart", or a
+     * user-assigned title). ODG only; absent for PDF pages. The PDF-specific fields above
+     * (`pageWidth`/`pageHeight`/`rotation`/`pageLabel`) are not populated for ODG in v1.
+     * @example "Flowchart"
+     */
+    pageName?: string;
 }
 
 /**

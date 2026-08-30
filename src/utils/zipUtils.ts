@@ -281,6 +281,8 @@ const PACKAGE_MIMETYPES: Readonly<Record<string, SupportedFileType>> = {
     'application/vnd.oasis.opendocument.text': 'odt',
     'application/vnd.oasis.opendocument.spreadsheet': 'ods',
     'application/vnd.oasis.opendocument.presentation': 'odp',
+    'application/vnd.oasis.opendocument.graphics': 'odg',
+    'application/vnd.oasis.opendocument.graphics-template': 'odg', // .otg template resolves to odg
     'application/epub+zip': 'epub',
 };
 

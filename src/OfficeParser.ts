@@ -59,7 +59,7 @@ import { detectOfficeTypeFromZip } from './utils/zipUtils.js';
 const GENERIC_ZIP_EXTENSION = 'zip';
 
 /** The formats that are ZIP archives, and so cannot be contradicted by a bare `zip` result. */
-const ZIP_BACKED_FILE_TYPES: ReadonlySet<string> = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'epub']);
+const ZIP_BACKED_FILE_TYPES: ReadonlySet<string> = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'epub']);
 
 /**
  * Upgrades a magic-byte result of `zip` (or none at all) into the specific office format the
@@ -274,7 +274,8 @@ export class OfficeParser {
                 case 'odt':
                 case 'odp':
                 case 'ods':
-                    // The three ODF types share one parser, which needs to know which of them
+                case 'odg':
+                    // The ODF types share one parser, which needs to know which of them
                     // it is looking at. It normally reads that from the archive's mimetype
                     // entry; passing the resolved type along gives it something accurate to
                     // fall back on when that entry is missing.
