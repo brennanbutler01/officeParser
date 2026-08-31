@@ -21,7 +21,7 @@
  * @module OpenOfficeParser
  */
 
-import { BreakMetadata, CellMetadata, ChartData, ChartMetadata, CodeMetadata, FullOfficeParserConfig, HeadingMetadata, ImageMetadata, ListMetadata, OfficeAttachment, OfficeContentNode, OfficeParserAST, OfficeParserConfig, OfficeWarningType, PageMetadata, SheetMetadata, SlideMetadata, SupportedFileType, TextFormatting, TextMetadata } from '../types.js';
+import { BreakMetadata, CellMetadata, ChartData, ChartMetadata, CodeMetadata, FullOfficeParserConfig, HeadingMetadata, ImageMetadata, ListMetadata, OfficeAttachment, OfficeAuxiliaryContent, OfficeContentNode, OfficeParserAST, OfficeParserConfig, OfficeWarningType, PageMetadata, SheetMetadata, SlideMetadata, SupportedFileType, TextFormatting, TextMetadata } from '../types.js';
 import { createAST } from '../utils/astUtils.js';
 import { extractChartData } from '../utils/chartUtils.js';
 import { checkAbortSignal, logWarning } from '../utils/errorUtils.js';
@@ -209,7 +209,9 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
     let lastListStyle: string | null = null;
     let listIdCounter = 0;
     let lastWasList = false;
-    let traverse: (node: Element, targetArray: OfficeContentNode[], forceHeading?: boolean, sourceXml?: string, asSheet?: boolean) => void;
+    // Definite-assignment asserted: `traverse` is assigned unconditionally below before any use
+    // (the recursive body is defined once and the whole parse depends on it).
+    let traverse!: (node: Element, targetArray: OfficeContentNode[], forceHeading?: boolean, sourceXml?: string, asSheet?: boolean) => void;
 
     // Helper to parse styles
     const parseStyles = (scope: Document | Element) => {
@@ -496,6 +498,36 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                             emptyTextNode.notes = [noteNode];
                             children.push(emptyTextNode);
                         }
+                    }
+                } else if (tagName === 'office:annotation' && !config.ignoreComments) {
+                    // A point comment. Mirrors the note branch and WordParser's attachment convention:
+                    // attach to the preceding text run's `.comments`, else a leading empty text node.
+                    const creatorEl = getFirstElementByTagName(element, "dc:creator");
+                    const dateEl = getFirstElementByTagName(element, "dc:date");
+                    const author = creatorEl?.textContent || undefined;
+                    const date = dateEl?.textContent || undefined;
+                    const commentPs = getElementsByTagName(element, "text:p");
+                    const commentChildren: OfficeContentNode[] = [];
+                    let commentText = '';
+                    for (const cp of commentPs) {
+                        const cpContent = parseParagraphContent(cp, paragraphStyleMap, styleMap, config, sourceXml);
+                        commentText += (commentText ? ' ' : '') + cpContent.text;
+                        commentChildren.push({ type: 'paragraph', text: cpContent.text, children: cpContent.children, metadata: {} });
+                    }
+                    const commentNode: OfficeContentNode = {
+                        type: 'comment',
+                        text: commentText,
+                        children: commentChildren,
+                        metadata: { ...(author ? { author } : {}), ...(date ? { date } : {}) }
+                    };
+                    if (children.length > 0 && children[children.length - 1].type === 'text') {
+                        const preceding = children[children.length - 1];
+                        if (!preceding.comments) preceding.comments = [];
+                        preceding.comments.push(commentNode);
+                    } else {
+                        const emptyTextNode: OfficeContentNode = { type: 'text', text: '' };
+                        emptyTextNode.comments = [commentNode];
+                        children.push(emptyTextNode);
                     }
                 } else if (tagName === 'draw:frame') {
                     const frame = element;
@@ -1944,6 +1976,30 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
     }
 
 
+    // Master-page headers/footers (ODT). ODF keeps them in styles.xml, not content.xml, so they
+    // are otherwise invisible to every destination. Parse the first master page's header/footer
+    // through the same block traversal, into `auxiliary` (the shape WordParser populates).
+    let auxiliary: OfficeAuxiliaryContent | undefined;
+    if (!config.ignoreHeadersAndFooters && stylesDom) {
+        const stylesXmlStr = stylesFile ? stylesFile.content.toString() : undefined;
+        const masterStyles = getFirstElementByTagName(stylesDom, "office:master-styles");
+        const masterPage = masterStyles ? getFirstElementByTagName(masterStyles, "style:master-page") : undefined;
+        if (masterPage) {
+            const headerEl = getFirstElementByTagName(masterPage, "style:header");
+            const footerEl = getFirstElementByTagName(masterPage, "style:footer");
+            const headers: OfficeContentNode[] = [];
+            const footers: OfficeContentNode[] = [];
+            if (headerEl) traverse(headerEl, headers, false, stylesXmlStr);
+            if (footerEl) traverse(footerEl, footers, false, stylesXmlStr);
+            if (headers.length || footers.length) {
+                auxiliary = {
+                    ...(headers.length ? { headers } : {}),
+                    ...(footers.length ? { footers } : {}),
+                };
+            }
+        }
+    }
+
     return createAST(
         fileType,
         {
@@ -1953,6 +2009,6 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
         content,
         attachments,
         config,
-        undefined,
+        auxiliary,
     );
 };
