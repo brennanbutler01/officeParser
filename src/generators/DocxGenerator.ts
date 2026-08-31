@@ -92,6 +92,14 @@ function xmlText(s: string | undefined): string {
     return escapeXml(stripInvalidXmlChars(s ?? ''));
 }
 
+/** Normalizes a Date or date-like string to a W3CDTF instant (`YYYY-MM-DDThh:mm:ssZ`), or null. */
+function toW3CDTF(v: unknown): string | null {
+    let d: Date | null = null;
+    if (v instanceof Date && !isNaN(v.getTime())) d = v;
+    else if (typeof v === 'string' && v.trim() !== '') { const p = new Date(v); if (!isNaN(p.getTime())) d = p; }
+    return d ? d.toISOString().replace(/\.\d+Z$/, 'Z') : null;
+}
+
 /** Validates a `#RRGGBB`/`RRGGBB`/`#RGB` hex color to bare uppercase `RRGGBB`, or null. */
 function hexColor(v: string | undefined): string | null {
     if (!v) return null;
@@ -107,6 +115,17 @@ function toBookmarkNameRaw(name: string): string {
     return s.slice(0, 40) || '_';
 }
 
+/**
+ * The full WML namespace set. Every part whose body can contain runs, hyperlinks (`r:`) or drawings
+ * (`wp:`/`a:`/`pic:`) - document, notes, comments, headers, footers - must declare all of them on its
+ * root, or an `r:id`/`wp:inline` inside it references an undeclared prefix and the part is malformed.
+ */
+const WML_NS = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" `
+    + `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" `
+    + `xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" `
+    + `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" `
+    + `xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"`;
+
 interface Rel { id: string; type: string; target: string; mode?: string; }
 interface MediaPart { name: string; bytes: Uint8Array; ext: string; contentType: string; }
 interface NoteEntry { key: string; kind: 'footnote' | 'endnote'; node: OfficeContentNode; }
@@ -121,12 +140,15 @@ interface CommentEntry { id: number; node: OfficeContentNode; }
  * parser with near-zero loss (the basis of its test strategy).
  */
 export class DocxGenerator extends BaseGenerator<'docx'> {
-    private rels: Rel[] = [];
-    private relByTarget = new Map<string, string>();
+    // Relationships are per owning part: an r:id inside footnotes.xml/header1.xml resolves against
+    // that part's own `.rels`, not document.xml.rels. `currentRelOwner` names the part being rendered.
+    private partRels = new Map<string, Rel[]>();
+    private relDedupe = new Map<string, string>();
+    private currentRelOwner = 'word/document.xml';
     private media: MediaPart[] = [];
     private mediaByAttachment = new Map<string, string>();
     private usedExtensions = new Set<string>();
-    private bookmarkIds = new Map<string, number>();
+    private drawingCounter = 0;
     private usedBookmarkNames = new Set<string>();
     private bookmarkCounter = 0;
     private footnotes: NoteEntry[] = [];
@@ -144,27 +166,43 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
     // ── registries ────────────────────────────────────────────────────────────
 
+    /** Adds a relationship to the part currently being rendered and returns its part-local r:id. */
     private addRel(type: string, target: string, mode?: string): string {
-        const dedupeKey = `${type}::${target}::${mode ?? ''}`;
-        const existing = this.relByTarget.get(dedupeKey);
+        const owner = this.currentRelOwner;
+        const dedupeKey = `${owner}::${type}::${target}::${mode ?? ''}`;
+        const existing = this.relDedupe.get(dedupeKey);
         if (existing) return existing;
-        const id = `rId${this.rels.length + 100}`; // offset so document-level ids never clash with .rels
-        this.rels.push({ id, type, target, mode });
-        this.relByTarget.set(dedupeKey, id);
+        let bucket = this.partRels.get(owner);
+        if (!bucket) { bucket = []; this.partRels.set(owner, bucket); }
+        const id = `rId${bucket.length + 1}`;
+        bucket.push({ id, type, target, mode });
+        this.relDedupe.set(dedupeKey, id);
         return id;
     }
 
-    /** Returns a stable, unique bookmark id for a sanitized name (same name -> same id). */
-    private bookmarkId(rawName: string): { id: number; name: string } {
+    /** Runs `fn` with relationships routed to `owner`'s `.rels`, restoring the previous owner after. */
+    private async withRelOwner<T>(owner: string, fn: () => Promise<T>): Promise<T> {
+        const prev = this.currentRelOwner;
+        this.currentRelOwner = owner;
+        try { return await fn(); } finally { this.currentRelOwner = prev; }
+    }
+
+    /**
+     * Mints a fresh, unique bookmark for one anchor. The first claim of a base keeps the base name
+     * (so an internal link to it, resolved via {@link anchorName}, matches); later claims of the same
+     * base get a `_2`/`_3` suffix and a distinct id, so no two bookmarks share a name or id.
+     */
+    private mintBookmark(rawName: string): { id: number; name: string } {
         const base = toBookmarkNameRaw(rawName);
-        const existing = this.bookmarkIds.get(base);
-        if (existing !== undefined) return { id: existing, name: base };
         let name = base, i = 2;
-        while (this.usedBookmarkNames.has(name)) name = `${base.slice(0, 37)}_${i++}`;
+        while (this.usedBookmarkNames.has(name)) { const suffix = `_${i++}`; name = base.slice(0, 40 - suffix.length) + suffix; }
         this.usedBookmarkNames.add(name);
-        const id = this.bookmarkCounter++;
-        this.bookmarkIds.set(name, id);
-        return { id, name };
+        return { id: this.bookmarkCounter++, name };
+    }
+
+    /** The bookmark name an internal link resolves to: the sanitized base (matches the first claim). */
+    private anchorName(rawName: string): string {
+        return toBookmarkNameRaw(rawName);
     }
 
     /** Packages an image attachment once, returning the relationship id or null (skipped). */
@@ -173,6 +211,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (!att || !att.data) return null;
         const ext = MIME_EXT[(att.mimeType || '').toLowerCase()];
         if (!ext) { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: 'unsupported mime' }); return null; }
+        // Word does not render an SVG referenced by a bare a:blip (it needs the asvg extension + a
+        // raster fallback); emit nothing here so the caller degrades to alt text instead of a broken image.
+        if (ext === 'svg') { this.warn(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, { format: 'docx', feature: 'svg image' }); return null; }
         let bytes: Uint8Array;
         try { bytes = decodeBase64(att.data); } catch { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName }); return null; }
         let name = this.mediaByAttachment.get(attachmentName);
@@ -207,17 +248,14 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         this.warnUnrepresentableCustomMetadata('docx');
         const { iso, mtime } = this.resolveModified();
 
-        // Pre-pass: assign numbering ids in first-seen listId order (deterministic).
-        this.prescanNumbering(this.ast.content);
-
-        // Render body blocks (this also populates rels, media, notes, comments, bookmarks).
+        // Render body blocks (this also populates rels, media, notes, comments, bookmarks, numbering).
         const metaBlock = this.config.renderMetadata ? this.renderMetadataBlock() : '';
         const body = await this.renderBlocks(this.ast.content);
 
         const hasHeader = !!(this.ast.auxiliary?.headers?.length);
         const hasFooter = !!(this.ast.auxiliary?.footers?.length);
-        const headerXml = hasHeader ? await this.renderHdrFtr('hdr', this.ast.auxiliary!.headers!) : '';
-        const footerXml = hasFooter ? await this.renderHdrFtr('ftr', this.ast.auxiliary!.footers!) : '';
+        const headerXml = hasHeader ? await this.withRelOwner('word/header1.xml', () => this.renderHdrFtr('hdr', this.ast.auxiliary!.headers!)) : '';
+        const footerXml = hasFooter ? await this.withRelOwner('word/footer1.xml', () => this.renderHdrFtr('ftr', this.ast.auxiliary!.footers!)) : '';
         const headerRid = hasHeader ? this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/header', 'header1.xml') : '';
         const footerRid = hasFooter ? this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer', 'footer1.xml') : '';
 
@@ -261,7 +299,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             case 'image': return this.wrapP(await this.imageRun(node), this.jc((node.metadata as any)?.align));
             case 'code': return this.codeBlock(node);
             case 'break': return this.blockBreak(node);
-            case 'note': return ''; // notes ride node.notes, never appear as standalone blocks
+            case 'note': return this.standaloneNote(node); // orphan note definition: keep it as a trailing note
             case 'comment': return this.standaloneComment(node);
             case 'admonition': return this.admonition(node);
             case 'chart': return this.chart(node);
@@ -292,8 +330,10 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         const style = styleOverride ?? this.styleForTag(semantic?.tag) ?? this.knownStyle(meta?.style);
         const pPr = this.buildPPr({ style, meta });
         const bookmarks = this.bookmarksFor(node);
+        // Notes/comments the parser attached to the block itself (their ref preceded any run).
+        const blockRefs = (await this.noteRefs(node)) + (await this.commentRefs(node));
         const inner = await this.renderInline(node.children && node.children.length ? node.children : [{ type: 'text', text: node.text || '' } as OfficeContentNode]);
-        return `<w:p>${pPr}${bookmarks.start}${inner}${bookmarks.end}</w:p>`;
+        return `<w:p>${pPr}${bookmarks.start}${blockRefs}${inner}${bookmarks.end}</w:p>`;
     }
 
     private async paragraphIndented(node: OfficeContentNode, leftTwips: number): Promise<string> {
@@ -334,7 +374,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         }
         let start = '', end = '';
         for (const raw of names) {
-            const { id, name } = this.bookmarkId(raw);
+            const { id, name } = this.mintBookmark(raw);
             start += `<w:bookmarkStart w:id="${id}" w:name="${escapeXml(name)}"/>`;
             end += `<w:bookmarkEnd w:id="${id}"/>`;
         }
@@ -380,7 +420,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 while (j < items.length && items[j].type === 'text' && (items[j].metadata as any)?.link === link) {
                     group.push(items[j]); j++;
                 }
-                out += this.hyperlink(link, (node.metadata as any)?.linkType, group);
+                out += await this.hyperlink(link, (node.metadata as any)?.linkType, group);
                 i = j;
                 continue;
             }
@@ -432,7 +472,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             const c = hexColor(fmt.color);
             if (c) s += `<w:color w:val="${c}"/>`;
             const sz = lengthToPt(fmt.size);
-            if (sz && sz > 0) s += `<w:sz w:val="${Math.round(sz * 2)}"/>`;
+            const halfPts = sz && sz > 0 ? Math.round(sz * 2) : 0;
+            if (halfPts > 0) s += `<w:sz w:val="${halfPts}"/>`;
             if (fmt.underline) s += '<w:u w:val="single"/>';
             const bg = hexColor(fmt.backgroundColor);
             if (bg) s += `<w:shd w:val="clear" w:color="auto" w:fill="${bg}"/>`;
@@ -442,18 +483,21 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         return s ? `<w:rPr>${s}</w:rPr>` : '';
     }
 
-    private hyperlink(link: string, linkType: string | undefined, group: OfficeContentNode[]): string {
+    private async hyperlink(link: string, linkType: string | undefined, group: OfficeContentNode[]): Promise<string> {
         const runs = group.map(n => this.styledRun(n.text || '', n.formatting, 'Hyperlink')).join('');
+        // Notes/comments anchored on linked text still have to be emitted; place them after the link.
+        let trailing = '';
+        for (const n of group) trailing += await this.noteRefs(n) + await this.commentRefs(n);
         const internal = linkType === 'internal' || link.startsWith('#');
         if (internal) {
-            if (this.config.ignoreInternalLinks) return group.map(n => this.textRuns(n)).join('');
-            const { name } = this.bookmarkId(link.replace(/^#/, ''));
-            return `<w:hyperlink w:anchor="${escapeXml(name)}">${runs}</w:hyperlink>`;
+            if (this.config.ignoreInternalLinks) return group.map(n => this.textRuns(n)).join('') + trailing;
+            const name = this.anchorName(link.replace(/^#/, ''));
+            return `<w:hyperlink w:anchor="${escapeXml(name)}">${runs}</w:hyperlink>${trailing}`;
         }
         const safe = sanitizeDocxUrl(link);
-        if (!safe) return group.map(n => this.textRuns(n)).join('');
+        if (!safe) return group.map(n => this.textRuns(n)).join('') + trailing;
         const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(safe), 'External');
-        return `<w:hyperlink r:id="${rid}">${runs}</w:hyperlink>`;
+        return `<w:hyperlink r:id="${rid}">${runs}</w:hyperlink>${trailing}`;
     }
 
     private styledRun(text: string, fmt: TextFormatting | undefined, styleId: string): string {
@@ -469,23 +513,39 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         let out = '';
         for (const note of node.notes) {
             const kind: 'footnote' | 'endnote' = (note.metadata as any)?.noteType === 'endnote' ? 'endnote' : 'footnote';
-            const key = this.getFootnoteKey(note);
-            if (!this.noteBodies.has(key)) {
-                (kind === 'endnote' ? this.endnotes : this.footnotes).push({ key, kind, node });
-                // Style the note body paragraphs as FootnoteText; a body always ends with a w:p.
-                const body = (await this.renderBlocks(note.children)) || '<w:p/>';
-                this.noteBodies.set(key, this.styleNoteBody(body));
-            }
-            const id = this.noteId(key);
-            const tag = kind === 'endnote' ? 'w:endnoteReference' : 'w:footnoteReference';
-            out += `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><${tag} w:id="${id}"/></w:r>`;
+            out += await this.registerNote(note, kind);
         }
         return out;
+    }
+
+    /**
+     * Registers a note (once, keyed by content) into the footnotes/endnotes part, rendering its body
+     * with relationships routed to that part, and returns the in-text reference run.
+     */
+    private async registerNote(note: OfficeContentNode, kind: 'footnote' | 'endnote'): Promise<string> {
+        const key = this.getFootnoteKey(note);
+        if (!this.noteBodies.has(key)) {
+            (kind === 'endnote' ? this.endnotes : this.footnotes).push({ key, kind, node: note });
+            const owner = kind === 'endnote' ? 'word/endnotes.xml' : 'word/footnotes.xml';
+            const body = (await this.withRelOwner(owner, () => this.renderBlocks(note.children))) || '<w:p/>';
+            this.noteBodies.set(key, this.withNoteMarker(this.styleNoteBody(body), kind));
+        }
+        const id = this.noteId(key);
+        const tag = kind === 'endnote' ? 'w:endnoteReference' : 'w:footnoteReference';
+        return `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><${tag} w:id="${id}"/></w:r>`;
     }
 
     private styleNoteBody(body: string): string {
         // Give each top-level body paragraph the FootnoteText style (only when it has no pPr already).
         return body.replace(/<w:p>(?!<w:pPr>)/g, '<w:p><w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr>');
+    }
+
+    /** Prepends the numbered marker run (w:footnoteRef/w:endnoteRef) to the note body's first paragraph. */
+    private withNoteMarker(body: string, kind: 'footnote' | 'endnote'): string {
+        const ref = `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:${kind}Ref/></w:r>`;
+        const m = /^<w:p>(<w:pPr>[\s\S]*?<\/w:pPr>)?/.exec(body);
+        if (m) return body.slice(0, m[0].length) + ref + body.slice(m[0].length);
+        return ref + body;
     }
 
     private noteIdMap = new Map<string, number>();
@@ -499,60 +559,73 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private async commentRefs(node: OfficeContentNode): Promise<string> {
         if (!node.comments || !node.comments.length) return '';
         let out = '';
-        for (const c of node.comments) {
-            const id = this.commentCounter++;
-            this.comments.push({ id, node: c });
-            this.commentBodies.set(id, (await this.renderBlocks(c.children)) || '<w:p/>');
-            out += `<w:r><w:commentReference w:id="${id}"/></w:r>`;
-        }
+        for (const c of node.comments) out += await this.registerComment(c, false);
         return out;
     }
 
     private async standaloneComment(node: OfficeContentNode): Promise<string> {
+        return this.registerComment(node, true);
+    }
+
+    /** Registers a comment into comments.xml (body rels routed there) and returns its reference run. */
+    private async registerComment(node: OfficeContentNode, ownParagraph: boolean): Promise<string> {
         const id = this.commentCounter++;
         this.comments.push({ id, node });
-        this.commentBodies.set(id, (await this.renderBlocks(node.children)) || '<w:p/>');
-        return `<w:p><w:r><w:commentReference w:id="${id}"/></w:r></w:p>`;
+        const body = (await this.withRelOwner('word/comments.xml', () => this.renderBlocks(node.children))) || '<w:p/>';
+        this.commentBodies.set(id, body);
+        const ref = `<w:r><w:commentReference w:id="${id}"/></w:r>`;
+        return ownParagraph ? `<w:p>${ref}</w:p>` : ref;
+    }
+
+    /**
+     * An orphan note node (e.g. an unreferenced footnote definition) has no in-text anchor. Keep it by
+     * registering it and emitting a trailing paragraph carrying its reference, so it survives round-trip.
+     */
+    private async standaloneNote(node: OfficeContentNode): Promise<string> {
+        const kind: 'footnote' | 'endnote' = (node.metadata as any)?.noteType === 'endnote' ? 'endnote' : 'footnote';
+        const ref = await this.registerNote(node, kind);
+        return `<w:p>${ref}</w:p>`;
     }
 
     // ── lists / numbering ────────────────────────────────────────────────────────
 
-    private prescanNumbering(nodes: OfficeContentNode[] | undefined): void {
-        for (const node of nodes || []) {
-            if (node.type === 'list') {
-                const meta = node.metadata as any;
-                const listId = String(meta?.listId ?? 'pdf-list');
-                let entry = this.numByListId.get(listId) !== undefined
-                    ? this.numbering.find(n => n.listId === listId)!
-                    : undefined;
-                if (!entry) {
-                    const numId = this.numbering.length + 1;
-                    entry = { listId, numId, levels: new Map(), startAt: new Map() };
-                    this.numbering.push(entry);
-                    this.numByListId.set(listId, numId);
-                    this.needsNumbering = true;
-                }
-                const lvl = Math.max(0, Math.min(8, meta?.indentation | 0));
-                if (!entry.levels.has(lvl)) {
-                    entry.levels.set(lvl, meta?.listType === 'ordered' ? 'ordered' : 'unordered');
-                    if (typeof meta?.itemIndex === 'number') entry.startAt.set(lvl, meta.itemIndex + 1);
-                }
-            }
-            this.prescanNumbering(node.children);
+    /**
+     * Registers the numbering definition for a list item at render time and returns its numId. Done
+     * lazily during rendering (not a pre-pass) so lists inside notes, comments, headers and footers -
+     * which the content walk never reaches - still get a numbering entry and a numbering.xml part.
+     */
+    private ensureNumbering(meta: any): number {
+        const listId = String(meta?.listId ?? 'pdf-list');
+        let numId = this.numByListId.get(listId);
+        let entry: { listId: string; numId: number; levels: Map<number, 'ordered' | 'unordered'>; startAt: Map<number, number> };
+        if (numId === undefined) {
+            numId = this.numbering.length + 1;
+            entry = { listId, numId, levels: new Map(), startAt: new Map() };
+            this.numbering.push(entry);
+            this.numByListId.set(listId, numId);
+            this.needsNumbering = true;
+        } else {
+            entry = this.numbering.find(n => n.numId === numId)!;
         }
+        const lvl = Math.max(0, Math.min(8, meta?.indentation | 0));
+        if (!entry.levels.has(lvl)) {
+            entry.levels.set(lvl, meta?.listType === 'ordered' ? 'ordered' : 'unordered');
+            if (typeof meta?.itemIndex === 'number') entry.startAt.set(lvl, meta.itemIndex + 1);
+        }
+        return numId;
     }
 
     private async listItem(node: OfficeContentNode): Promise<string> {
         const meta = node.metadata as any;
-        const listId = String(meta?.listId ?? 'pdf-list');
-        const numId = this.numByListId.get(listId) ?? 1;
+        const numId = this.ensureNumbering(meta);
         const lvl = Math.max(0, Math.min(8, meta?.indentation | 0));
         const numPr = `<w:numPr><w:ilvl w:val="${lvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
         const pPr = this.buildPPr({ style: 'ListParagraph', numPr, meta });
         let prefix = '';
         if (meta?.isTask) prefix = this.run(meta.checked ? '☑ ' : '☐ ', undefined);
+        const blockRefs = (await this.noteRefs(node)) + (await this.commentRefs(node));
         const inner = await this.renderInline(node.children || [{ type: 'text', text: node.text || '' } as OfficeContentNode]);
-        return `<w:p>${pPr}${prefix}${inner}</w:p>`;
+        return `<w:p>${pPr}${prefix}${blockRefs}${inner}</w:p>`;
     }
 
     private buildNumberingXml(): string {
@@ -589,7 +662,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         const contentWidth = this.contentWidthTwips();
         const colW = Math.max(1, Math.floor(contentWidth / Math.max(1, cols)));
         const tblGrid = `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${colW}"/>`).join('')}</w:tblGrid>`;
-        const tableAlign = this.jcVal((node.metadata as any)?.align);
+        // Table-level justification only accepts left/center/right; 'both' (justify) is not valid here.
+        const tableAlign = this.jcVal((node.metadata as any)?.align) === 'both' ? null : this.jcVal((node.metadata as any)?.align);
         const tblPr = `<w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/>`
             + (tableAlign ? `<w:jc w:val="${tableAlign}"/>` : '')
             + `<w:tblBorders>${['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(s => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="auto"/>`).join('')}</w:tblBorders></w:tblPr>`;
@@ -598,6 +672,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         let trs = '';
         for (const row of rows) {
             const cells = (row.children || []).filter(c => c.type === 'cell');
+            const isHeaderRow = (row.metadata as any)?.isHeader
+                || (cells.length > 0 && cells.every(c => (c.metadata as any)?.isHeader));
+            const trPr = isHeaderRow ? '<w:trPr><w:tblHeader/></w:trPr>' : '';
             let tcs = '';
             let col = 0, ci = 0;
             while (ci < cells.length || [...active.entries()].some(([c]) => c >= col)) {
@@ -627,7 +704,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 tcs += `<w:tc><w:tcPr>${tcPr}</w:tcPr>${inner}</w:tc>`;
                 col += colSpan;
             }
-            trs += `<w:tr>${tcs}</w:tr>`;
+            // A w:tr must contain at least one w:tc.
+            if (!tcs) tcs = `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p/></w:tc>`;
+            trs += `<w:tr>${trPr}${tcs}</w:tr>`;
         }
         return `<w:tbl>${tblPr}${tblGrid}${trs}</w:tbl>`;
     }
@@ -673,7 +752,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         let drawing = '';
         if (rel) {
             const { cx, cy } = this.imageEmu(node, rel.intrinsic);
-            const id = this.media.length; // stable per-doc id
+            const id = ++this.drawingCounter; // unique per emitted drawing (image reuse must not repeat ids)
             const alt = xmlText(meta?.altText || '');
             drawing = `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">`
                 + `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="image${id}" descr="${alt}"/>`
@@ -689,6 +768,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             const safe = sanitizeDocxUrl(meta.url);
             if (safe) { const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(safe), 'External'); drawing = `<w:hyperlink r:id="${rid}">${this.styledRun(meta.altText || safe, undefined, 'Hyperlink')}</w:hyperlink>`; }
         }
+        // No renderable image (unresolvable/unsupported attachment, no url): keep the alt text or OCR
+        // so the content is not silently lost.
+        if (!drawing) { const fallback = meta?.altText || ocr; return fallback ? this.run(fallback, undefined) : ''; }
         if (mode === 'image+ocrtext' && ocr) return drawing + this.run('\n' + ocr, undefined);
         return drawing;
     }
@@ -822,15 +904,15 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         const inner = await this.renderBlocks(nodes) || '<w:p/>';
         const tag = kind === 'hdr' ? 'w:hdr' : 'w:ftr';
         return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`
-            + `<${tag} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" `
-            + `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${inner}</${tag}>`;
+            + `<${tag} ${WML_NS}>${inner}</${tag}>`;
     }
 
     private renderMetadataBlock(): string {
         const m = this.effectiveMetadata;
         let out = '';
         if (m.title) out += `<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t xml:space="preserve">${xmlText(m.title)}</w:t></w:r></w:p>`;
-        const bits = [m.author, m.modified instanceof Date ? m.modified.toISOString().slice(0, 10) : undefined].filter(Boolean).join(' — ');
+        const modIso = toW3CDTF(m.modified);
+        const bits = [m.author, modIso ? modIso.slice(0, 10) : undefined].filter(Boolean).join(' · ');
         if (bits) out += `<w:p><w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">${xmlText(bits)}</w:t></w:r></w:p>`;
         return out;
     }
@@ -852,11 +934,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             + `<w:pgSz w:w="${pw}" w:h="${ph}"${orient}/>${pgMar}</w:sectPr>`;
         const bodyContent = body.trim() ? body : '<w:p/>';
         return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`
-            + `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" `
-            + `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" `
-            + `xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" `
-            + `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" `
-            + `xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">`
+            + `<w:document ${WML_NS}>`
             + `<w:body>${bodyContent}${sectPr}</w:body></w:document>`;
     }
 
@@ -873,10 +951,10 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (hasEndnotes) this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes', 'endnotes.xml');
         if (hasComments) this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', 'comments.xml');
 
-        parts['[Content_Types].xml'] = this.contentTypes({ hasFootnotes, hasEndnotes, hasComments });
-        parts['_rels/.rels'] = ROOT_RELS;
+        const custom = this.customProps();
+        parts['[Content_Types].xml'] = this.contentTypes({ hasFootnotes, hasEndnotes, hasComments, hasCustom: !!custom });
+        parts['_rels/.rels'] = this.rootRels(!!custom);
         parts['word/document.xml'] = o.documentXml;
-        parts['word/_rels/document.xml.rels'] = this.documentRels();
         parts['word/styles.xml'] = STYLES_XML;
         if (this.needsNumbering) parts['word/numbering.xml'] = this.buildNumberingXml();
         if (hasFootnotes) parts['word/footnotes.xml'] = this.buildNotesXml('footnote', this.footnotes);
@@ -886,12 +964,37 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (o.hasFooter) parts['word/footer1.xml'] = o.footerXml;
         parts['docProps/core.xml'] = this.coreProps(o.iso);
         parts['docProps/app.xml'] = APP_XML;
-        const custom = this.customProps();
         if (custom) parts['docProps/custom.xml'] = custom;
+        // One `.rels` per part that actually carries relationships (r:id/r:embed resolve per-part).
+        for (const [owner, bucket] of this.partRels) {
+            if (bucket.length) parts[this.relsPathFor(owner)] = this.relsXml(bucket);
+        }
         return parts;
     }
 
-    private contentTypes(o: { hasFootnotes: boolean; hasEndnotes: boolean; hasComments: boolean }): string {
+    /** Maps an owning part path (`word/footnotes.xml`) to its relationships part (`word/_rels/footnotes.xml.rels`). */
+    private relsPathFor(owner: string): string {
+        const slash = owner.lastIndexOf('/');
+        const dir = slash >= 0 ? owner.slice(0, slash) : '';
+        const base = slash >= 0 ? owner.slice(slash + 1) : owner;
+        return `${dir ? dir + '/' : ''}_rels/${base}.rels`;
+    }
+
+    private relsXml(bucket: Rel[]): string {
+        const rels = bucket.map(r => `<Relationship Id="${r.id}" Type="${r.type}" Target="${r.target}"${r.mode ? ` TargetMode="${r.mode}"` : ''}/>`).join('');
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+    }
+
+    /** Package-level relationships. The custom-properties relationship is included only when that part exists. */
+    private rootRels(hasCustom: boolean): string {
+        let rels = `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>`
+            + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>`
+            + `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>`;
+        if (hasCustom) rels += `<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/>`;
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+    }
+
+    private contentTypes(o: { hasFootnotes: boolean; hasEndnotes: boolean; hasComments: boolean; hasCustom: boolean }): string {
         const wml = 'application/vnd.openxmlformats-officedocument.wordprocessingml';
         let defaults = `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>`;
         for (const ext of this.usedExtensions) {
@@ -908,13 +1011,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (this.ast.auxiliary?.footers?.length) overrides += `<Override PartName="/word/footer1.xml" ContentType="${wml}.footer+xml"/>`;
         overrides += `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>`
             + `<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`;
-        if (this.customProps()) overrides += `<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>`;
+        if (o.hasCustom) overrides += `<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>`;
         return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${defaults}${overrides}</Types>`;
-    }
-
-    private documentRels(): string {
-        const rels = this.rels.map(r => `<Relationship Id="${r.id}" Type="${r.type}" Target="${r.target}"${r.mode ? ` TargetMode="${r.mode}"` : ''}/>`).join('');
-        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
     }
 
     private buildNotesXml(kind: 'footnote' | 'endnote', notes: NoteEntry[]): string {
@@ -930,7 +1028,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             const body = (this.noteBodies.get(n.key)) ?? '<w:p/>';
             entries += `<${tag} w:id="${id}">${body}</${tag}>`;
         }
-        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<${root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${entries}</${root}>`;
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<${root} ${WML_NS}>${entries}</${root}>`;
     }
 
     private noteBodies = new Map<string, string>();
@@ -939,21 +1037,26 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         for (const c of this.comments) {
             const meta = c.node.metadata as any;
             const body = this.commentBodies.get(c.id) ?? '<w:p/>';
-            entries += `<w:comment w:id="${c.id}" w:author="${xmlText(meta?.author || '')}" w:date="${xmlText(meta?.date || '')}" w:initials="${xmlText(meta?.initials || '')}">${body}</w:comment>`;
+            // w:author is required; w:date must be a valid dateTime (omit if absent/garbage); w:initials optional.
+            const dateVal = toW3CDTF(meta?.date);
+            const dateAttr = dateVal ? ` w:date="${dateVal}"` : '';
+            const initialsAttr = meta?.initials ? ` w:initials="${xmlText(String(meta.initials))}"` : '';
+            entries += `<w:comment w:id="${c.id}" w:author="${xmlText(meta?.author || '')}"${dateAttr}${initialsAttr}>${body}</w:comment>`;
         }
-        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${entries}</w:comments>`;
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:comments ${WML_NS}>${entries}</w:comments>`;
     }
     private commentBodies = new Map<number, string>();
 
     private coreProps(iso: string): string {
         const m = this.effectiveMetadata;
-        const created = m.created instanceof Date ? m.created.toISOString().replace(/\.\d+Z$/, 'Z') : iso;
+        const created = toW3CDTF(m.created) ?? iso;
         const el = (tag: string, val: string | undefined) => val ? `<${tag}>${xmlText(val)}</${tag}>` : '';
         return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`
             + `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" `
             + `xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`
             + el('dc:title', m.title) + el('dc:creator', m.author) + el('dc:subject', m.subject)
-            + el('dc:description', m.description) + el('cp:keywords', m.keywords) + el('cp:lastModifiedBy', m.lastModifiedBy)
+            + el('dc:description', m.description) + el('dc:language', (m as any).language)
+            + el('cp:keywords', m.keywords) + el('cp:lastModifiedBy', m.lastModifiedBy)
             + `<dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created>`
             + `<dcterms:modified xsi:type="dcterms:W3CDTF">${iso}</dcterms:modified></cp:coreProperties>`;
     }
@@ -979,9 +1082,6 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 function cellOf(text: string): OfficeContentNode {
     return { type: 'cell', text, children: [{ type: 'paragraph', children: [{ type: 'text', text } as OfficeContentNode] } as OfficeContentNode], metadata: { row: 0, col: 0 } as any };
 }
-
-const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/></Relationships>`;
 
 const APP_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>officeParser</Application></Properties>`;

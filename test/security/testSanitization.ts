@@ -848,6 +848,49 @@ async function docxSanitizationTests() {
             colors.every(c => /^[0-9A-Fa-f]{6}$/.test(c) || c === 'auto'),
             `invalid color leaked: ${JSON.stringify(colors)}`);
     }
+
+    // ── Attachment name cannot escape the media directory ─────────────────────
+    {
+        const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+        const ast = astWith([{ type: 'image', metadata: { attachmentName: '../../evil.png' } }]);
+        (ast as any).attachments = [{ name: '../../evil.png', mimeType: 'image/png', data: png }];
+        const bytes = (await OfficeGenerator.generate(ast, 'docx')).value as Uint8Array;
+        const entries = Object.keys(unzipSync(bytes));
+        check('docx: no zip entry escapes its directory', entries.every(e => !e.includes('..')),
+            `traversal entry present: ${entries.filter(e => e.includes('..')).join(', ')}`);
+        const media = entries.filter(e => e.startsWith('word/media/'));
+        check('docx: media file names are synthesized, not attacker-controlled',
+            media.every(e => /^word\/media\/image\d+\.[a-z]+$/.test(e)), `unexpected media entry: ${media.join(', ')}`);
+    }
+
+    // ── Absurd colSpan/rowSpan is clamped (no unbounded cell explosion) ────────
+    {
+        const ast = astWith([{ type: 'table', children: [
+            { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 1e9, rowSpan: 1e9 }, children: [{ type: 'text', text: 'x' }] }] } ] }]);
+        const bytes = (await OfficeGenerator.generate(ast, 'docx')).value as Uint8Array;
+        check('docx: absurd span does not blow up output size', bytes.length < 200_000, `output was ${bytes.length} bytes`);
+        const doc = await docFor(bytes);
+        let ok = true; try { parseXmlString(doc); } catch { ok = false; }
+        check('docx: document.xml well-formed with clamped spans', ok);
+        const gridSpan = doc.match(/<w:gridSpan w:val="(\d+)"/);
+        check('docx: gridSpan clamped to a sane value', !gridSpan || Number(gridSpan[1]) <= 1000,
+            `gridSpan was ${gridSpan?.[1]}`);
+    }
+
+    // ── styleMap output.tag cannot inject into w:pStyle ───────────────────────
+    {
+        const pAst = astWith([{ type: 'paragraph', metadata: { style: 'Custom' }, children: [{ type: 'text', text: 'hi' }] } as any]);
+        const sm = (tag: string) => ({ styleMap: [{ selector: { nodeType: 'paragraph', attributes: { style: 'Custom' } }, output: { tag } }] } as any);
+        const hostile = (await OfficeGenerator.generate(pAst, 'docx', sm('h1"/><w:pStyle w:val="Injected'))).value as Uint8Array;
+        const hdoc = strFromU8(unzipSync(hostile)['word/document.xml']);
+        check('docx: hostile styleMap tag is not mapped to a style', !/Injected/.test(hdoc), hdoc.match(/<w:pStyle[^>]*>/)?.[0] ?? '');
+        let ok = true; try { parseXmlString(hdoc); } catch { ok = false; }
+        check('docx: document.xml well-formed with hostile styleMap tag', ok);
+        // Positive control: a legitimate tag still maps to its Word style.
+        const benign = (await OfficeGenerator.generate(pAst, 'docx', sm('h1'))).value as Uint8Array;
+        const bdoc = strFromU8(unzipSync(benign)['word/document.xml']);
+        check('docx: legitimate styleMap tag h1 maps to Heading1', /<w:pStyle w:val="Heading1"\/>/.test(bdoc), bdoc.match(/<w:pStyle[^>]*>/)?.[0] ?? '');
+    }
 }
 
 /**

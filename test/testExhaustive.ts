@@ -1268,41 +1268,156 @@ async function testOdg(): Promise<void> {
     }
 }
 
+// A minimal valid 1x1 PNG (sniffs to 1x1, Tesseract-independent) for image-bearing synthetic ASTs.
+const TINY_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+/** Counts every DOCX part whose name matches, unzipped once. */
+function docxParts(bytes: Uint8Array): Record<string, string> {
+    const files = unzipSync(bytes);
+    const out: Record<string, string> = {};
+    for (const [name, data] of Object.entries(files)) {
+        if (name.endsWith('.xml') || name.endsWith('.rels')) out[name] = strFromU8(data as Uint8Array);
+    }
+    return out;
+}
+
 /**
- * DOCX generation: generate a Word document from the richest fixture, assert the OOXML package is
- * well-formed and carries the expected WML, then re-parse it with WordParser and confirm the round
- * trip preserves headings, tables, lists, images, footnotes and text.
+ * DOCX generation. Two tiers:
+ *  1. Round-trip the richest markdown fixture and confirm structure + specific text survive.
+ *  2. Drive a synthetic AST whose shapes exercise exactly the OOXML edge cases a plain fixture never
+ *     reaches - a hyperlink and a list inside a footnote, an image inside a header, duplicate heading
+ *     slugs, a comment with no date, merged table cells, an orphan note - and assert the package stays
+ *     well-formed with correct PER-PART relationships (the class of bug a document-wide rels list hides).
  */
 async function testDocxGeneration(): Promise<void> {
+    // ── Tier 1: fixture round-trip ────────────────────────────────────────────
     const src = await OfficeParser.parseOffice(path.join(__dirname, 'files/exhaustive/markdown.md'));
     const { value } = await src.to('docx', { metadataOverrides: { modified: new Date('2024-01-01T00:00:00Z') } });
     const bytes = value as Uint8Array;
     assert.ok(bytes instanceof Uint8Array && bytes.length > 0, 'DOCX: produced non-empty Uint8Array');
     assert.ok(bytes[0] === 0x50 && bytes[1] === 0x4B, 'DOCX: PK zip signature');
 
-    const files = unzipSync(bytes);
-    // Every emitted XML part must be well-formed.
-    for (const [name, data] of Object.entries(files)) {
-        if (!name.endsWith('.xml') && !name.endsWith('.rels')) continue;
-        assert.doesNotThrow(() => parseXmlString(strFromU8(data as Uint8Array)), `DOCX: ${name} is well-formed XML`);
+    let parts = docxParts(bytes);
+    for (const [name, xml] of Object.entries(parts)) {
+        assert.doesNotThrow(() => parseXmlString(xml), `DOCX: ${name} is well-formed XML`);
     }
-    const doc = strFromU8(files['word/document.xml']);
-    assert.ok(files['[Content_Types].xml'], 'DOCX: has [Content_Types].xml');
-    assert.ok(files['word/styles.xml'], 'DOCX: has styles.xml');
+    const doc = parts['word/document.xml'];
+    assert.ok(parts['[Content_Types].xml'], 'DOCX: has [Content_Types].xml');
+    assert.ok(parts['word/styles.xml'], 'DOCX: has styles.xml');
     assert.ok(/<w:pStyle w:val="Heading1"\/>/.test(doc), 'DOCX: emits Heading1 style');
-    assert.ok(/<w:numPr>/.test(doc) && !!files['word/numbering.xml'], 'DOCX: emits numbered list + numbering.xml');
+    assert.ok(/<w:numPr>/.test(doc) && !!parts['word/numbering.xml'], 'DOCX: emits numbered list + numbering.xml');
     assert.ok(/<w:hyperlink r:id="/.test(doc), 'DOCX: emits an external hyperlink');
-    const rels = strFromU8(files['word/_rels/document.xml.rels']);
-    assert.ok(/TargetMode="External"/.test(rels), 'DOCX: external hyperlink relationship present');
+    assert.ok(/TargetMode="External"/.test(parts['word/_rels/document.xml.rels']), 'DOCX: external hyperlink relationship present');
+    assert.ok(!!parts['word/footnotes.xml'] && /<w:footnoteRef\/>/.test(parts['word/footnotes.xml']), 'DOCX: footnotes carry the numbered marker run');
 
-    // Re-parse and compare structure.
     const back = await OfficeParser.parseOffice(Buffer.from(bytes), { fileType: 'docx' });
     const cnt = (a: any, t: string) => { let c = 0; const w = (n: any) => { if (n.type === t) c++; (n.children || []).forEach(w); }; a.content.forEach(w); return c; };
-    for (const t of ['heading', 'table', 'list']) {
-        assert.ok(cnt(back, t) > 0, `DOCX: round-trip preserves ${t} nodes`);
+    for (const t of ['heading', 'table', 'list']) assert.ok(cnt(back, t) > 0, `DOCX: round-trip preserves ${t} nodes`);
+    const textOf = (a: any) => { let s = ''; const w = (n: any) => { if (n.type === 'text' && n.text) s += n.text; (n.children || []).forEach(w); }; a.content.forEach(w); return s; };
+    assert.ok(textOf(back).includes('Heading Level 1'), 'DOCX: round-trip preserves a specific heading text');
+
+    // Deep self-parity: formatting and links survive, compared by character volume (robust to a
+    // parser splitting or merging runs differently than the generator did).
+    const boldChars = (a: any) => { let n = 0; const w = (x: any) => { if (x.type === 'text' && x.formatting?.bold && x.text) n += x.text.length; (x.children || []).forEach(w); (x.notes || []).forEach(w); }; a.content.forEach(w); return n; };
+    const linkCount = (a: any) => { let n = 0; const w = (x: any) => { if (x.type === 'text' && (x.metadata as any)?.link) n++; (x.children || []).forEach(w); (x.notes || []).forEach(w); }; a.content.forEach(w); return n; };
+    assert.ok(boldChars(src) > 0 && boldChars(back) >= boldChars(src) * 0.8,
+        `DOCX: round-trip preserves bold text (${boldChars(back)}/${boldChars(src)} chars)`);
+    assert.ok(linkCount(src) > 0 && linkCount(back) >= 1,
+        `DOCX: round-trip preserves hyperlinks (${linkCount(back)}/${linkCount(src)})`);
+
+    // ── Tier 2: synthetic hostile-shape AST ───────────────────────────────────
+    const footnote = { type: 'note', metadata: { noteType: 'footnote', noteId: 'fn1' }, children: [
+        { type: 'paragraph', children: [
+            { type: 'text', text: 'note with ' },
+            { type: 'text', text: 'a link', metadata: { link: 'https://note.example.com/x', linkType: 'external' } },
+        ] },
+        { type: 'list', metadata: { listId: 'FL', listType: 'unordered', indentation: 0 }, children: [{ type: 'text', text: 'nested list item' }] },
+    ] };
+    const comment = { type: 'comment', metadata: { author: 'Reviewer', date: '' }, children: [
+        { type: 'paragraph', children: [{ type: 'text', text: 'a review comment' }] } ] };
+    const synthetic: any = {
+        type: 'docx', metadata: { title: 'Synthetic' },
+        attachments: [
+            { name: 'himg', mimeType: 'image/png', data: TINY_PNG_B64 },
+            { name: 'bimg', mimeType: 'image/png', data: TINY_PNG_B64 },
+        ],
+        auxiliary: { headers: [ { type: 'header', children: [
+            { type: 'paragraph', children: [{ type: 'image', metadata: { attachmentName: 'himg', altText: 'logo' } }] } ] } ] },
+        content: [
+            { type: 'heading', text: 'Intro', metadata: { level: 1 }, children: [{ type: 'text', text: 'Intro' }] },
+            { type: 'heading', text: 'Intro', metadata: { level: 2 }, children: [{ type: 'text', text: 'Intro' }] },
+            { type: 'paragraph', comments: [comment], children: [
+                { type: 'text', text: 'See ', notes: [footnote] } ] },
+            { type: 'table', children: [
+                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, isHeader: true }, children: [{ type: 'text', text: 'H' }] }] },
+                { type: 'row', children: [
+                    { type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'R' }] },
+                    { type: 'cell', children: [{ type: 'text', text: 'b' }] } ] },
+                { type: 'row', children: [{ type: 'cell', children: [{ type: 'text', text: 'c' }] }] },
+            ] },
+            { type: 'image', metadata: { attachmentName: 'bimg', altText: 'body image' } },
+            { type: 'note', metadata: { noteType: 'footnote', noteId: 'orphan' }, children: [
+                { type: 'paragraph', children: [{ type: 'text', text: 'orphan footnote body' }] } ] },
+        ],
+        getImages: () => [],
+    };
+    const sbytes = (await OfficeGenerator.generate(synthetic, 'docx', {})).value as Uint8Array;
+    parts = docxParts(sbytes);
+    for (const [name, xml] of Object.entries(parts)) {
+        assert.doesNotThrow(() => parseXmlString(xml), `DOCX synthetic: ${name} well-formed (critical for note/header parts)`);
     }
-    const text = (a: any) => { let s = ''; const w = (n: any) => { if (n.type === 'text' && n.text) s += n.text; (n.children || []).forEach(w); }; a.content.forEach(w); return s; };
-    assert.ok(text(back).includes('Heading Level 1') || text(back).length > 100, 'DOCX: round-trip preserves text');
+    const sdoc = parts['word/document.xml'];
+
+    // Per-part relationships: the footnote's hyperlink resolves against footnotes.xml.rels, NOT the document's.
+    assert.ok(parts['word/footnotes.xml'], 'DOCX synthetic: footnotes.xml emitted');
+    assert.ok(parts['word/_rels/footnotes.xml.rels'] && /note\.example\.com/.test(parts['word/_rels/footnotes.xml.rels']),
+        'DOCX synthetic: footnote hyperlink lives in footnotes.xml.rels');
+    assert.ok(!/note\.example\.com/.test(parts['word/_rels/document.xml.rels'] || ''),
+        'DOCX synthetic: footnote hyperlink is NOT leaked into document.xml.rels');
+    // A list inside the footnote still produces a numbering part.
+    assert.ok(parts['word/numbering.xml'] && /<w:numPr>/.test(parts['word/footnotes.xml']),
+        'DOCX synthetic: list inside a footnote yields numbering.xml');
+    // Header image resolves against header1.xml.rels.
+    assert.ok(parts['word/header1.xml'], 'DOCX synthetic: header1.xml emitted');
+    assert.ok(parts['word/_rels/header1.xml.rels'] && /relationships\/image/.test(parts['word/_rels/header1.xml.rels']),
+        'DOCX synthetic: header image lives in header1.xml.rels');
+
+    // Merged cells.
+    assert.ok(/<w:gridSpan w:val="2"\/>/.test(sdoc), 'DOCX synthetic: colSpan -> gridSpan');
+    assert.ok(/<w:vMerge w:val="restart"\/>/.test(sdoc) && /<w:vMerge\/>/.test(sdoc), 'DOCX synthetic: rowSpan -> vMerge restart + continuation');
+
+    // Bookmarks: names and ids are unique; the duplicate slug is disambiguated.
+    const names = [...sdoc.matchAll(/<w:bookmarkStart w:id="\d+" w:name="([^"]+)"/g)].map(m => m[1]);
+    assert.ok(names.includes('intro') && names.includes('intro_2'), 'DOCX synthetic: duplicate heading slug disambiguated (intro, intro_2)');
+    assert.strictEqual(new Set(names).size, names.length, 'DOCX synthetic: bookmark names are unique');
+    const bmIds = [...sdoc.matchAll(/<w:bookmarkStart w:id="(\d+)"/g)].map(m => m[1]);
+    assert.strictEqual(new Set(bmIds).size, bmIds.length, 'DOCX synthetic: bookmark ids are unique');
+
+    // Drawing ids (header + body image) are unique.
+    const drawIds = [...Object.values(parts).join('').matchAll(/<wp:docPr id="(\d+)"/g)].map(m => m[1]);
+    assert.ok(drawIds.length >= 2 && new Set(drawIds).size === drawIds.length, 'DOCX synthetic: drawing ids are unique across parts');
+
+    // Comment with an empty date must not emit an invalid w:date="".
+    assert.ok(parts['word/comments.xml'] && !/w:date=""/.test(parts['word/comments.xml']), 'DOCX synthetic: no empty w:date attribute');
+
+    // No custom properties -> root .rels must not reference the custom-properties part.
+    assert.ok(!/custom-properties/.test(parts['_rels/.rels']), 'DOCX synthetic: root .rels omits absent custom.xml');
+
+    // Orphan note is kept (two footnotes: the referenced one and the orphan).
+    assert.strictEqual((parts['word/footnotes.xml'].match(/<w:footnote w:id="\d+"/g) || []).length, 2, 'DOCX synthetic: orphan note preserved as a footnote');
+
+    // Re-parse: footnote body text and comment survive the round trip.
+    const sback = await OfficeParser.parseOffice(Buffer.from(sbytes), { fileType: 'docx' });
+    const sjson = JSON.stringify(sback);
+    assert.ok(sjson.includes('a review comment'), 'DOCX synthetic: comment text round-trips');
+    assert.ok(sjson.includes('note with') || sjson.includes('a link'), 'DOCX synthetic: footnote text round-trips');
+
+    // ── Tier 3: docxConfig knobs actually take effect ─────────────────────────
+    const land = (await OfficeGenerator.generate(synthetic, 'docx',
+        { docxConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
+    const ldoc = docxParts(land)['word/document.xml'];
+    assert.ok(/<w:pgSz w:w="20160"[^>]*w:orient="landscape"/.test(ldoc), 'DOCX config: Legal + landscape sets pgSz and orient');
+    assert.ok(/<w:pgMar w:top="720" w:right="360" w:bottom="720" w:left="360"/.test(ldoc), 'DOCX config: margins (points) convert to twips');
 }
 
 async function runTests(): Promise<void> {
