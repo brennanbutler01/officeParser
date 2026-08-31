@@ -38,11 +38,11 @@ import { createAST } from '../../src/utils/astUtils.js';
 // ============================================================================
 
 /** Output formats tested (PDF excluded — slow/brittle in CI) */
-const GENERATOR_FORMATS = ['html', 'md', 'text', 'rtf', 'csv', 'chunks', 'epub', 'docx'] as const;
+const GENERATOR_FORMATS = ['html', 'md', 'text', 'rtf', 'csv', 'chunks', 'epub', 'docx', 'odt'] as const;
 type GeneratorFormat = typeof GENERATOR_FORMATS[number];
 
 /** Formats that support roundtrip testing (parse → generate → re-parse) */
-const ROUNDTRIP_FORMATS: GeneratorFormat[] = ['html', 'md', 'rtf', 'docx'];
+const ROUNDTRIP_FORMATS: GeneratorFormat[] = ['html', 'md', 'rtf', 'docx', 'odt'];
 
 /** Source baseline formats used to drive generation tests */
 const SOURCE_FORMATS = {
@@ -122,14 +122,15 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
 const BASELINE_MODIFIED = new Date('2024-01-01T00:00:00Z');
 
 /**
- * Applied only to EPUB generation. Other formats embed `ast.metadata.modified` straight from the
- * fixture, which is already stable run to run, so pinning them too would rewrite their baselines
- * with a synthetic date and make the snapshots less faithful to real output for no gain. EPUB is
- * the one that needs it: fixtures without a modification date of their own (CSV, HTML) otherwise
- * fall through to the current time, and the zip entry mtimes follow the same instant.
+ * Applied to the zip-packaged generators (EPUB, DOCX, ODT). Other formats embed
+ * `ast.metadata.modified` straight from the fixture, which is already stable run to run, so pinning
+ * them too would rewrite their baselines with a synthetic date and make the snapshots less faithful
+ * to real output for no gain. The packaged formats are the ones that need it: fixtures without a
+ * modification date of their own (CSV, HTML) otherwise fall through to the current time, and the zip
+ * entry mtimes follow the same instant.
  */
 const deterministicConfigFor = (destFmt: string): GeneratorConfig =>
-    (destFmt === 'epub' || destFmt === 'docx' ? { metadataOverrides: { modified: BASELINE_MODIFIED } } : {}) as GeneratorConfig;
+    (destFmt === 'epub' || destFmt === 'docx' || destFmt === 'odt' ? { metadataOverrides: { modified: BASELINE_MODIFIED } } : {}) as GeneratorConfig;
 
 /** Generator config permutations */
 const GENERATOR_CONFIG_TESTS = [
@@ -240,6 +241,18 @@ const GENERATOR_CONFIG_TESTS = [
         name: 'HTML Standalone true (explicit)',
         config: { htmlConfig: { standalone: true } } as GeneratorConfig,
         formats: ['html'] as GeneratorFormat[],
+    },
+    {
+        id: 'G-docx',
+        name: 'DOCX Legal Landscape Margins',
+        config: { docxConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
+        formats: ['docx'] as GeneratorFormat[],
+    },
+    {
+        id: 'G-odt',
+        name: 'ODT Letter Landscape Margins',
+        config: { odtConfig: { pageSize: 'Letter', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
+        formats: ['odt'] as GeneratorFormat[],
     },
 ];
 
@@ -378,6 +391,25 @@ function extractDocxMetrics(bytes: Uint8Array): GeneratedMetrics {
     };
 }
 
+/** Metrics for a generated ODT (binary zip): unzips and reads content.xml. */
+function extractOdtMetrics(bytes: Uint8Array): GeneratedMetrics {
+    const files = unzipSync(bytes);
+    const doc = files['content.xml'] ? strFromU8(files['content.xml']) : '';
+    const text = doc.replace(/<[^>]+>/g, ' ');
+    const words = text.split(/\s+/).filter(Boolean);
+    return {
+        outputLength: bytes.length,
+        hasContent: bytes.length > 0 && words.length > 0,
+        lineCount: (doc.match(/<text:p[ >/]/g) || []).length,
+        wordCount: words.length,
+        headingCount: (doc.match(/<text:h[ >]/g) || []).length,
+        tableCount: (doc.match(/<table:table[ >]/g) || []).length,
+        listCount: (doc.match(/<text:list-item[ >]/g) || []).length,
+        imageCount: (doc.match(/<draw:image[ >/]/g) || []).length,
+        linkCount: (doc.match(/<text:a[ >]/g) || []).length,
+    };
+}
+
 function extractGeneratedMetrics(output: string, fmt: GeneratorFormat): GeneratedMetrics {
     const outputLength = output.length;
     const hasContent = outputLength > 0;
@@ -459,7 +491,7 @@ function compareGeneratedMetrics(
     results.push(mk('Word Count', `${expected.wordCount} (±15%)`, actual.wordCount, wOk,
         `${(wRatio * 100).toFixed(1)}% of baseline word count`, !wOk));
 
-    if (destFmt === 'html' || destFmt === 'md' || destFmt === 'docx') {
+    if (destFmt === 'html' || destFmt === 'md' || destFmt === 'docx' || destFmt === 'odt') {
         if (expected.headingCount !== undefined && expected.headingCount > 0) {
             const hOk = actual.headingCount === expected.headingCount;
             results.push(mk('Headings', expected.headingCount, actual.headingCount, hOk,
@@ -612,6 +644,7 @@ async function testGeneration(
         let isZipOutput = false;
         let isEpubOutput = false;
         let isDocxOutput = false;
+        let isOdtOutput = false;
         if (destFmt === 'epub') {
             // EPUB is always a binary ZIP archive
             isZipOutput = true;
@@ -621,6 +654,10 @@ async function testGeneration(
             // DOCX is always a binary ZIP (OOXML) archive.
             isDocxOutput = true;
             rawOutput = '[DOCX archive]';
+        } else if (destFmt === 'odt') {
+            // ODT is always a binary ZIP (ODF) archive.
+            isOdtOutput = true;
+            rawOutput = '[ODT archive]';
         } else if (destFmt === 'csv') {
             if (result.value instanceof Uint8Array) {
                 // ZIP archive — convert to base64 placeholder metrics
@@ -641,6 +678,8 @@ async function testGeneration(
             actualMetrics = extractChunkMetrics(chunks);
         } else if (isDocxOutput) {
             actualMetrics = extractDocxMetrics(result.value as Uint8Array);
+        } else if (isOdtOutput) {
+            actualMetrics = extractOdtMetrics(result.value as Uint8Array);
         } else if (isZipOutput) {
             // ZIP: treat as valid multi-sheet output, just validate non-empty archive
             actualMetrics = {
@@ -662,6 +701,8 @@ async function testGeneration(
             fs.writeFileSync(`${outPath}.epub`, result.value as Uint8Array);
         } else if (isDocxOutput) {
             fs.writeFileSync(`${outPath}.docx`, result.value as Uint8Array);
+        } else if (isOdtOutput) {
+            fs.writeFileSync(`${outPath}.odt`, result.value as Uint8Array);
         } else if (isZipOutput) {
             fs.writeFileSync(`${outPath}.zip`, result.value as Uint8Array);
         } else {
@@ -973,6 +1014,29 @@ async function testGeneratorConfigs(
                         expected: 'Has DOCTYPE', actual: hasDoctype ? 'Has DOCTYPE' : 'No DOCTYPE',
                         details: 'standalone:true must still produce a full standalone document'
                     }
+                });
+            }
+
+            // G-docx: Legal + landscape + margins must reach word/document.xml's sectPr.
+            if (ct.id === 'G-docx' && destFmt === 'docx' && result.value instanceof Uint8Array) {
+                const doc = strFromU8(unzipSync(result.value)['word/document.xml']);
+                const ok = /<w:pgSz w:w="20160"[^>]*w:orient="landscape"/.test(doc)
+                    && /<w:pgMar w:top="720" w:right="360" w:bottom="720" w:left="360"/.test(doc);
+                results.push({
+                    category, feature: `${ct.id}: page size/orient/margins applied`, sourceFormat: srcFmt, destFormat: destFmt,
+                    result: { status: ok ? 'PASS' : 'FAIL', expected: 'Legal landscape, 36/18pt margins', actual: doc.match(/<w:pgSz[^>]*>/)?.[0] ?? 'no pgSz', details: 'docxConfig must reach the section properties' }
+                });
+            }
+
+            // G-odt: Letter + landscape + margins must reach styles.xml's page-layout.
+            if (ct.id === 'G-odt' && destFmt === 'odt' && result.value instanceof Uint8Array) {
+                const styles = strFromU8(unzipSync(result.value)['styles.xml']);
+                const ok = /fo:page-width="11in"/.test(styles) && /fo:page-height="8.5in"/.test(styles)
+                    && /style:print-orientation="landscape"/.test(styles)
+                    && /fo:margin-top="36pt"/.test(styles) && /fo:margin-left="18pt"/.test(styles);
+                results.push({
+                    category, feature: `${ct.id}: page size/orient/margins applied`, sourceFormat: srcFmt, destFormat: destFmt,
+                    result: { status: ok ? 'PASS' : 'FAIL', expected: 'Letter landscape, 36/18pt margins', actual: styles.match(/<style:page-layout-properties[^>]*>/)?.[0]?.slice(0, 120) ?? 'no page-layout', details: 'odtConfig must reach the page layout' }
                 });
             }
 
@@ -1900,6 +1964,8 @@ async function generateBaselines(): Promise<void> {
                 let metrics: GeneratedMetrics;
                 if (destFmt === 'docx') {
                     metrics = extractDocxMetrics(result.value as Uint8Array);
+                } else if (destFmt === 'odt') {
+                    metrics = extractOdtMetrics(result.value as Uint8Array);
                 } else if (result.value instanceof Uint8Array) {
                     // ZIP archive (multi-sheet CSV)
                     metrics = { outputLength: result.value.length, hasContent: result.value.length > 0, lineCount: 0, wordCount: 0 };
@@ -1919,6 +1985,8 @@ async function generateBaselines(): Promise<void> {
                     fs.writeFileSync(`${fileBaselinePath}.epub`, result.value as Uint8Array);
                 } else if (destFmt === 'docx') {
                     fs.writeFileSync(`${fileBaselinePath}.docx`, result.value as Uint8Array);
+                } else if (destFmt === 'odt') {
+                    fs.writeFileSync(`${fileBaselinePath}.odt`, result.value as Uint8Array);
                 } else if (result.value instanceof Uint8Array) {
                     fs.writeFileSync(`${fileBaselinePath}.zip`, result.value);
                 } else if (destFmt === 'chunks') {

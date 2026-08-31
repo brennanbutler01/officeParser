@@ -1420,6 +1420,164 @@ async function testDocxGeneration(): Promise<void> {
     assert.ok(/<w:pgMar w:top="720" w:right="360" w:bottom="720" w:left="360"/.test(ldoc), 'DOCX config: margins (points) convert to twips');
 }
 
+/** Asserts every element/attribute namespace prefix used in an XML part is declared on its root. */
+function assertPrefixesDeclared(xml: string, label: string): void {
+    const rootMatch = /<([a-zA-Z0-9]+:[a-zA-Z0-9-]+)\b([^>]*)>/.exec(xml);
+    assert.ok(rootMatch, `${label}: has a prefixed root element`);
+    const declared = new Set(['xml']);
+    for (const m of rootMatch![2].matchAll(/xmlns:([a-zA-Z0-9]+)=/g)) declared.add(m[1]);
+    const rootPrefix = rootMatch![1].split(':')[0];
+    declared.add(rootPrefix);
+    const used = new Set<string>();
+    for (const m of xml.matchAll(/<\/?([a-zA-Z0-9]+):/g)) used.add(m[1]);          // element prefixes
+    for (const m of xml.matchAll(/\s([a-zA-Z0-9]+):[a-zA-Z0-9-]+=/g)) { if (m[1] !== 'xmlns') used.add(m[1]); } // attribute prefixes (not xmlns decls)
+    for (const p of used) assert.ok(declared.has(p), `${label}: prefix "${p}" is declared on the root`);
+}
+
+/**
+ * ODT generation. Mirrors testDocxGeneration: round-trip the richest fixture, then a synthetic
+ * hostile-shape AST for the ODF constructs a plain fixture lacks (a link inside a footnote, an image
+ * in a header, duplicate slugs, a comment without a date, merged cells, an orphan note, awkward
+ * whitespace), asserting the package is well-formed with every prefix declared and re-parses cleanly.
+ */
+async function testOdtGeneration(): Promise<void> {
+    // ── Tier 1: fixture round-trip ────────────────────────────────────────────
+    const src = await OfficeParser.parseOffice(path.join(__dirname, 'files/exhaustive/markdown.md'));
+    const bytes = (await src.to('odt', { metadataOverrides: { modified: new Date('2024-01-01T00:00:00Z') } })).value as Uint8Array;
+    assert.ok(bytes instanceof Uint8Array && bytes.length > 0, 'ODT: produced non-empty Uint8Array');
+    assert.ok(bytes[0] === 0x50 && bytes[1] === 0x4B, 'ODT: PK zip signature');
+    // mimetype must be the first local entry (name at offset 30) and STORED (method at offset 8).
+    assert.strictEqual(strFromU8(bytes.slice(30, 38)), 'mimetype', 'ODT: first zip entry is mimetype');
+    assert.strictEqual(bytes[8] | (bytes[9] << 8), 0, 'ODT: mimetype entry is STORED (uncompressed)');
+
+    let files = unzipSync(bytes);
+    const partsOf = (f: Record<string, Uint8Array>) => Object.fromEntries(Object.entries(f).map(([n, d]) => [n, strFromU8(d)]));
+    let parts = partsOf(files);
+    for (const [name, xml] of Object.entries(parts)) {
+        if (!name.endsWith('.xml')) continue;
+        assert.doesNotThrow(() => parseXmlString(xml), `ODT: ${name} is well-formed`);
+        assertPrefixesDeclared(xml, `ODT: ${name}`);
+    }
+    // Manifest lists exactly the packaged files (both directions), with the right root media-type.
+    const manifest = parts['META-INF/manifest.xml'];
+    assert.ok(/manifest:full-path="\/"[^>]*media-type="application\/vnd.oasis.opendocument.text"/.test(manifest), 'ODT: manifest root media-type matches mimetype');
+    const listed = new Set([...manifest.matchAll(/manifest:full-path="([^"]+)"/g)].map(m => m[1]).filter(p => p !== '/'));
+    const packaged = new Set(Object.keys(files).filter(n => n !== 'mimetype' && n !== 'META-INF/manifest.xml'));
+    assert.deepStrictEqual([...listed].sort(), [...packaged].sort(), 'ODT: manifest lists exactly the packaged files');
+
+    const content = parts['content.xml'];
+    assert.ok(/<text:h text:outline-level="1"/.test(content), 'ODT: emits an outline-level-1 heading');
+    assert.ok(/<text:list /.test(content) && /<text:list-item>/.test(content), 'ODT: emits nested lists');
+    assert.ok(/<text:list-level-style-bullet/.test(content) || /<text:list-level-style-number/.test(content), 'ODT: list style defines level styles');
+    assert.ok(/<text:a xlink:type="simple" xlink:href="http/.test(content), 'ODT: emits an external hyperlink');
+    assert.ok(/<text:note [^>]*text:note-class="footnote"><text:note-citation>/.test(content), 'ODT: footnote carries a citation');
+
+    const back = await OfficeParser.parseOffice(Buffer.from(bytes), { fileType: 'odt' });
+    const cnt = (a: any, t: string) => { let c = 0; const w = (n: any) => { if (n.type === t) c++; (n.children || []).forEach(w); (n.notes || []).forEach(w); }; a.content.forEach(w); return c; };
+    for (const t of ['heading', 'table', 'list']) assert.ok(cnt(back, t) > 0, `ODT: round-trip preserves ${t} nodes`);
+    const textOf = (a: any) => { let s = ''; const w = (n: any) => { if (n.type === 'text' && n.text) s += n.text; (n.children || []).forEach(w); (n.notes || []).forEach(w); }; a.content.forEach(w); return s; };
+    assert.ok(textOf(back).includes('Heading Level 1'), 'ODT: round-trip preserves a specific heading text');
+
+    // Deep parity: bold volume + link count preserved (robust to run splitting).
+    const boldChars = (a: any) => { let n = 0; const w = (x: any) => { if (x.type === 'text' && x.formatting?.bold && x.text) n += x.text.length; (x.children || []).forEach(w); (x.notes || []).forEach(w); }; a.content.forEach(w); return n; };
+    const linkCount = (a: any) => { let n = 0; const w = (x: any) => { if (x.type === 'text' && (x.metadata as any)?.link) n++; (x.children || []).forEach(w); (x.notes || []).forEach(w); }; a.content.forEach(w); return n; };
+    assert.ok(boldChars(src) > 0 && boldChars(back) >= boldChars(src) * 0.8, `ODT: round-trip preserves bold text (${boldChars(back)}/${boldChars(src)})`);
+    assert.ok(linkCount(src) > 0 && linkCount(back) >= 1, `ODT: round-trip preserves hyperlinks (${linkCount(back)}/${linkCount(src)})`);
+
+    // ── Tier 2: synthetic hostile-shape AST ───────────────────────────────────
+    const footnote = { type: 'note', metadata: { noteType: 'footnote', noteId: 'fn1' }, children: [
+        { type: 'paragraph', children: [
+            { type: 'text', text: 'note with ' },
+            { type: 'text', text: 'a link', metadata: { link: 'https://note.example.com/x', linkType: 'external' } },
+        ] },
+        { type: 'list', metadata: { listId: 'FL', listType: 'unordered', indentation: 0 }, children: [{ type: 'text', text: 'nested list item' }] },
+    ] };
+    const comment = { type: 'comment', metadata: { author: 'Reviewer', date: '' }, children: [
+        { type: 'paragraph', children: [{ type: 'text', text: 'a review comment' }] } ] };
+    const synthetic: any = {
+        type: 'odt', metadata: { title: 'Synthetic' },
+        attachments: [
+            { name: 'himg', mimeType: 'image/png', data: TINY_PNG_B64 },
+            { name: 'bimg', mimeType: 'image/png', data: TINY_PNG_B64 },
+        ],
+        auxiliary: { headers: [ { type: 'paragraph', children: [{ type: 'image', metadata: { attachmentName: 'himg', altText: 'logo' } }] } ] },
+        content: [
+            { type: 'heading', text: 'Intro', metadata: { level: 1 }, children: [{ type: 'text', text: 'Intro' }] },
+            { type: 'heading', text: 'Intro', metadata: { level: 2 }, children: [{ type: 'text', text: 'Intro' }] },
+            { type: 'paragraph', comments: [comment], children: [{ type: 'text', text: 'See ', notes: [footnote] }] },
+            { type: 'paragraph', children: [{ type: 'text', text: 'a  b\tc', metadata: { link: '#intro', linkType: 'internal' } }] },
+            { type: 'table', children: [
+                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, isHeader: true }, children: [{ type: 'text', text: 'H' }] }] },
+                { type: 'row', children: [
+                    { type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'R' }] },
+                    { type: 'cell', children: [{ type: 'text', text: 'b' }] } ] },
+                { type: 'row', children: [{ type: 'cell', children: [{ type: 'text', text: 'c' }] }] },
+            ] },
+            { type: 'image', metadata: { attachmentName: 'bimg', altText: 'body image' } },
+            { type: 'image', metadata: { attachmentName: 'bimg', altText: 'reused image' } },
+            { type: 'note', metadata: { noteType: 'footnote', noteId: 'orphan' }, children: [
+                { type: 'paragraph', children: [{ type: 'text', text: 'orphan footnote body' }] } ] },
+        ],
+        getImages: () => [],
+    };
+    const sbytes = (await OfficeGenerator.generate(synthetic, 'odt', {})).value as Uint8Array;
+    files = unzipSync(sbytes);
+    parts = partsOf(files);
+    for (const [name, xml] of Object.entries(parts)) {
+        if (!name.endsWith('.xml')) continue;
+        assert.doesNotThrow(() => parseXmlString(xml), `ODT synthetic: ${name} well-formed`);
+        assertPrefixesDeclared(xml, `ODT synthetic: ${name}`);
+    }
+    const sc = parts['content.xml'];
+    const styles = parts['styles.xml'];
+
+    // Footnote body carries its link inline (no separate part, no dangling ref) and a numbered citation.
+    assert.ok(/note\.example\.com/.test(sc) && /<text:note-citation>/.test(sc), 'ODT synthetic: footnote link is inline with a citation');
+    // Merged cells become covered-table-cell continuations.
+    assert.ok(/table:number-columns-spanned="2"/.test(sc), 'ODT synthetic: colSpan -> number-columns-spanned');
+    assert.ok(/table:number-rows-spanned="2"/.test(sc) && /<table:covered-table-cell\/>/.test(sc), 'ODT synthetic: rowSpan -> covered-table-cell');
+    assert.ok(/<table:table-header-rows>/.test(sc), 'ODT synthetic: header row wrapped in table-header-rows');
+    // Duplicate heading slugs -> unique bookmark names; internal link resolves to the first.
+    const bmNames = [...sc.matchAll(/<text:bookmark text:name="([^"]+)"/g)].map(m => m[1]);
+    assert.ok(bmNames.includes('intro') && bmNames.includes('intro_2'), 'ODT synthetic: duplicate slug disambiguated (intro, intro_2)');
+    assert.strictEqual(new Set(bmNames).size, bmNames.length, 'ODT synthetic: bookmark names are unique');
+    assert.ok(/xlink:href="#intro"/.test(sc), 'ODT synthetic: internal link resolves to the first-claimed name');
+    // Two distinct attachments (header himg + body bimg); bimg is referenced twice but deduped to one
+    // Pictures part, so exactly two media files, with unique draw:frame names for every emission.
+    assert.strictEqual(Object.keys(files).filter(n => n.startsWith('Pictures/')).length, 2, 'ODT synthetic: distinct images packaged once each (reuse deduped)');
+    const frameNames = [...(sc + styles).matchAll(/draw:name="([^"]+)"/g)].map(m => m[1]);
+    assert.ok(frameNames.length >= 3 && new Set(frameNames).size === frameNames.length, 'ODT synthetic: draw:frame names are unique across reuse');
+    // Comment with an empty date must not emit an invalid dc:date.
+    assert.ok(!/<dc:date><\/dc:date>/.test(sc) && !/<dc:date\/>/.test(sc), 'ODT synthetic: no empty dc:date element');
+    // Whitespace encoding.
+    assert.ok(/<text:tab\/>/.test(sc) && /<text:s /.test(sc), 'ODT synthetic: tabs and space runs are encoded');
+    // Header image lives in Pictures + manifest, header content in styles.xml.
+    assert.ok(/<style:header>/.test(styles) && /Pictures\//.test(styles), 'ODT synthetic: header image referenced from styles.xml');
+
+    // Re-parse: comment, footnote, header, and whitespace survive.
+    const sback = await OfficeParser.parseOffice(Buffer.from(sbytes), { fileType: 'odt' });
+    const sjson = JSON.stringify(sback);
+    assert.ok(sjson.includes('a review comment'), 'ODT synthetic: comment text round-trips');
+    assert.ok(sjson.includes('note with') || sjson.includes('a link'), 'ODT synthetic: footnote text round-trips');
+    assert.ok((sback.auxiliary?.headers?.length ?? 0) > 0, 'ODT synthetic: header round-trips into auxiliary');
+    const wsBack = textOf(sback);
+    assert.ok(wsBack.includes('a  b\tc'), 'ODT synthetic: awkward whitespace ("a  b\\tc") round-trips exactly');
+
+    // ── Tier 3: odtConfig knobs actually take effect ──────────────────────────
+    const land = (await OfficeGenerator.generate(synthetic, 'odt',
+        { odtConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
+    const lstyles = strFromU8(unzipSync(land)['styles.xml']);
+    assert.ok(/fo:page-width="14in"/.test(lstyles) && /fo:page-height="8.5in"/.test(lstyles) && /style:print-orientation="landscape"/.test(lstyles), 'ODT config: Legal + landscape sets page geometry');
+    assert.ok(/fo:margin-top="36pt"/.test(lstyles) && /fo:margin-left="18pt"/.test(lstyles), 'ODT config: margins (points) are written as fo:margin lengths');
+
+    // Empty AST -> valid package with one empty text:p, no throw.
+    const empty: any = { type: 'odt', metadata: {}, attachments: [], content: [], getImages: () => [] };
+    const ebytes = (await OfficeGenerator.generate(empty, 'odt', {})).value as Uint8Array;
+    const econtent = strFromU8(unzipSync(ebytes)['content.xml']);
+    assert.doesNotThrow(() => parseXmlString(econtent), 'ODT empty: content.xml well-formed');
+    assert.ok(/<office:text><text:p\/><\/office:text>/.test(econtent), 'ODT empty: emits one empty paragraph');
+}
+
 async function runTests(): Promise<void> {
     console.log('Starting exhaustive officeParser test suite...');
     let passed = 0;
@@ -1436,6 +1594,7 @@ async function runTests(): Promise<void> {
         ['GeneratedOutput', testGeneratedOutput],
         ['ODG', testOdg],
         ['DOCX', testDocxGeneration],
+        ['ODT', testOdtGeneration],
     ];
 
     for (const [name, fn] of tests) {

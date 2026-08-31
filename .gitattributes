@@ -24,6 +24,9 @@
 *.docx binary
 *.pptx binary
 *.xlsx binary
+*.odt binary
+*.odp binary
+*.ods binary
 *.odg binary
 *.pdf binary
 *.epub binary

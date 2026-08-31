@@ -894,6 +894,113 @@ async function docxSanitizationTests() {
 }
 
 /**
+ * The ODT generator hand-writes OpenDocument XML into a zip, so text, hyperlink hrefs, bookmark
+ * names, colors, attachment names and styleMap tags are all injection surfaces. These assert the
+ * package stays well-formed and script-free under hostile input while legitimate content survives.
+ */
+async function odtSanitizationTests() {
+    console.log('- OdtGenerator (ODF injection surfaces)...');
+
+    const contentFor = (bytes: Uint8Array) => strFromU8(unzipSync(bytes)['content.xml']);
+    const gen = async (content: any[]) => (await OfficeGenerator.generate(astWith(content), 'odt')).value as Uint8Array;
+    const wellFormed = (xml: string) => { try { parseXmlString(xml); return true; } catch { return false; } };
+
+    // ── Hyperlink scheme rejection ────────────────────────────────────────────
+    const linkContent = (url: string) => [{ type: 'paragraph', children: [{ type: 'text', text: 'clickme', metadata: { link: url, linkType: 'external' } }] }];
+    for (const url of ['javascript:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,<script>', 'file:///etc/passwd', '\\\\evil.com\\share\\x', '//evil.com/share']) {
+        const doc = contentFor(await gen(linkContent(url)));
+        check(`odt: ${JSON.stringify(url).slice(0, 32)} emits no text:a`, !/<text:a /.test(doc), doc.match(/<text:a[^>]*>/)?.[0] ?? '');
+        check('odt: rejected link keeps its text', doc.includes('clickme'), doc.slice(0, 160));
+    }
+    for (const url of ['https://example.com/a?b=1', 'http://x.test/p', 'mailto:a@b.test', 'tel:+123']) {
+        const doc = contentFor(await gen(linkContent(url)));
+        check(`odt: ${url} still emits a text:a`, /<text:a [^>]*xlink:href="/.test(doc), doc.slice(0, 160));
+    }
+
+    // ── Text / attribute XML injection ────────────────────────────────────────
+    {
+        const payload = `</text:p></office:text><script>alert(1)</script>&<>"'`;
+        const bytes = await gen([{ type: 'paragraph', children: [{ type: 'text', text: payload }] }]);
+        const doc = contentFor(bytes);
+        check('odt: hostile text does not break out', !/<script>/.test(doc), doc.match(/<script>[^<]*/)?.[0] ?? '');
+        for (const [name, data] of Object.entries(unzipSync(bytes))) {
+            if (!name.endsWith('.xml')) continue;
+            check(`odt: ${name} well-formed under hostile text`, wellFormed(strFromU8(data as Uint8Array)));
+        }
+        const back = await OfficeParser.parseOffice(Buffer.from(bytes), { fileType: 'odt' });
+        check('odt: payload text preserved through round-trip', JSON.stringify(back.content).includes('alert(1)'), '');
+    }
+
+    // ── Control-character stripping ───────────────────────────────────────────
+    {
+        const doc = contentFor(await gen([{ type: 'paragraph', children: [{ type: 'text', text: 'a\x00\x01\x1F\x08b' }] }]));
+        check('odt: invalid XML control chars stripped', !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(doc), 'control chars leaked');
+        check('odt: content.xml well-formed after control-char strip', wellFormed(doc));
+    }
+
+    // ── Bookmark / anchor name sanitization + uniqueness ──────────────────────
+    {
+        const doc = contentFor(await gen([
+            { type: 'heading', text: 'Dup', metadata: { level: 1, id: 'evil" name<>&/\\' }, children: [{ type: 'text', text: 'Dup' }] },
+            { type: 'heading', text: 'Dup', metadata: { level: 1 }, children: [{ type: 'text', text: 'Dup' }] },
+            { type: 'paragraph', children: [{ type: 'text', text: 'jump', metadata: { link: '#evil" name<>&/\\', linkType: 'internal' } }] },
+        ]));
+        const names = [...doc.matchAll(/text:(?:bookmark|name)="([^"]*)"/g)].map(m => m[1]);
+        check('odt: bookmark names contain only safe chars', names.length > 0 && names.every(a => /^[A-Za-z_][A-Za-z0-9_]*$/.test(a)), JSON.stringify(names));
+        const bmNames = [...doc.matchAll(/<text:bookmark text:name="([^"]+)"/g)].map(m => m[1]);
+        check('odt: duplicate raw names produce unique bookmark names', new Set(bmNames).size === bmNames.length, JSON.stringify(bmNames));
+        check('odt: content.xml well-formed with hostile anchor', wellFormed(doc));
+    }
+
+    // ── Color validation ──────────────────────────────────────────────────────
+    {
+        const doc = contentFor(await gen([{ type: 'paragraph', children: [{ type: 'text', text: 'c', formatting: { color: 'red"/><style:x' } as any }] }]));
+        const colors = [...doc.matchAll(/fo:color="([^"]*)"/g)].map(m => m[1]);
+        check('odt: color values are valid #hex or absent', colors.every(c => /^#[0-9A-Fa-f]{6}$/.test(c)), JSON.stringify(colors));
+        check('odt: content.xml well-formed with hostile color', wellFormed(doc));
+    }
+
+    // ── Attachment name cannot escape Pictures/ ───────────────────────────────
+    {
+        const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+        const ast = astWith([{ type: 'image', metadata: { attachmentName: '../../evil.png' } }]);
+        (ast as any).attachments = [{ name: '../../evil.png', mimeType: 'image/png', data: png }];
+        const entries = Object.keys(unzipSync((await OfficeGenerator.generate(ast, 'odt')).value as Uint8Array));
+        check('odt: no zip entry escapes its directory', entries.every(e => !e.includes('..')), entries.filter(e => e.includes('..')).join(', '));
+        const pics = entries.filter(e => e.startsWith('Pictures/'));
+        check('odt: media file names are synthesized', pics.every(e => /^Pictures\/image\d+\.[a-z]+$/.test(e)), pics.join(', '));
+    }
+
+    // ── Absurd colSpan is clamped ─────────────────────────────────────────────
+    {
+        const ast = astWith([{ type: 'table', children: [{ type: 'row', children: [{ type: 'cell', metadata: { colSpan: 1e9, rowSpan: 1e9 }, children: [{ type: 'text', text: 'x' }] }] }] }]);
+        const bytes = (await OfficeGenerator.generate(ast, 'odt')).value as Uint8Array;
+        check('odt: absurd span does not blow up output', bytes.length < 200_000, `${bytes.length} bytes`);
+        const doc = contentFor(bytes);
+        check('odt: content.xml well-formed with clamped spans', wellFormed(doc));
+        const span = doc.match(/table:number-columns-spanned="(\d+)"/);
+        check('odt: span clamped to a sane value', !span || Number(span[1]) <= 1000, span?.[1] ?? '');
+    }
+
+    // ── styleMap output.tag cannot inject a style ─────────────────────────────
+    {
+        const pAst = astWith([{ type: 'paragraph', metadata: { style: 'Custom' }, children: [{ type: 'text', text: 'hi' }] } as any]);
+        const sm = (tag: string) => ({ styleMap: [{ selector: { nodeType: 'paragraph', attributes: { style: 'Custom' } }, output: { tag } }] } as any);
+        const hostile = contentFor((await OfficeGenerator.generate(pAst, 'odt', sm('h1"/><style:x style:name="Injected'))).value as Uint8Array);
+        check('odt: hostile styleMap tag is not mapped to a style', !/Injected/.test(hostile), hostile.match(/text:style-name="[^"]*"/)?.[0] ?? '');
+        check('odt: content.xml well-formed with hostile styleMap tag', wellFormed(hostile));
+        const benign = contentFor((await OfficeGenerator.generate(pAst, 'odt', sm('h1'))).value as Uint8Array);
+        check('odt: legitimate styleMap tag h1 maps to Heading_20_1', /text:style-name="Heading_20_1"/.test(benign) || /Heading_20_1/.test(benign), benign.match(/<text:p[^>]*>/)?.[0] ?? '');
+    }
+
+    // ── Whitespace-encoding metachars survive as literal text ─────────────────
+    {
+        const doc = contentFor(await gen([{ type: 'paragraph', children: [{ type: 'text', text: '<text:s text:c="99"/>' }] }]));
+        check('odt: literal text:s in source is escaped, not emitted as markup', /&lt;text:s/.test(doc) && !/<text:s text:c="99"/.test(doc), doc.slice(0, 160));
+    }
+}
+
+/**
  * ODF encodes runs of identical cells/rows with `table:number-columns-repeated` /
  * `table:number-rows-repeated` instead of repeating markup, so a few hundred bytes of XML can ask
  * the parser to materialize an arbitrary number of nodes, and the two multiply. The ZIP limits do
@@ -1541,6 +1648,7 @@ async function main() {
     await styleMapTests();
     await rtfUrlTests();
     await docxSanitizationTests();
+    await odtSanitizationTests();
     await odfRepeatExpansionTests();
     await abortSignalTests();
     await corruptArchiveTests();

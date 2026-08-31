@@ -682,6 +682,37 @@ async function runTests() {
         results.push({ name: 'CLI: --to docx writes a valid Word package', status: 'FAIL', details: `exit ${res41.status}, file exists: ${fs.existsSync(docxOut)}. stderr: ${res41.stderr.slice(0, 120)}`, duration: d41 });
     }
 
+    // 42. Binary ODT generation to a file (--to odt --output), with an odtConfig flag threaded through
+    console.log('Test 42: ODT generation --to odt --output');
+    const t42 = Date.now();
+    const odtOut = fsPath.join(RESULTS_DIR, 'output_test.odt');
+    if (fs.existsSync(odtOut)) fs.unlinkSync(odtOut);
+    const res42 = runCli(['--to', 'odt', '--odtConfig.pageSize=Letter', `--output=${odtOut}`]);
+    const d42 = Date.now() - t42;
+    if (res42.status === 0 && fs.existsSync(odtOut)) {
+        const bytes = new Uint8Array(fs.readFileSync(odtOut));
+        let ok = false, detail = '';
+        try {
+            const files = unzipSync(bytes);
+            const styles = files['styles.xml'] ? strFromU8(files['styles.xml']) : '';
+            // Valid ODF package: PK zip, mimetype first + STORED, content.xml present, Letter width in styles.
+            const mimetypeFirst = strFromU8(bytes.slice(30, 38)) === 'mimetype' && (bytes[8] | (bytes[9] << 8)) === 0;
+            ok = bytes[0] === 0x50 && bytes[1] === 0x4B && mimetypeFirst
+                && !!files['content.xml'] && /fo:page-width="8.5in"/.test(styles);
+            detail = ok ? 'ODF zip: mimetype-first/STORED, content.xml, Letter page-width' : `checks failed: ${styles.match(/fo:page-width="[^"]*"/)?.[0] ?? 'no page-width'}, mimetypeFirst=${mimetypeFirst}`;
+        } catch (e: any) {
+            detail = `output is not a valid zip: ${e.message}`;
+        }
+        results.push({ name: 'CLI: --to odt writes a valid ODF package', status: ok ? 'PASS' : 'FAIL', details: detail, duration: d42 });
+
+        // End-to-end: feed the generated ODT back through the CLI and confirm text re-extracts.
+        const back = runCliRaw([odtOut, '--to=text']);
+        const textOk = back.status === 0 && back.stdout.includes('Demonstration of DOCX support');
+        results.push({ name: 'CLI: generated ODT re-parses through the CLI', status: textOk ? 'PASS' : 'FAIL', details: textOk ? 'round-tripped text via --to=text' : `exit ${back.status}, stdout: ${back.stdout.slice(0, 120)}`, duration: 0 });
+    } else {
+        results.push({ name: 'CLI: --to odt writes a valid ODF package', status: 'FAIL', details: `exit ${res42.status}, file exists: ${fs.existsSync(odtOut)}. stderr: ${res42.stderr.slice(0, 120)}`, duration: d42 });
+    }
+
     // Print summary report
     const logger = new DualLogger();
     const failedCount = generateReport(results, logger);

@@ -5,6 +5,7 @@ import { DocxGenerator } from './generators/DocxGenerator.js';
 import { EpubGenerator } from './generators/EpubGenerator.js';
 import { HtmlGenerator } from './generators/HtmlGenerator.js';
 import { MarkdownGenerator } from './generators/MarkdownGenerator.js';
+import { OdtGenerator } from './generators/OdtGenerator.js';
 import { PdfGenerator } from './generators/PdfGenerator.js';
 import { RtfGenerator } from './generators/RtfGenerator.js';
 import { TextGenerator } from './generators/TextGenerator.js';
@@ -70,6 +71,9 @@ export class OfficeGenerator {
                 break;
             case 'docx':
                 generator = new DocxGenerator(ast, config as GeneratorConfig<'docx'>);
+                break;
+            case 'odt':
+                generator = new OdtGenerator(ast, config as GeneratorConfig<'odt'>);
                 break;
             default:
                 throw getOfficeError(OfficeErrorType.FORMAT_UNSUPPORTED, undefined, destination);

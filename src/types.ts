@@ -708,6 +708,7 @@ type ConversionValue<D extends UniversalGeneratorFormat> =
     D extends 'csv' ? string | Uint8Array :
     D extends 'epub' ? Uint8Array :
     D extends 'docx' ? Uint8Array :
+    D extends 'odt' ? Uint8Array :
     string;
 
 export interface ConversionResult<D extends UniversalGeneratorFormat> {
@@ -720,7 +721,7 @@ export interface ConversionResult<D extends UniversalGeneratorFormat> {
 /**
  * Universal formats supported by all source types for generation.
  */
-export type UniversalGeneratorFormat = 'text' | 'md' | 'html' | 'pdf' | 'csv' | 'rtf' | 'chunks' | 'epub' | 'docx';
+export type UniversalGeneratorFormat = 'text' | 'md' | 'html' | 'pdf' | 'csv' | 'rtf' | 'chunks' | 'epub' | 'docx' | 'odt';
 
 /**
  * Allowed destination formats for a given source type.
@@ -953,6 +954,7 @@ type GeneratorSpecificConfig<D extends string> =
     D extends 'text' ? { textConfig?: TextGeneratorConfig } :
     D extends 'rtf' ? { rtfConfig?: RtfGeneratorConfig } :
     D extends 'docx' ? { docxConfig?: DocxGeneratorConfig } :
+    D extends 'odt' ? { odtConfig?: OdtGeneratorConfig } :
     D extends 'chunks' ? { chunksConfig?: ChunkingConfig } :
     Partial<{
         htmlConfig: HtmlGeneratorConfig;
@@ -962,6 +964,7 @@ type GeneratorSpecificConfig<D extends string> =
         textConfig: TextGeneratorConfig;
         rtfConfig: RtfGeneratorConfig;
         docxConfig: DocxGeneratorConfig;
+        odtConfig: OdtGeneratorConfig;
         chunksConfig: ChunkingConfig;
     }>;
 
@@ -1034,6 +1037,7 @@ export type FullGeneratorConfig = DeepRequired<Omit<CommonGeneratorConfig, 'meta
     textConfig: TextGeneratorConfig;
     rtfConfig: RtfGeneratorConfig;
     docxConfig: DocxGeneratorConfig;
+    odtConfig: OdtGeneratorConfig;
 }> & {
     chunksConfig: ChunkingConfig;
     // Deliberately not DeepRequired: every field is meant to stay optional, since the whole
@@ -1323,6 +1327,21 @@ export interface DocxGeneratorConfig {
     /**
      * Page margins in points (1/72 inch), converted to twips for `w:pgMar`. Defaults to 72 on all
      * sides (Word's standard one inch).
+     */
+    margin?: { top?: number; right?: number; bottom?: number; left?: number };
+}
+
+/**
+ * Configuration options for ODT (OpenDocument Text) generation.
+ */
+export interface OdtGeneratorConfig {
+    /** Page size preset for the page layout (`style:page-layout` in styles.xml). Defaults to `'A4'`. */
+    pageSize?: 'A4' | 'Letter' | 'Legal';
+    /** Landscape orientation (swaps page dimensions and sets `style:print-orientation`). Defaults to false. */
+    landscape?: boolean;
+    /**
+     * Page margins in points (1/72 inch), written as `fo:margin-*` lengths. Defaults to 72 on all
+     * sides (the standard one inch).
      */
     margin?: { top?: number; right?: number; bottom?: number; left?: number };
 }
