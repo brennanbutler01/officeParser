@@ -4,7 +4,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
 
 **Parses:** [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`odt`](https://en.wikipedia.org/wiki/OpenDocument) · [`odp`](https://en.wikipedia.org/wiki/OpenDocument) · [`ods`](https://en.wikipedia.org/wiki/OpenDocument) · [`odg`](https://en.wikipedia.org/wiki/OpenDocument) · [`pdf`](https://en.wikipedia.org/wiki/PDF) · [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) · [`csv`](https://en.wikipedia.org/wiki/Comma-separated_values) · [`md`](https://en.wikipedia.org/wiki/Markdown) · [`html`](https://en.wikipedia.org/wiki/HTML) · [`epub`](https://en.wikipedia.org/wiki/EPUB)
 
-**Generates:** `Markdown` · `HTML` · `CSV` · `RTF` · `PDF` · `EPUB` · `Plain Text` · `RAG Chunks`
+**Generates:** `DOCX` · `Markdown` · `HTML` · `CSV` · `RTF` · `PDF` · `EPUB` · `Plain Text` · `RAG Chunks`
 
 [![npm version](https://badge.fury.io/js/officeparser.svg)](https://badge.fury.io/js/officeparser)
 [![Total Downloads](https://img.shields.io/npm/dt/officeparser.svg)](https://www.npmjs.com/package/officeparser)
@@ -54,6 +54,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
   - [HtmlGeneratorConfig](#htmlgeneratorconfig)
   - [MdGeneratorConfig](#mdgeneratorconfig)
   - [PdfGeneratorConfig](#pdfgeneratorconfig)
+  - [DocxGeneratorConfig](#docxgeneratorconfig)
   - [CsvGeneratorConfig](#csvgeneratorconfig)
   - [TextGeneratorConfig](#textgeneratorconfig)
   - [metadataOverrides](#metadataoverrides)
@@ -100,6 +101,9 @@ npx officeparser document.pdf --to=chunks
 # Convert DOCX to EPUB (--extractAttachments is required to embed images)
 npx officeparser book.docx --extractAttachments --to=epub --output=book.epub
 
+# Convert Markdown (or any source) to a Word document
+npx officeparser notes.md --extractAttachments --to=docx --output=notes.docx
+
 # Overriding file extension mapping
 npx officeparser my_document --fileType=docx --to=json
 ```
@@ -113,7 +117,7 @@ npx officeparser my_document --fileType=docx --to=json
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--to` | `json\|text\|md\|html\|csv\|rtf\|pdf\|epub\|chunks` | `json` | Output format |
+| `--to` | `json\|text\|md\|html\|csv\|rtf\|pdf\|docx\|epub\|chunks` | `json` | Output format |
 | `--output` | path | — | Write output to a file |
 | `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
 | `--ocr` | boolean | `false` | Enable OCR for images |
@@ -133,7 +137,7 @@ npx officeparser my_document --fileType=docx --to=json
 | `--includeFormatting` | boolean | `true` | Include formatting style map matching |
 | `--renderMetadata` | boolean | `false` | Render metadata as visible content in the generated output |
 | `--htmlConfig.containerWidth` | string \| number | `auto` | HTML output container width (e.g. `900px`, `100%`) |
-| ~~`--format`~~ | `json\|text\|md\|html\|csv\|rtf\|pdf\|epub\|chunks` | `json` | **Deprecated.** Use `--to` |
+| ~~`--format`~~ | `json\|text\|md\|html\|csv\|rtf\|pdf\|docx\|epub\|chunks` | `json` | **Deprecated.** Use `--to` |
 | ~~`--toText`~~ | | | **Removed in v8.** Use `--to=text`. |
 | ~~`--ocrLanguage`~~ | string | `eng` | **Deprecated.** Use `--ocrConfig.language` |
 | ~~`--putNotesAtLast`~~ | `true\|false` | `false` | **Deprecated and ignored.** Notes are attached structurally to their nodes. |
@@ -1190,6 +1194,27 @@ Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requir
 | `scale` | `number` | `1` | Rendering scale factor |
 | `launchOptions` | `object` | headless defaults | Puppeteer launch options (e.g., `executablePath`) |
 | `timeout` | `number` | `30000` | PDF rendering timeout in milliseconds. Set to `0` to disable. |
+
+### DocxGeneratorConfig
+
+Pass as `docxConfig` inside `GeneratorConfig`. The DOCX generator writes a real WordprocessingML package (`.docx`) with zero extra dependencies, so it runs identically in Node and the browser and returns a `Uint8Array`. It reproduces headings, styled runs, tables (including merged cells), lists, images, hyperlinks, footnotes/endnotes, comments, headers/footers and metadata from any parsed source.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `pageSize` | `'A4' \| 'Letter' \| 'Legal'` | `'A4'` | Page size preset for the document section (`w:pgSz`) |
+| `landscape` | `boolean` | `false` | Landscape orientation (swaps page dimensions and sets `w:orient`) |
+| `margin` | `object` | `{72,72,72,72}` | Page margins in points, 1/72 inch (`top`, `right`, `bottom`, `left`); 72 = Word's standard one inch |
+
+```typescript
+import { OfficeConverter } from 'officeparser';
+import { writeFileSync } from 'fs';
+
+// Any supported source → Word. Use --extractAttachments (CLI) or extractAttachments: true to embed images.
+const { value } = await OfficeConverter.convert('report.md', 'docx', {
+    docxConfig: { pageSize: 'Letter', margin: { top: 36, right: 36, bottom: 36, left: 36 } }
+});
+writeFileSync('report.docx', value); // value is a Uint8Array
+```
 
 ### CsvGeneratorConfig
 

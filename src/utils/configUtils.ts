@@ -65,6 +65,7 @@ export function isFullGeneratorConfig(config: any): config is FullGeneratorConfi
         'htmlConfig' in config &&
         'pdfConfig' in config &&
         'csvConfig' in config &&
+        'docxConfig' in config &&
         'onNode' in config);
 }
 
@@ -180,7 +181,7 @@ export function resolveParserConfig(
 /** The per-destination and metadata sub-objects a generator config groups its settings into. */
 const GENERATOR_CONFIG_CONTAINERS = [
     'metadataOverrides', 'htmlConfig', 'mdConfig', 'pdfConfig',
-    'csvConfig', 'textConfig', 'rtfConfig', 'chunksConfig',
+    'csvConfig', 'textConfig', 'rtfConfig', 'docxConfig', 'chunksConfig',
 ] as const;
 
 /**
@@ -236,7 +237,7 @@ export function resolveGeneratorConfig<D extends string>(
     // 2. Merge common properties and sub-configs
     if (userConfig) {
         // Extract sub-configs to avoid shallow-overwriting the whole sub-config objects
-        const { htmlConfig, mdConfig, pdfConfig, csvConfig, textConfig, rtfConfig, chunksConfig, ...commonProps } = userConfig as any;
+        const { htmlConfig, mdConfig, pdfConfig, csvConfig, textConfig, rtfConfig, docxConfig, chunksConfig, ...commonProps } = userConfig as any;
         Object.assign(config, withoutPrototypeKeys(commonProps));
 
         // Merge sub-configs individually, ignoring undefined properties to preserve defaults
@@ -279,6 +280,7 @@ export function resolveGeneratorConfig<D extends string>(
         if (csvConfig) mergeSubConfig(config.csvConfig, csvConfig);
         if (textConfig) mergeSubConfig(config.textConfig, textConfig);
         if (rtfConfig) mergeSubConfig(config.rtfConfig, rtfConfig);
+        if (docxConfig) mergeSubConfig(config.docxConfig, docxConfig);
         if (chunksConfig) mergeSubConfig(config.chunksConfig, chunksConfig);
     }
 

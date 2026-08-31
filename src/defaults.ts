@@ -1,4 +1,4 @@
-import { ChunkingConfig, CsvGeneratorConfig, DeepRequired, DocumentStructureChunkingConfig, FixedSizeChunkingConfig, FullGeneratorConfig, HtmlGeneratorConfig, HtmlParserConfig, MdGeneratorConfig, OcrConfig, OcrTimeoutConfig, OfficeParserConfig, PdfGeneratorConfig, PdfParserConfig, SemanticChunkingConfig, TextGeneratorConfig } from './types.js';
+import { ChunkingConfig, CsvGeneratorConfig, DeepRequired, DocumentStructureChunkingConfig, DocxGeneratorConfig, FixedSizeChunkingConfig, FullGeneratorConfig, HtmlGeneratorConfig, HtmlParserConfig, MdGeneratorConfig, OcrConfig, OcrTimeoutConfig, OfficeParserConfig, PdfGeneratorConfig, PdfParserConfig, SemanticChunkingConfig, TextGeneratorConfig } from './types.js';
 
 const PDFJS_VERSION = '6.2.108';
 const DEFAULT_PDF_WORKER_SRC = typeof __SLIM__ !== 'undefined' && __SLIM__ ? '' : `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
@@ -239,6 +239,15 @@ const DEFAULT_CHUNKING_CONFIG: ChunkingConfig = DEFAULT_DOCUMENT_STRUCTURE_CHUNK
 /**
  * Default configuration for the OfficeGenerator.
  */
+/**
+ * Default configuration for DOCX (Word) generation.
+ */
+const DEFAULT_DOCX_GENERATOR_CONFIG: DeepRequired<DocxGeneratorConfig> = {
+    pageSize: 'A4',
+    landscape: false,
+    margin: { top: 72, right: 72, bottom: 72, left: 72 },
+};
+
 export const DEFAULT_GENERATOR_CONFIG: FullGeneratorConfig = {
     onNode: () => { },
     onWarning: () => { },
@@ -259,6 +268,7 @@ export const DEFAULT_GENERATOR_CONFIG: FullGeneratorConfig = {
     csvConfig: DEFAULT_CSV_GENERATOR_CONFIG,
     textConfig: DEFAULT_TEXT_GENERATOR_CONFIG,
     rtfConfig: {},
+    docxConfig: DEFAULT_DOCX_GENERATOR_CONFIG,
     chunksConfig: DEFAULT_CHUNKING_CONFIG,
 };
 

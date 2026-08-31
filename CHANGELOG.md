@@ -4,9 +4,9 @@ All notable changes to `officeParser` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [8.0.0] - 2026-08-27
+## [8.0.0] - 2026-08-31
 
-This release is a ground-up rewrite of PDF text extraction and drops one deprecated API.
+This release is a ground-up rewrite of PDF text extraction, adds a native DOCX generator and ODG parsing, and drops one deprecated API.
 
 ### Breaking
 - **`ast.toText()` was removed.** Use `(await ast.to('text')).value`, which produces the same content at its defaults and is configurable (layout, notes, image placeholders). The CLI's `--toText` flag was removed too and now errors with `--toText was removed in v8. Use --to=text instead.`
@@ -16,6 +16,8 @@ This release is a ground-up rewrite of PDF text extraction and drops one depreca
 - **Node.js `>=22.13` is now required** (was `>=18`). This matches the bundled `pdfjs-dist`, whose own floor is `>=22.13`, so the previous claim was already unmet on the PDF path.
 
 ### Added
+- **DOCX generation (`to('docx')`).** A new generator writes a real WordprocessingML package (a `.docx` ZIP: `[Content_Types].xml`, `word/document.xml`, `styles.xml`, `numbering.xml`, footnotes/endnotes/comments, headers/footers, media, and `docProps`) from any parsed source, returning a `Uint8Array`. It reproduces headings, styled runs (bold/italic/underline/strike/color/size/font/sub-superscript/highlight), paragraphs, tables with merged cells (`gridSpan`/`vMerge`), bulleted and numbered nested lists, images (with EMU sizing sniffed from PNG/JPEG/GIF), external and internal hyperlinks, bookmarks, footnotes, endnotes and comments, code blocks, admonitions, and document metadata. Like the EPUB generator it adds no dependencies (built on the bundled `fflate`) and runs identically in Node and the browser, and its output is reproducible (pinned zip mtimes and deterministic ids, honoring `metadataOverrides.modified`). Configurable via **`DocxGeneratorConfig`** (`docxConfig`): `pageSize` (`'A4'`/`'Letter'`/`'Legal'`), `landscape`, and `margin` (points). Every value written into the XML is sanitized: hyperlink targets go through a UNC/scheme allowlist (rejected links degrade to plain text rather than being dropped), text and attributes are entity-escaped with invalid XML control chars stripped, bookmark/anchor names are reduced to a safe character set, and colors are hex-validated. Round-trips cleanly back through the Word parser.
+- **`CONTENT_NOT_REPRESENTABLE`** warning code: raised when a content feature has no faithful representation in the destination format (e.g. math or an embedded object written to DOCX) and is downgraded to a plain-text fallback rather than silently dropped.
 - **Parse support for ODG (OpenDocument Graphics / LibreOffice Draw).** `.odg` (and the `.otg` template) join the ODF family handled by the existing OpenOffice parser: each `draw:page` becomes a `page` node, and shape text (text boxes, custom shapes, grouped shapes), embedded tables, and embedded images are extracted per page. Parse-only, in line with the other ODF types; vector geometry, shape coordinates, and ODG generation are out of scope. The HTML generator's PDF-detection now keys off the source format instead of the presence of `page` nodes, so ODG is not styled as a PDF.
 - **Tagged-PDF structure recovery.** When a PDF declares a structure tree and it passes reliability checks, headings, tables, lists and footnotes/endnotes come from the tags. Untagged PDFs fall back to geometric heuristics.
 - **Reading-order recovery** for multi-column and float-beside-text pages, via a recursive XY-cut, so columns and floating tables no longer interleave.

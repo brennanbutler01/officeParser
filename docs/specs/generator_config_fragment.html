@@ -493,6 +493,44 @@ await ast.to('md', {
         </tbody>
     </table>
 
+    <h3 id="docxgeneratorconfig">DocxGeneratorConfig (<code>docxConfig</code>)</h3>
+    <p>Writes a real WordprocessingML package (a <code>.docx</code> ZIP) from any parsed source and returns a
+        <code>Uint8Array</code>. Adds no dependencies (built on the bundled <code>fflate</code>), runs identically in
+        Node and the browser, and produces reproducible bytes (honoring <code>metadataOverrides.modified</code>).
+        Reproduces headings, styled runs, tables with merged cells, nested lists, images, hyperlinks,
+        footnotes/endnotes, comments, headers/footers and metadata.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Property</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>pageSize</code></td>
+                <td><code>'A4' | 'Letter' | 'Legal'</code></td>
+                <td><code>'A4'</code></td>
+                <td>Page size preset for the document section (<code>w:pgSz</code>).</td>
+            </tr>
+            <tr>
+                <td><code>landscape</code></td>
+                <td><code>boolean</code></td>
+                <td><code>false</code></td>
+                <td>Landscape orientation (swaps page dimensions and sets <code>w:orient</code>).</td>
+            </tr>
+            <tr>
+                <td><code>margin</code></td>
+                <td><code>object</code></td>
+                <td><code>{72,72,72,72}</code></td>
+                <td>Page margins in points, 1/72 inch (<code>top</code>, <code>right</code>, <code>bottom</code>,
+                    <code>left</code>); 72 = Word's standard one inch.</td>
+            </tr>
+        </tbody>
+    </table>
+
     <h3 id="csvgeneratorconfig">CsvGeneratorConfig (<code>csvConfig</code>)</h3>
     <table>
         <thead>

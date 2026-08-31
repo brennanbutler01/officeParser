@@ -19,6 +19,7 @@ import {
     serializeForInlineScript, csvSafeCell, escapeRtf, markdownEscapeText, sanitizeMarkdownUrl, sanitizeRtfUrl
 } from '../../src/utils/sanitize';
 import { extractFiles } from '../../src/utils/zipUtils';
+import { parseXmlString } from '../../src/utils/xmlUtils';
 import { getOfficeError, getWrappedError } from '../../src/utils/errorUtils';
 import { OfficeErrorType } from '../../src/types';
 
@@ -752,6 +753,104 @@ async function rtfUrlTests() {
 }
 
 /**
+ * The DOCX generator hand-writes WordprocessingML into a ZIP package, so every value that reaches
+ * the XML is an injection surface: text, hyperlink targets, internal-link anchors, bookmark names
+ * and colors. These assert the package stays well-formed and script-free under hostile input while
+ * legitimate content survives (degrade, don't delete).
+ */
+async function docxSanitizationTests() {
+    console.log('- DocxGenerator (WML injection surfaces)...');
+
+    const docFor = async (bytes: Uint8Array) => strFromU8(unzipSync(bytes)['word/document.xml']);
+    const relsFor = async (bytes: Uint8Array) => {
+        const f = unzipSync(bytes)['word/_rels/document.xml.rels'];
+        return f ? strFromU8(f) : '';
+    };
+    const gen = async (content: any[]) => (await OfficeGenerator.generate(astWith(content), 'docx')).value as Uint8Array;
+
+    // ── Hyperlink target scheme rejection ─────────────────────────────────────
+    const linkContent = (url: string) => [{ type: 'paragraph', children: [
+        { type: 'text', text: 'clickme', metadata: { link: url, linkType: 'external' } }] }];
+    for (const url of ['javascript:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,<script>',
+                       'file:///C:/Windows/System32/calc.exe', '\\\\evil.com\\share\\x', '//evil.com/share']) {
+        const bytes = await gen(linkContent(url));
+        const doc = await docFor(bytes);
+        const rels = await relsFor(bytes);
+        check(`docx: ${JSON.stringify(url).slice(0, 32)} emits no hyperlink relationship`,
+            !/<w:hyperlink r:id=/.test(doc) && !/TargetMode="External"/.test(rels),
+            doc.match(/<w:hyperlink[^>]*>/)?.[0] ?? rels.slice(0, 120));
+        check('docx: rejected link keeps its text', doc.includes('clickme'),
+            `link text was dropped along with the URL: ${doc.slice(0, 160)}`);
+    }
+    // Positive controls: without these the allowlist could be "reject everything" and still pass.
+    for (const url of ['https://example.com/a?b=1', 'http://x.test/p', 'mailto:a@b.test', 'tel:+123']) {
+        const bytes = await gen(linkContent(url));
+        const doc = await docFor(bytes);
+        const rels = await relsFor(bytes);
+        check(`docx: ${url} still emits a hyperlink relationship`,
+            /<w:hyperlink r:id=/.test(doc) && /TargetMode="External"/.test(rels),
+            `legitimate URL was dropped: ${doc.slice(0, 160)}`);
+    }
+
+    // ── Text / attribute XML injection ────────────────────────────────────────
+    const payload = `</w:t></w:r></w:p><script>alert(1)</script>&<>"'`;
+    {
+        const bytes = await gen([{ type: 'paragraph', children: [{ type: 'text', text: payload }] }]);
+        const doc = await docFor(bytes);
+        check('docx: hostile text does not break out of <w:t>', !/<script>/.test(doc),
+            doc.match(/<script>[^<]*/)?.[0] ?? '');
+        // Every emitted XML part must remain well-formed (strict @xmldom throws on malformed input).
+        for (const [name, data] of Object.entries(unzipSync(bytes))) {
+            if (!name.endsWith('.xml') && !name.endsWith('.rels')) continue;
+            let ok = true;
+            try { parseXmlString(strFromU8(data as Uint8Array)); } catch { ok = false; }
+            check(`docx: ${name} well-formed under hostile text`, ok);
+        }
+        // The literal characters survive a re-parse (escaped, not executed).
+        const back = await OfficeParser.parseOffice(Buffer.from(bytes), { fileType: 'docx' });
+        const allText = JSON.stringify(back.content);
+        check('docx: payload text preserved through round-trip', allText.includes('alert(1)'),
+            `payload text was lost: ${allText.slice(0, 200)}`);
+    }
+
+    // ── Control-character stripping ───────────────────────────────────────────
+    {
+        const bytes = await gen([{ type: 'paragraph', children: [{ type: 'text', text: 'a\x00\x01\x1F\x08b' }] }]);
+        const doc = await docFor(bytes);
+        check('docx: invalid XML control chars stripped', !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(doc),
+            'control characters leaked into document.xml');
+        let ok = true; try { parseXmlString(doc); } catch { ok = false; }
+        check('docx: document.xml well-formed after control-char strip', ok);
+    }
+
+    // ── Internal-link anchor / bookmark name sanitization ─────────────────────
+    {
+        const bytes = await gen([
+            { type: 'heading', metadata: { level: 1, id: 'evil" name<>&/\\' }, children: [{ type: 'text', text: 'Title' }] },
+            { type: 'paragraph', children: [{ type: 'text', text: 'jump', metadata: { link: '#evil" name<>&/\\', linkType: 'internal' } }] },
+        ]);
+        const doc = await docFor(bytes);
+        const anchors = [...doc.matchAll(/w:(?:anchor|name)="([^"]*)"/g)].map(m => m[1]);
+        check('docx: bookmark/anchor names contain only safe chars',
+            anchors.length > 0 && anchors.every(a => /^[A-Za-z_][A-Za-z0-9_]*$/.test(a)),
+            `unsafe anchor/name emitted: ${JSON.stringify(anchors)}`);
+        let ok = true; try { parseXmlString(doc); } catch { ok = false; }
+        check('docx: document.xml well-formed with hostile anchor', ok);
+    }
+
+    // ── Color validation ──────────────────────────────────────────────────────
+    {
+        const bytes = await gen([{ type: 'paragraph', children: [
+            { type: 'text', text: 'colored', formatting: { color: 'red"/><w:color w:val="injected' } as any }] }]);
+        const doc = await docFor(bytes);
+        const colors = [...doc.matchAll(/<w:color w:val="([^"]*)"/g)].map(m => m[1]);
+        check('docx: color values are valid hex or absent',
+            colors.every(c => /^[0-9A-Fa-f]{6}$/.test(c) || c === 'auto'),
+            `invalid color leaked: ${JSON.stringify(colors)}`);
+    }
+}
+
+/**
  * ODF encodes runs of identical cells/rows with `table:number-columns-repeated` /
  * `table:number-rows-repeated` instead of repeating markup, so a few hundred bytes of XML can ask
  * the parser to materialize an arbitrary number of nodes, and the two multiply. The ZIP limits do
@@ -1398,6 +1497,7 @@ async function main() {
     await metadataOverrideTests();
     await styleMapTests();
     await rtfUrlTests();
+    await docxSanitizationTests();
     await odfRepeatExpansionTests();
     await abortSignalTests();
     await corruptArchiveTests();

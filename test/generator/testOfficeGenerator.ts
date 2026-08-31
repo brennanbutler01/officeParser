@@ -38,11 +38,11 @@ import { createAST } from '../../src/utils/astUtils.js';
 // ============================================================================
 
 /** Output formats tested (PDF excluded — slow/brittle in CI) */
-const GENERATOR_FORMATS = ['html', 'md', 'text', 'rtf', 'csv', 'chunks', 'epub'] as const;
+const GENERATOR_FORMATS = ['html', 'md', 'text', 'rtf', 'csv', 'chunks', 'epub', 'docx'] as const;
 type GeneratorFormat = typeof GENERATOR_FORMATS[number];
 
 /** Formats that support roundtrip testing (parse → generate → re-parse) */
-const ROUNDTRIP_FORMATS: GeneratorFormat[] = ['html', 'md', 'rtf'];
+const ROUNDTRIP_FORMATS: GeneratorFormat[] = ['html', 'md', 'rtf', 'docx'];
 
 /** Source baseline formats used to drive generation tests */
 const SOURCE_FORMATS = {
@@ -129,7 +129,7 @@ const BASELINE_MODIFIED = new Date('2024-01-01T00:00:00Z');
  * fall through to the current time, and the zip entry mtimes follow the same instant.
  */
 const deterministicConfigFor = (destFmt: string): GeneratorConfig =>
-    (destFmt === 'epub' ? { metadataOverrides: { modified: BASELINE_MODIFIED } } : {}) as GeneratorConfig;
+    (destFmt === 'epub' || destFmt === 'docx' ? { metadataOverrides: { modified: BASELINE_MODIFIED } } : {}) as GeneratorConfig;
 
 /** Generator config permutations */
 const GENERATOR_CONFIG_TESTS = [
@@ -359,6 +359,25 @@ async function extractRoundtripMetrics(ast: OfficeParserAST): Promise<RoundtripM
     return { contentNodes, textLength, headings, tables, lists, images, headerCells, embeds, highlightedText, captions };
 }
 
+/** Metrics for a generated DOCX (binary zip): unzips and reads word/document.xml. */
+function extractDocxMetrics(bytes: Uint8Array): GeneratedMetrics {
+    const files = unzipSync(bytes);
+    const doc = files['word/document.xml'] ? strFromU8(files['word/document.xml']) : '';
+    const text = (doc.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(m => m.replace(/<[^>]+>/g, '')).join(' ');
+    const words = text.split(/\s+/).filter(Boolean);
+    return {
+        outputLength: bytes.length,
+        hasContent: bytes.length > 0 && words.length > 0,
+        lineCount: (doc.match(/<w:p[ >/]/g) || []).length,
+        wordCount: words.length,
+        headingCount: (doc.match(/w:val="Heading/g) || []).length,
+        tableCount: (doc.match(/<w:tbl[ >]/g) || []).length,
+        listCount: (doc.match(/<w:numPr/g) || []).length,
+        imageCount: (doc.match(/<w:drawing/g) || []).length,
+        linkCount: (doc.match(/<w:hyperlink/g) || []).length,
+    };
+}
+
 function extractGeneratedMetrics(output: string, fmt: GeneratorFormat): GeneratedMetrics {
     const outputLength = output.length;
     const hasContent = outputLength > 0;
@@ -440,7 +459,7 @@ function compareGeneratedMetrics(
     results.push(mk('Word Count', `${expected.wordCount} (±15%)`, actual.wordCount, wOk,
         `${(wRatio * 100).toFixed(1)}% of baseline word count`, !wOk));
 
-    if (destFmt === 'html' || destFmt === 'md') {
+    if (destFmt === 'html' || destFmt === 'md' || destFmt === 'docx') {
         if (expected.headingCount !== undefined && expected.headingCount > 0) {
             const hOk = actual.headingCount === expected.headingCount;
             results.push(mk('Headings', expected.headingCount, actual.headingCount, hOk,
@@ -592,11 +611,16 @@ async function testGeneration(
         let rawOutput: string = '';
         let isZipOutput = false;
         let isEpubOutput = false;
+        let isDocxOutput = false;
         if (destFmt === 'epub') {
             // EPUB is always a binary ZIP archive
             isZipOutput = true;
             isEpubOutput = true;
             rawOutput = '[EPUB archive]';
+        } else if (destFmt === 'docx') {
+            // DOCX is always a binary ZIP (OOXML) archive.
+            isDocxOutput = true;
+            rawOutput = '[DOCX archive]';
         } else if (destFmt === 'csv') {
             if (result.value instanceof Uint8Array) {
                 // ZIP archive — convert to base64 placeholder metrics
@@ -615,6 +639,8 @@ async function testGeneration(
         if (destFmt === 'chunks') {
             const chunks = Array.isArray(result.value) ? result.value : JSON.parse(rawOutput);
             actualMetrics = extractChunkMetrics(chunks);
+        } else if (isDocxOutput) {
+            actualMetrics = extractDocxMetrics(result.value as Uint8Array);
         } else if (isZipOutput) {
             // ZIP: treat as valid multi-sheet output, just validate non-empty archive
             actualMetrics = {
@@ -634,6 +660,8 @@ async function testGeneration(
             fs.writeFileSync(`${outPath}.json`, rawOutput, 'utf8');
         } else if (isEpubOutput) {
             fs.writeFileSync(`${outPath}.epub`, result.value as Uint8Array);
+        } else if (isDocxOutput) {
+            fs.writeFileSync(`${outPath}.docx`, result.value as Uint8Array);
         } else if (isZipOutput) {
             fs.writeFileSync(`${outPath}.zip`, result.value as Uint8Array);
         } else {
@@ -1020,11 +1048,12 @@ async function testRoundtrip(srcFmt: string): Promise<GenFeatureTest[]> {
 
         // Step 2: Generate to same format
         const genResult = await OfficeGenerator.generate(ast1 as any, destFmt as any);
-        const genContent = genResult.value as string;
+        const genContent = genResult.value;
 
-        // Step 3: Write generated file to temp, re-parse it
+        // Step 3: Write generated file to temp, re-parse it (binary for zip-backed formats like docx)
         const tmpPath = path.join(__dirname, '..', 'files', `_roundtrip_tmp.${destFmt}`);
-        fs.writeFileSync(tmpPath, genContent, 'utf8');
+        if (genContent instanceof Uint8Array) fs.writeFileSync(tmpPath, genContent);
+        else fs.writeFileSync(tmpPath, genContent as string, 'utf8');
 
         try {
             const ast2 = await OfficeParser.parseOffice(tmpPath, { ...PARSER_CONFIG, fileType: srcFmt as any });
@@ -1869,7 +1898,9 @@ async function generateBaselines(): Promise<void> {
             try {
                 const result = await OfficeGenerator.generate(ast as any, destFmt as any, deterministicConfigFor(destFmt) as any);
                 let metrics: GeneratedMetrics;
-                if (result.value instanceof Uint8Array) {
+                if (destFmt === 'docx') {
+                    metrics = extractDocxMetrics(result.value as Uint8Array);
+                } else if (result.value instanceof Uint8Array) {
                     // ZIP archive (multi-sheet CSV)
                     metrics = { outputLength: result.value.length, hasContent: result.value.length > 0, lineCount: 0, wordCount: 0 };
                 } else if (destFmt === 'chunks') {
@@ -1886,6 +1917,8 @@ async function generateBaselines(): Promise<void> {
                 const fileBaselinePath = path.join(baselineDir, `gen.${srcFmt}.to.${destFmt}`);
                 if (destFmt === 'epub') {
                     fs.writeFileSync(`${fileBaselinePath}.epub`, result.value as Uint8Array);
+                } else if (destFmt === 'docx') {
+                    fs.writeFileSync(`${fileBaselinePath}.docx`, result.value as Uint8Array);
                 } else if (result.value instanceof Uint8Array) {
                     fs.writeFileSync(`${fileBaselinePath}.zip`, result.value);
                 } else if (destFmt === 'chunks') {

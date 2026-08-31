@@ -4,6 +4,7 @@ import * as fsPath from 'path';
 import * as child_process from 'child_process';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+import { unzipSync, strFromU8 } from 'fflate';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = fsPath.dirname(__filename);
@@ -653,6 +654,32 @@ async function runTests() {
         results.push({ name: 'Config: --mdConfig.fallbackToHtml=false disables HTML fallback', status: 'PASS', details: 'No <u> tag in output', duration: d40 });
     } else {
         results.push({ name: 'Config: --mdConfig.fallbackToHtml=false disables HTML fallback', status: 'FAIL', details: 'Found <u> tag despite fallbackToHtml=false', duration: d40 });
+    }
+
+    // 41. Binary DOCX generation to a file (--to docx --output), with a docxConfig flag threaded through
+    console.log('Test 41: DOCX generation --to docx --output');
+    const t41 = Date.now();
+    const docxOut = fsPath.join(RESULTS_DIR, 'output_test.docx');
+    if (fs.existsSync(docxOut)) fs.unlinkSync(docxOut);
+    const res41 = runCli(['--to', 'docx', '--docxConfig.pageSize=Letter', `--output=${docxOut}`]);
+    const d41 = Date.now() - t41;
+    if (res41.status === 0 && fs.existsSync(docxOut)) {
+        const bytes = new Uint8Array(fs.readFileSync(docxOut));
+        let ok = false, detail = '';
+        try {
+            const files = unzipSync(bytes);
+            const doc = files['word/document.xml'] ? strFromU8(files['word/document.xml']) : '';
+            // Valid OOXML package (PK + required parts) and Letter page size honored (12240 x 15840 twips).
+            ok = bytes[0] === 0x50 && bytes[1] === 0x4B
+                && !!files['[Content_Types].xml'] && !!files['word/document.xml']
+                && /<w:pgSz w:w="12240"/.test(doc);
+            detail = ok ? 'PK zip with document.xml and Letter pgSz' : `pgSz/parts check failed: ${doc.match(/<w:pgSz[^>]*>/)?.[0] ?? 'no pgSz'}`;
+        } catch (e: any) {
+            detail = `output is not a valid zip: ${e.message}`;
+        }
+        results.push({ name: 'CLI: --to docx writes a valid Word package', status: ok ? 'PASS' : 'FAIL', details: detail, duration: d41 });
+    } else {
+        results.push({ name: 'CLI: --to docx writes a valid Word package', status: 'FAIL', details: `exit ${res41.status}, file exists: ${fs.existsSync(docxOut)}. stderr: ${res41.stderr.slice(0, 120)}`, duration: d41 });
     }
 
     // Print summary report

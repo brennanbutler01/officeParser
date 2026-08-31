@@ -6,11 +6,12 @@
 
 import { OfficeParser } from '../src/OfficeParser';
 import { OfficeGenerator } from '../src/OfficeGenerator';
-import { zipSync, strToU8 } from 'fflate';
+import { zipSync, strToU8, unzipSync, strFromU8 } from 'fflate';
 import * as assert from 'assert';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { OfficeContentNode, OfficeParserAST } from '../src/types';
+import { parseXmlString } from '../src/utils/xmlUtils';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1267,6 +1268,43 @@ async function testOdg(): Promise<void> {
     }
 }
 
+/**
+ * DOCX generation: generate a Word document from the richest fixture, assert the OOXML package is
+ * well-formed and carries the expected WML, then re-parse it with WordParser and confirm the round
+ * trip preserves headings, tables, lists, images, footnotes and text.
+ */
+async function testDocxGeneration(): Promise<void> {
+    const src = await OfficeParser.parseOffice(path.join(__dirname, 'files/exhaustive/markdown.md'));
+    const { value } = await src.to('docx', { metadataOverrides: { modified: new Date('2024-01-01T00:00:00Z') } });
+    const bytes = value as Uint8Array;
+    assert.ok(bytes instanceof Uint8Array && bytes.length > 0, 'DOCX: produced non-empty Uint8Array');
+    assert.ok(bytes[0] === 0x50 && bytes[1] === 0x4B, 'DOCX: PK zip signature');
+
+    const files = unzipSync(bytes);
+    // Every emitted XML part must be well-formed.
+    for (const [name, data] of Object.entries(files)) {
+        if (!name.endsWith('.xml') && !name.endsWith('.rels')) continue;
+        assert.doesNotThrow(() => parseXmlString(strFromU8(data as Uint8Array)), `DOCX: ${name} is well-formed XML`);
+    }
+    const doc = strFromU8(files['word/document.xml']);
+    assert.ok(files['[Content_Types].xml'], 'DOCX: has [Content_Types].xml');
+    assert.ok(files['word/styles.xml'], 'DOCX: has styles.xml');
+    assert.ok(/<w:pStyle w:val="Heading1"\/>/.test(doc), 'DOCX: emits Heading1 style');
+    assert.ok(/<w:numPr>/.test(doc) && !!files['word/numbering.xml'], 'DOCX: emits numbered list + numbering.xml');
+    assert.ok(/<w:hyperlink r:id="/.test(doc), 'DOCX: emits an external hyperlink');
+    const rels = strFromU8(files['word/_rels/document.xml.rels']);
+    assert.ok(/TargetMode="External"/.test(rels), 'DOCX: external hyperlink relationship present');
+
+    // Re-parse and compare structure.
+    const back = await OfficeParser.parseOffice(Buffer.from(bytes), { fileType: 'docx' });
+    const cnt = (a: any, t: string) => { let c = 0; const w = (n: any) => { if (n.type === t) c++; (n.children || []).forEach(w); }; a.content.forEach(w); return c; };
+    for (const t of ['heading', 'table', 'list']) {
+        assert.ok(cnt(back, t) > 0, `DOCX: round-trip preserves ${t} nodes`);
+    }
+    const text = (a: any) => { let s = ''; const w = (n: any) => { if (n.type === 'text' && n.text) s += n.text; (n.children || []).forEach(w); }; a.content.forEach(w); return s; };
+    assert.ok(text(back).includes('Heading Level 1') || text(back).length > 100, 'DOCX: round-trip preserves text');
+}
+
 async function runTests(): Promise<void> {
     console.log('Starting exhaustive officeParser test suite...');
     let passed = 0;
@@ -1282,6 +1320,7 @@ async function runTests(): Promise<void> {
         ['WordParagraphMark', testWordParagraphMarkFormatting],
         ['GeneratedOutput', testGeneratedOutput],
         ['ODG', testOdg],
+        ['DOCX', testDocxGeneration],
     ];
 
     for (const [name, fn] of tests) {

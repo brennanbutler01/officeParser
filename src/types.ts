@@ -100,6 +100,8 @@ export enum OfficeWarningType {
     TABLE_CELL_LIMIT_EXCEEDED = 'TABLE_CELL_LIMIT_EXCEEDED',
     /** A metadata override could not be represented in the destination format's vocabulary */
     METADATA_NOT_REPRESENTABLE = 'METADATA_NOT_REPRESENTABLE',
+    /** A content feature (e.g. math, an embedded object) has no faithful representation in the destination format and was downgraded or dropped */
+    CONTENT_NOT_REPRESENTABLE = 'CONTENT_NOT_REPRESENTABLE',
     /** A styleMap output.tag was not an allowed element name and was ignored */
     INVALID_STYLE_MAP_TAG = 'INVALID_STYLE_MAP_TAG',
     /** A workbook archive contains no worksheet parts (chartsheet-only workbooks are legitimate) */
@@ -705,6 +707,7 @@ type ConversionValue<D extends UniversalGeneratorFormat> =
     D extends 'chunks' ? OfficeChunk[] :
     D extends 'csv' ? string | Uint8Array :
     D extends 'epub' ? Uint8Array :
+    D extends 'docx' ? Uint8Array :
     string;
 
 export interface ConversionResult<D extends UniversalGeneratorFormat> {
@@ -717,7 +720,7 @@ export interface ConversionResult<D extends UniversalGeneratorFormat> {
 /**
  * Universal formats supported by all source types for generation.
  */
-export type UniversalGeneratorFormat = 'text' | 'md' | 'html' | 'pdf' | 'csv' | 'rtf' | 'chunks' | 'epub';
+export type UniversalGeneratorFormat = 'text' | 'md' | 'html' | 'pdf' | 'csv' | 'rtf' | 'chunks' | 'epub' | 'docx';
 
 /**
  * Allowed destination formats for a given source type.
@@ -949,6 +952,7 @@ type GeneratorSpecificConfig<D extends string> =
     D extends 'csv' ? { csvConfig?: CsvGeneratorConfig } :
     D extends 'text' ? { textConfig?: TextGeneratorConfig } :
     D extends 'rtf' ? { rtfConfig?: RtfGeneratorConfig } :
+    D extends 'docx' ? { docxConfig?: DocxGeneratorConfig } :
     D extends 'chunks' ? { chunksConfig?: ChunkingConfig } :
     Partial<{
         htmlConfig: HtmlGeneratorConfig;
@@ -957,6 +961,7 @@ type GeneratorSpecificConfig<D extends string> =
         csvConfig: CsvGeneratorConfig;
         textConfig: TextGeneratorConfig;
         rtfConfig: RtfGeneratorConfig;
+        docxConfig: DocxGeneratorConfig;
         chunksConfig: ChunkingConfig;
     }>;
 
@@ -1028,6 +1033,7 @@ export type FullGeneratorConfig = DeepRequired<Omit<CommonGeneratorConfig, 'meta
     csvConfig: CsvGeneratorConfig;
     textConfig: TextGeneratorConfig;
     rtfConfig: RtfGeneratorConfig;
+    docxConfig: DocxGeneratorConfig;
 }> & {
     chunksConfig: ChunkingConfig;
     // Deliberately not DeepRequired: every field is meant to stay optional, since the whole
@@ -1301,6 +1307,24 @@ export interface StructuredStyleMapping {
          */
         fresh?: boolean;
     };
+}
+
+/**
+ * Configuration options for DOCX (Word) generation.
+ */
+export interface DocxGeneratorConfig {
+    /**
+     * Page size preset for the document section (`w:pgSz`). Defaults to `'A4'`, matching
+     * {@link PdfGeneratorConfig.format}'s default.
+     */
+    pageSize?: 'A4' | 'Letter' | 'Legal';
+    /** Landscape orientation (swaps the page dimensions and sets `w:orient`). Defaults to false. */
+    landscape?: boolean;
+    /**
+     * Page margins in points (1/72 inch), converted to twips for `w:pgMar`. Defaults to 72 on all
+     * sides (Word's standard one inch).
+     */
+    margin?: { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 /**

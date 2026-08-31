@@ -263,6 +263,38 @@ export function sanitizeRtfUrl(url: string): string {
 }
 
 /**
+ * Validates a hyperlink URL for a DOCX package, returning the raw (un-escaped) validated string or
+ * `''` when rejected. The caller is responsible for `escapeXml`-ing the result at the relationship
+ * `Target` sink (unlike {@link sanitizeRtfUrl}, which RTF-escapes because RTF has no separate
+ * attribute-quoting layer). The validation policy is identical to RTF's, and for the same reason: a
+ * DOCX hyperlink is the same click target as an RTF field, so a UNC target (`\\host\share`) is a
+ * live SMB/NTLM credential-leak vector in Word, not the inert relative path a browser sees. Only
+ * `https`/`http`/`mailto`/`tel` schemes (plus relative and fragment URLs) are allowed.
+ */
+export function sanitizeDocxUrl(url: string): string {
+    if (typeof url !== 'string') return '';
+    const stripped = url.trim().replace(/[\x00-\x1F\x7F]+/g, '');
+    if (/^[\\/]{2}[^\\/]/.test(stripped)) return '';   // UNC
+    const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(stripped);
+    if (schemeMatch && !/^(https?|mailto|tel)$/i.test(schemeMatch[1])) return '';
+    return stripped;
+}
+
+/**
+ * Removes characters that are illegal in XML 1.0 even when escaped, so a single stray control byte
+ * from a hostile source document cannot make an OOXML part unparseable (which makes Word refuse the
+ * whole file). Strips C0/C1 controls except tab/newline/carriage-return, U+FFFE/U+FFFF, and lone
+ * surrogates. Apply before escaping at every text and attribute sink.
+ */
+export function stripInvalidXmlChars(text: string): string {
+    if (typeof text !== 'string') return '';
+    return text
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F￾￿]/g, '')
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')   // high surrogate not followed by low
+        .replace(/(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '$1'); // low surrogate not preceded by high
+}
+
+/**
  * Escapes text for RTF: neutralizes the control/group metacharacters `\ { }`
  * (which would otherwise inject RTF control words or groups), encodes the double
  * quote (so a hyperlink field argument can't be terminated early), and hex/unicode

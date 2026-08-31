@@ -8,7 +8,7 @@
  *   officeparser file.docx --ocr --extractAttachments
  *
  * Options (--key=value, --key value, or bare flags):
- *   --to=json|text|md|html|csv|rtf|pdf|epub|chunks  Convert AST to specified format (default: json)
+ *   --to=json|text|md|html|csv|rtf|pdf|epub|docx|chunks  Convert AST to specified format (default: json)
  *   --output=path             Save result to a file
  *   --fileType=docx|xlsx|...  Override file type detection
  *   --ocr                     Enable OCR for images (default: false)
@@ -66,7 +66,7 @@ const knownGeneratorBooleans = new Set([
 
 // Prefixes used to identify configurations targeted for the generator instead of the parser.
 const generatorPrefixes = [
-    'generatorConfig.', 'htmlConfig.', 'csvConfig.', 'textConfig.', 'mdConfig.', 'pdfConfig.', 'rtfConfig.', 'chunksConfig.'
+    'generatorConfig.', 'htmlConfig.', 'csvConfig.', 'textConfig.', 'mdConfig.', 'pdfConfig.', 'rtfConfig.', 'docxConfig.', 'chunksConfig.'
 ];
 
 // Trackers to detect if deprecated/legacy options were used to log helpful warnings.
@@ -303,7 +303,7 @@ if (fileArg && !showHelp) {
     console.log('Usage: officeparser <file> [options]');
     console.log('');
     console.log('Options:');
-    console.log('  --to=json|text|md|html|pdf|csv|rtf|epub|chunks  Target conversion format (default: json)');
+    console.log('  --to=json|text|md|html|pdf|csv|rtf|epub|docx|chunks  Target conversion format (default: json)');
     console.log('  --output=file.ext                           Save output to file instead of stdout');
     console.log('  --fileType=docx|xlsx|pptx|odt|...           Explicitly override input file type detection');
     console.log('  --ocr                                       Enable OCR for images (default: false)');

@@ -29,7 +29,7 @@ const { value: html } = await OfficeGenerator.generate(ast, 'html', {
 // Convert to CSV
 const { value: csv } = await OfficeGenerator.generate(ast, 'csv');</code></pre>
 
-    <p><strong>Supported destinations:</strong> <code>'text'</code> · <code>'md'</code> · <code>'html'</code> · <code>'csv'</code> · <code>'rtf'</code> · <code>'pdf'</code> · <code>'epub'</code> · <code>'chunks'</code></p>
+    <p><strong>Supported destinations:</strong> <code>'text'</code> · <code>'md'</code> · <code>'html'</code> · <code>'csv'</code> · <code>'rtf'</code> · <code>'pdf'</code> · <code>'docx'</code> · <code>'epub'</code> · <code>'chunks'</code></p>
 
     <blockquote>
         [!IMPORTANT]
@@ -51,6 +51,7 @@ const { value: markdown }  = await ast.to('md');
 const { value: html }      = await ast.to('html', { includeFormatting: false });
 const { value: chunks }    = await ast.to('chunks', { strategy: 'fixed-size', chunkSize: 800 });
 const { value: pdfBytes }  = await ast.to('pdf');  // returns Uint8Array
+const { value: docxBytes } = await ast.to('docx'); // returns Uint8Array
 const { value: epubBytes } = await ast.to('epub'); // returns Uint8Array</code></pre>
 
     <h2>ConversionResult Reference</h2>
