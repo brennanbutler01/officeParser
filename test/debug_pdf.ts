@@ -12,7 +12,6 @@ async function main() {
         const ast = await OfficeParser.parseOffice(buffer, {
             extractAttachments: true,
             ocr: true,
-            outputErrorToConsole: true,
             fileType: 'pdf'
         });
         console.log("Parse complete!");

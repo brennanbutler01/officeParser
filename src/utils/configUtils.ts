@@ -166,12 +166,7 @@ export function resolveParserConfig(
         };
     }
 
-    // 3. Handle legacy ocrLanguage mapping if not explicitly set in ocrConfig
-    if (userConfig.ocrLanguage && !userConfig.ocrConfig?.language) {
-        config.ocrConfig.language = userConfig.ocrLanguage;
-    }
-
-    // 4. Propagate the top-level abortSignal to ocrConfig so the OCR subsystem is aware of it
+    // 3. Propagate the top-level abortSignal to ocrConfig so the OCR subsystem is aware of it
     if (config.abortSignal) {
         config.ocrConfig.abortSignal = config.abortSignal;
     }

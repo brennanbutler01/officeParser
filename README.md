@@ -143,9 +143,9 @@ npx officeparser my_document --fileType=docx --to=json
 | `--htmlConfig.containerWidth` | string \| number | `auto` | HTML output container width (e.g. `900px`, `100%`) |
 | ~~`--format`~~ | `json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks` | `json` | **Deprecated.** Use `--to` |
 | ~~`--toText`~~ | | | **Removed in v8.** Use `--to=text`. |
-| ~~`--ocrLanguage`~~ | string | `eng` | **Deprecated.** Use `--ocrConfig.language` |
-| ~~`--putNotesAtLast`~~ | `true\|false` | `false` | **Deprecated and ignored.** Notes are attached structurally to their nodes. |
-| ~~`--outputErrorToConsole`~~ | `true\|false` | `false` | **Deprecated.** Use `--verbose` |
+| ~~`--ocrLanguage`~~ | | | **Removed in v8.** Use `--ocrConfig.language`. |
+| ~~`--putNotesAtLast`~~ | | | **Removed in v8.** Notes are attached structurally via `node.notes`. |
+| ~~`--outputErrorToConsole`~~ | | | **Removed in v8.** Use `--verbose`. |
 
 ---
 
@@ -900,7 +900,7 @@ printNotes(ast.content);
 ```
 
 > [!IMPORTANT]
-> `putNotesAtLast` is **deprecated**. Notes are always attached via `node.notes`; this flag has no effect and will be removed in a future major version.
+> `putNotesAtLast` was **removed in v8**. Notes are always attached via `node.notes`.
 
 ### Access headers, footers & slide masters
 ```ts
@@ -980,7 +980,6 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `ignoreComments` | `boolean` | `false` | **New**: Ignore inline comments/annotations (DOCX, XLSX, PPTX), attached by default via `node.comments[]` |
 | `ignoreHeadersAndFooters` | `boolean` | `false` | **New**: Skip DOCX headers & footers (populated in `ast.auxiliary.headers/footers` by default) |
 | `ignoreSlideMasters` | `boolean` | `false` | **New**: Skip PPTX slide masters (populated in `ast.auxiliary.slideMasters` by default) |
-| ~~`putNotesAtLast`~~ | `boolean` | `false` | **Deprecated**: Notes are now attached via `node.notes[]`. This flag has no effect |
 | `extractAttachments` | `boolean` | `false` | Populate `ast.attachments` with Base64 images/charts |
 | `ocr` | `boolean` | `false` | Run Tesseract OCR on images (requires `extractAttachments: true`) |
 | `ocrConfig` | `OcrConfig` | `{}` | OCR worker pool settings (see [OCR section](#ocr-scheduler--resource-management)) |
@@ -998,7 +997,6 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `pdfParserConfig` | `PdfParserConfig` | see below | PDF-specific options ([table below](#pdfparserconfig)) |
 | `onWarning` | `(issue: OfficeIssue) => void` | — | Callback for non-fatal parsing issues |
 | `abortSignal` | `AbortSignal \| null` | `null` | Optional signal to cancel parsing (rejects with AbortError) |
-| ~~`outputErrorToConsole`~~ | `boolean` | `false` | **Deprecated.** Use `onWarning` instead |
 
 ---
 
@@ -1370,7 +1368,7 @@ When `ocr: true` is set, `officeParser` maintains an intelligent **Smart Worker 
 
 - **Dynamic Affinity**: Workers persist with their last-used language, avoiding re-initialization overhead.
 - **LRU Re-allocation**: When a new language is requested and the pool is full, the Least Recently Used idle worker is re-initialized.
-- **Auto-Termination**: Workers shut down after 10 seconds of inactivity (configurable via `ocrConfig.autoTerminateTimeout`).
+- **Auto-Termination**: Workers shut down after 10 seconds of inactivity (configurable via `ocrConfig.timeout.autoTerminate`).
 
 ### OCR Config (`ocrConfig`)
 
@@ -1382,7 +1380,6 @@ When `ocr: true` is set, `officeParser` maintains an intelligent **Smart Worker 
 | `langPath` | `string` | `''` | Custom path for language data files |
 | `preserveLayout` | `boolean` | `true` | Reconstruct the recognized text's 2-D page layout from Tesseract's per-word boxes (columns line up, right-hand text stays right), instead of flat reading-order text. Set `false` for the flat string |
 | `timeout` | `OcrTimeoutConfig` | `{}` | Consolidated timeouts: `autoTerminate`, `workerLoad`, `recognition` |
-| ~~`autoTerminateTimeout`~~ | `number` | `10000` | **Deprecated.** Use `timeout.autoTerminate` instead |
 
 See all language codes at [tesseract-ocr.github.io](https://tesseract-ocr.github.io/tessdoc/Data-Files).
 

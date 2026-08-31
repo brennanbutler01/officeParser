@@ -144,9 +144,3 @@ export function ensureEnvPolyfills(): void {
         }
     }
 }
-
-/**
- * Backward-compatible alias for ensureEnvPolyfills.
- * @deprecated Use ensureEnvPolyfills instead.
- */
-export const ensureDomMatrix = ensureEnvPolyfills;

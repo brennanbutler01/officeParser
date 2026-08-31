@@ -71,9 +71,6 @@ const generatorPrefixes = [
 
 // Trackers to detect if deprecated/legacy options were used to log helpful warnings.
 let usedFormat = false;
-let usedOcrLanguage = false;
-let usedPutNotesAtLast = false;
-let usedOutputErrorToConsole = false;
 
 // Parse the arguments list
 for (let i = 0; i < args.length; i++) {
@@ -105,8 +102,7 @@ for (let i = 0; i < args.length; i++) {
             cleanKey = arg.slice(2);
             const isKnownBoolean = knownParserBooleans.has(cleanKey) ||
                                    knownGeneratorBooleans.has(cleanKey) ||
-                                   cleanKey === 'verbose' ||
-                                   cleanKey === 'outputErrorToConsole';
+                                   cleanKey === 'verbose';
             const isNextBool = i + 1 < args.length &&
                                (args[i + 1].toLowerCase() === 'true' || args[i + 1].toLowerCase() === 'false');
 
@@ -139,15 +135,6 @@ for (let i = 0; i < args.length; i++) {
             process.exit(1);
         } else if (cleanKey === 'verbose') {
             verbose = boolValue !== undefined ? boolValue : true;
-        } else if (cleanKey === 'ocrLanguage') {
-            config.ocrLanguage = val;
-            usedOcrLanguage = true;
-        } else if (cleanKey === 'putNotesAtLast') {
-            config.putNotesAtLast = boolValue !== undefined ? boolValue : true;
-            usedPutNotesAtLast = true;
-        } else if (cleanKey === 'outputErrorToConsole') {
-            verbose = boolValue !== undefined ? boolValue : true;
-            usedOutputErrorToConsole = true;
         } else {
             // Check if the flag belongs to generatorConfig or a specific sub-generator (e.g., htmlConfig)
             const isGeneratorOption = knownGeneratorBooleans.has(cleanKey) || generatorPrefixes.some(pref => cleanKey.startsWith(pref));
@@ -206,15 +193,6 @@ if (fileArg && !showHelp) {
     // Display warning messages for any deprecated CLI options used
     if (usedFormat) {
         console.warn('Warning: --format is deprecated. Use --to instead.');
-    }
-    if (usedOcrLanguage) {
-        console.warn('Warning: --ocrLanguage is deprecated. Use --ocrConfig.language instead.');
-    }
-    if (usedPutNotesAtLast) {
-        console.warn('Warning: --putNotesAtLast is deprecated and will be ignored by all parsers.');
-    }
-    if (usedOutputErrorToConsole) {
-        console.warn('Warning: --outputErrorToConsole is deprecated. Use --verbose instead.');
     }
     // Intercept parser warning callbacks to format and print issues when verbose is enabled
     const originalOnWarning = config.onWarning;

@@ -136,7 +136,7 @@ export class OfficeParser {
      * const buffer = await retrieveData('document.pdf').then(r => r.arrayBuffer());
      * const ast = await OfficeParser.parseOffice(buffer, {
      *   ocr: true,
-     *   ocrLanguage: 'eng+fra'          
+     *   ocrConfig: { language: 'eng+fra' }
      * });
      * 
      * // Extract text

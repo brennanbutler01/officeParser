@@ -73,8 +73,8 @@ export interface ZipFileContent {
  * @param filterFn - A predicate function to determine which files to extract.
  *                   Receives the filename and returns true to extract, false to skip.
  * @param limits - Decompression limits guarding against zip bombs
- * @param config - Parser configuration, so extraction failures honour `onWarning` /
- *                 `outputErrorToConsole` like every other reported issue
+ * @param config - Parser configuration, so extraction failures honour `onWarning` like every other
+ *                 reported issue
  * @returns A promise resolving to an array of extracted files
  * @throws {Error} If the ZIP file cannot be opened or an entry cannot be read
  * 
@@ -291,10 +291,11 @@ const ZIP_MAGIC_BYTES = [0x50, 0x4b];
 
 /**
  * Reporting is suppressed while sniffing: the input is not yet known to be a document, so a
- * failure here is an inconclusive guess rather than something the caller did wrong. Without a
- * config, `getOfficeError` would write these to the console.
+ * failure here is an inconclusive guess rather than something the caller did wrong. Passing a
+ * config with a no-op `onWarning` keeps `getOfficeError` from falling back to the console (which it
+ * only does when given no config at all).
  */
-const SILENT_DETECTION_CONFIG: OfficeParserConfig = { outputErrorToConsole: false };
+const SILENT_DETECTION_CONFIG: OfficeParserConfig = { onWarning: () => { } };
 
 /** Whether a buffer starts with the ZIP local file header signature. */
 const looksLikeZip = (buffer: Buffer): boolean =>

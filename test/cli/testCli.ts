@@ -443,8 +443,6 @@ async function runTests() {
     console.log('Test 19: Remaining config flags passthrough');
     const t19 = Date.now();
     const res19 = runCli([
-        '--ocrLanguage=fra',
-        '--putNotesAtLast=true',
         '--serializeRawContent=false',
         '--includeBreakNodes=true'
     ]);
@@ -452,12 +450,6 @@ async function runTests() {
     try {
         const json = JSON.parse(res19.stdout);
         const c = json.config;
-        if (c.ocrLanguage === 'fra') results.push({ name: 'Config: ocrLanguage passed', status: 'PASS', details: 'ocrLanguage reflected in AST config', duration: d19 });
-        else results.push({ name: 'Config: ocrLanguage passed', status: 'FAIL', details: `ocrLanguage was ${c.ocrLanguage}`, duration: d19 });
-
-        if (c.putNotesAtLast === true) results.push({ name: 'Config: putNotesAtLast passed', status: 'PASS', details: 'putNotesAtLast reflected in AST config', duration: d19 });
-        else results.push({ name: 'Config: putNotesAtLast passed', status: 'FAIL', details: `putNotesAtLast was ${c.putNotesAtLast}`, duration: d19 });
-
         if (c.serializeRawContent === false) results.push({ name: 'Config: serializeRawContent passed', status: 'PASS', details: 'serializeRawContent reflected in AST config', duration: d19 });
         else results.push({ name: 'Config: serializeRawContent passed', status: 'FAIL', details: `serializeRawContent was ${c.serializeRawContent}`, duration: d19 });
 

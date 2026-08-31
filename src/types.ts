@@ -118,11 +118,6 @@ export enum OfficeWarningType {
 
 /**
  * Consolidated timeout settings for OCR operations.
- * Preferred over the individual flat timeout properties on {@link OcrConfig},
- * which are now deprecated.
- * 
- * If a key is present here, it takes priority over the corresponding deprecated
- * flat property (e.g. `timeout.autoTerminate` wins over `autoTerminateTimeout`).
  * Set any value to `0` to disable that specific timeout.
  */
 export interface OcrTimeoutConfig {
@@ -228,21 +223,8 @@ export interface OcrConfig {
     preserveLayout?: boolean;
     /**
      * Consolidated timeout settings for all OCR operations.
-     * 
-     * Prefer this over the deprecated flat timeout properties.
-     * If `timeout.autoTerminate` is set, it takes priority over the deprecated `autoTerminateTimeout`.
      */
     timeout?: OcrTimeoutConfig;
-    /**
-     * @deprecated Use `timeout.autoTerminate` instead.
-     * 
-     * Timeout in milliseconds of inactivity before the OCR worker pool is automatically terminated.
-     * Set to 0 to disable auto-termination.
-     * Default is 10,000 (10 seconds).
-     * 
-     * If `timeout.autoTerminate` is also set, that value takes priority over this one.
-     */
-    autoTerminateTimeout?: number;
     /**
      * An optional AbortSignal propagated from the main parser configuration to abort active OCR jobs.
      * If the signal is aborted:
@@ -260,12 +242,6 @@ export interface OcrConfig {
  * Configuration options shared across every input format.
  */
 export interface CommonOfficeParserConfig {
-    /**
-     * @deprecated Use `onWarning` instead.
-     * Flag to show all the logs to console in case of an error irrespective of your own handling.
-     * Default is false.
-     */
-    outputErrorToConsole?: boolean;
     /**
      * Callback for warnings or non-fatal errors encountered during parsing.
      * Allows you to capture issues like OCR failures or attachment extraction errors
@@ -298,11 +274,6 @@ export interface CommonOfficeParserConfig {
      */
     ignoreSlideMasters?: boolean;
     /**
-     * @deprecated Notes are now structurally attached to the specific nodes they belong to via `node.notes`.
-     * This option is now completely ignored by all parsers.
-     */
-    putNotesAtLast?: boolean;
-    /**
      * Flag to extract attachments like images, charts, etc.
      * Default is false.
      */
@@ -318,20 +289,8 @@ export interface CommonOfficeParserConfig {
      */
     ocr?: boolean;
     /**
-     * @deprecated Use `ocrConfig.language` instead.
-     * Language for OCR.
-     * Default is 'eng'.
-     * 
-     * You can provide multiple languages separated by a `+` sign (e.g., 'eng+fra' for English and French).
-     * The OCR engine will then attempt to recognize text in any of the specified languages.
-     * 
-     * See the list of supported languages and their codes here:
-     * https://tesseract-ocr.github.io/tessdoc/Data-Files#data-files-for-version-400-november-29-2016
-     */
-    ocrLanguage?: string;
-    /**
-     * Shared OCR configuration for worker pooling and offline support.
-     * If provided, `ocrLanguage` will be ignored in favor of `ocrConfig.language`.
+     * Shared OCR configuration for worker pooling and offline support, including the recognition
+     * language (`ocrConfig.language`, default `'eng'`).
      */
     ocrConfig?: OcrConfig;
     /**
@@ -2750,7 +2709,7 @@ export interface OfficeAttachment {
      * - `config.ocr` is true
      * - `config.extractAttachments` is true
      * - The attachment is an image containing text
-     * Uses Tesseract.js with the language specified in `config.ocrLanguage`.
+     * Uses Tesseract.js with the language specified in `config.ocrConfig.language`.
      * @example "Annual Revenue: $1.2M"
      */
     ocrText?: string;

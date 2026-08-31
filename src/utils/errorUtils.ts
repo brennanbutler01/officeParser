@@ -118,7 +118,8 @@ const reportIssue = (
 ): void => {
     if (config?.onWarning) {
         config.onWarning(issue);
-    } else if (!config || config.outputErrorToConsole) {
+    } else if (!config) {
+        // No handler and no config context at all: fall back to the console.
         const formatted = ERRORHEADER + issue.message;
         if (issue.type === 'error') {
             console.error(formatted, issue.details || '');
@@ -132,7 +133,7 @@ const reportIssue = (
  * Creates, optionally logs to console, and returns a formatted OfficeParser error.
  * 
  * @param type - The type of error
- * @param config - Optional parser configuration (checks outputErrorToConsole)
+ * @param config - Optional parser configuration (its `onWarning` handler receives the issue)
  * @param info - Optional additional information
  * @returns The Error object to be thrown
  */
@@ -202,9 +203,9 @@ export const getWrappedError = (error: any, config: OfficeParserConfig, filePath
 
 /**
  * Centralized logging utility for non-fatal warnings or issues.
- * Routes messages to config.onWarning if provided, or console.warn/error 
- * if config.outputErrorToConsole is true.
- * 
+ * Routes messages to config.onWarning if provided, otherwise to console.warn/error only when no
+ * config context is supplied at all.
+ *
  * @param messageOrType - The warning message or warning type
  * @param config - Optional parser configuration
  * @param info - Optional additional information for dynamic messages or context

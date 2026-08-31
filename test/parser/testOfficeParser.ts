@@ -94,14 +94,12 @@ const BASELINE_STATUS = {
 const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
     extractAttachments: true,
     ocr: true,
-    ocrLanguage: 'eng',
     ocrConfig: {
         language: 'eng',
         workerPath: '',
         corePath: '',
         langPath: '',
         preserveLayout: true,
-        // New consolidated timeout object — preferred over the deprecated flat fields below.
         // Generous (0 = unlimited) for workerLoad/recognition so the real-file tests are never
         // killed by the timeout machinery.  C8/C9 permutation tests override these to 1 ms.
         timeout: {
@@ -109,16 +107,11 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
             workerLoad: 0,
             recognition: 0
         },
-        // Kept for backward-compatibility coverage — the resolution logic in ocrUtils.ts
-        // will prefer timeout.autoTerminate over this deprecated flat key.
-        autoTerminateTimeout: 10000,
         abortSignal: null
     },
     includeRawContent: true,
     ignoreNotes: false,
-    putNotesAtLast: false,
     newlineDelimiter: '\n',
-    outputErrorToConsole: true,
     pdfWorkerSrc: '',
     serializeRawContent: true,
     preserveXmlWhitespace: false,
@@ -2393,14 +2386,14 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
         const startTime = Date.now();
         const plainZip = Buffer.from(fflate.zipSync({ 'notes.txt': encode('just some text') }));
         let message = '';
-        try { await OfficeParser.parseOffice(plainZip, { outputErrorToConsole: false } as any); }
+        try { await OfficeParser.parseOffice(plainZip, { onWarning: () => { } } as any); }
         catch (err: any) { message = String(err?.officeIssue?.code); }
         record('a plain ZIP is still rejected as unsupported', 'EXTENSION_UNSUPPORTED', message,
             message === 'EXTENSION_UNSUPPORTED', 'An archive with no office declaration must not be adopted',
             Date.now() - startTime);
 
         let corruptCode = '';
-        try { await OfficeParser.parseOffice(Buffer.from('not an archive at all'), { fileType: 'pptx', outputErrorToConsole: false } as any); }
+        try { await OfficeParser.parseOffice(Buffer.from('not an archive at all'), { fileType: 'pptx', onWarning: () => { } } as any); }
         catch (err: any) { corruptCode = String(err?.officeIssue?.code); }
         record('corrupt input still reports the corrupt-archive error', 'ZIP_NO_ENTRIES_FOUND', corruptCode,
             corruptCode === 'ZIP_NO_ENTRIES_FOUND', 'Detection must not mask the corrupt-input errors');
@@ -2412,7 +2405,7 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
         const pptx = Buffer.from(fflate.zipSync(FORMATS[0].parts));
         const mismatchWarnings: string[] = [];
         try {
-            await OfficeParser.parseOffice(pptx, { fileType: 'docx', outputErrorToConsole: false, onWarning: (i: any) => mismatchWarnings.push(i.code) } as any);
+            await OfficeParser.parseOffice(pptx, { fileType: 'docx', onWarning: (i: any) => mismatchWarnings.push(i.code) } as any);
         } catch { /* the docx parser then fails on the missing part, which is expected here */ }
         record('a genuinely wrong fileType hint still warns', 'BUFFER_TYPE_MISMATCH',
             mismatchWarnings.join(',') || 'none', mismatchWarnings.includes('BUFFER_TYPE_MISMATCH'),
@@ -2425,7 +2418,7 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
             ...Object.entries(FORMATS[0].parts).map(([name, data]) => ({ name, data: data as Uint8Array, dataDescriptor: true })),
         ]);
         const hintedWarnings: string[] = [];
-        await OfficeParser.parseOffice(streamed, { fileType: 'pptx', outputErrorToConsole: false, onWarning: (i: any) => hintedWarnings.push(i.code) } as any);
+        await OfficeParser.parseOffice(streamed, { fileType: 'pptx', onWarning: (i: any) => hintedWarnings.push(i.code) } as any);
         record('a correct fileType hint produces no mismatch warning', 'no BUFFER_TYPE_MISMATCH',
             hintedWarnings.join(',') || 'none', !hintedWarnings.includes('BUFFER_TYPE_MISMATCH'),
             'A generic zip result must not be reported as disagreeing with the caller');
@@ -2450,7 +2443,7 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
                 .map(([name, data]) => ({ name, data: data as Uint8Array, dataDescriptor: true })),
         ];
         let outcome: 'resolved' | 'rejected' = 'resolved';
-        try { await OfficeParser.parseOffice(buildZip(entries), { outputErrorToConsole: false } as any); }
+        try { await OfficeParser.parseOffice(buildZip(entries), { onWarning: () => { } } as any); }
         catch { outcome = 'rejected'; }
         record('an oversized declaration is not inflated past the detection cap',
             'rejected (falls back to unsupported, not parsed via a 4.5 MiB introspection read)',
@@ -2487,7 +2480,7 @@ async function testZipTypeDetection(): Promise<FeatureTest[]> {
         let code = '';
         try {
             await OfficeParser.parseOffice(mislabeled,
-                { fileType: 'pptx', outputErrorToConsole: false, onWarning: (i: any) => warnings.push(i.code) } as any);
+                { fileType: 'pptx', onWarning: (i: any) => warnings.push(i.code) } as any);
         } catch (err: any) { code = String(err?.officeIssue?.code); }
         record('a wrong zip-backed hint on a sniff-defeating archive skips the mismatch warning',
             'no BUFFER_TYPE_MISMATCH, REQUIRED_PART_MISSING from the hinted parser',

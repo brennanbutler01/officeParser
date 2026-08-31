@@ -987,7 +987,7 @@ export const parsePowerPoint = async (buffer: Buffer, config: FullOfficeParserCo
         assignAttachmentData(content);
     }
 
-    // putNotesAtLast is deprecated. Notes are now structurally attached to their respective slides.
+    // Notes are structurally attached to their respective slides (via node.notes), not collected at the end.
 
     const auxiliaryContent = slideMasters.length > 0 ? {
         slideMasters

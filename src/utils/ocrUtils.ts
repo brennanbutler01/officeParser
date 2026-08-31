@@ -200,8 +200,7 @@ class OcrSchedulerManager {
 
         return new Promise((resolve, reject) => {
             // Update idle timeout if provided.
-            // Priority: timeout.autoTerminate (new) > autoTerminateTimeout (deprecated) > built-in default.
-            const effectiveAutoTerminate = config?.timeout?.autoTerminate ?? config?.autoTerminateTimeout;
+            const effectiveAutoTerminate = config?.timeout?.autoTerminate;
             if (effectiveAutoTerminate !== undefined) {
                 this.idleTimeout = effectiveAutoTerminate;
             }

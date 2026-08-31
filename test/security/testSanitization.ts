@@ -1181,7 +1181,7 @@ async function abortSignalTests() {
 }
 
 /** Silences the console for guards that report through it, without disabling the guard itself. */
-const QUIET = { outputErrorToConsole: false } as any;
+const QUIET = { onWarning: () => { } } as any;
 
 /** Encodes test fixture XML for zipSync. */
 const zipEnc = (text: string) => new TextEncoder().encode(text);
@@ -1491,7 +1491,6 @@ async function configOwnershipTests() {
     // one that genuinely qualifies: `ocrConfig` carrying `language` and `workerPath`.
     const fullConfig = (): any => ({
         ocrConfig: { language: 'eng', workerPath: '', abortSignal: null },
-        outputErrorToConsole: false,
         fileType: 'pptx',
     });
 
@@ -1549,7 +1548,7 @@ async function configOwnershipTests() {
     // hold and hides the problem from every later run, so the same config would report it once
     // and then look clean. An AST built by hand carries no config of its own, which is what
     // lets a complete generator config skip the merge and reach this path.
-    const generatorConfig: any = resolveGeneratorConfig('html', undefined, { outputErrorToConsole: false } as any);
+    const generatorConfig: any = resolveGeneratorConfig('html', undefined, { onWarning: () => { } } as any);
     generatorConfig.htmlConfig.containerWidth = 'not-a-width';
     const generatorWarnings: string[] = [];
     generatorConfig.onWarning = (issue: any) => generatorWarnings.push(issue.code);
@@ -1568,7 +1567,7 @@ async function configOwnershipTests() {
         `got ${JSON.stringify(generatorWarnings)}`);
 
     // The same identity rule applies on the generator side.
-    const generatorSource: any = resolveGeneratorConfig('html', undefined, { outputErrorToConsole: false } as any);
+    const generatorSource: any = resolveGeneratorConfig('html', undefined, { onWarning: () => { } } as any);
     const generatorCopy: any = resolveGeneratorConfig('html', undefined, generatorSource);
     check('config ownership: generator containers are copied',
         generatorCopy.htmlConfig !== generatorSource.htmlConfig, 'htmlConfig was shared with the caller');

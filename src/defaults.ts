@@ -31,11 +31,7 @@ const DEFAULT_OCR_CONFIG: DeepRequired<OcrConfig> = {
     corePath: '',
     langPath: '',
     preserveLayout: true,
-    // Preferred: consolidated timeout object.  New code should always read from here.
     timeout: DEFAULT_OCR_TIMEOUT,
-    // Kept for backward compatibility.  When timeout.autoTerminate is set (as above),
-    // the ocrUtils resolution logic will prefer timeout.autoTerminate over this flat field.
-    autoTerminateTimeout: DEFAULT_OCR_TIMEOUT.autoTerminate,
     abortSignal: null,
 };
 
@@ -74,18 +70,15 @@ const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
  * Default configuration for the OfficeParser.
  */
 export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
-    outputErrorToConsole: false,
     onWarning: () => { },
     newlineDelimiter: '\n',
     ignoreNotes: false,
     ignoreComments: false,
     ignoreHeadersAndFooters: false,
     ignoreSlideMasters: false,
-    putNotesAtLast: false,
     extractAttachments: false,
     includeRawContent: false,
     ocr: false,
-    ocrLanguage: 'eng',
     ocrConfig: DEFAULT_OCR_CONFIG,
     abortSignal: null,
     serializeRawContent: true,

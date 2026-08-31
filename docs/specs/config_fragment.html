@@ -38,13 +38,6 @@
                 <td><strong>Cancellation</strong>: An optional signal to abort the parsing operation. Interrupts heavy loops, PDF page parsing, zip decompression, and active OCR processes cleanly. Rejects with an <code>AbortError</code>.</td>
             </tr>
             <tr>
-                <td><del><code>outputErrorToConsole</code></del></td>
-                <td><code>boolean</code></td>
-                <td><code>false</code></td>
-                <td><strong>Deprecated</strong>: Use <code>onWarning</code> instead. When enabled, dumps internal trace
-                    logs and raw errors to the console.</td>
-            </tr>
-            <tr>
                 <td><code>newlineDelimiter</code></td>
                 <td><code>string</code></td>
                 <td><code>\n</code></td>
@@ -87,14 +80,6 @@
                     <code>ast.auxiliary.slideMasters</code>.</td>
             </tr>
             <tr>
-                <td><del><code>putNotesAtLast</code></del></td>
-                <td><code>boolean</code></td>
-                <td><code>false</code></td>
-                <td><strong>Deprecated</strong>: Notes are now structurally attached to their parent node via
-                    <code>node.notes[]</code>. This flag no longer has any effect and will be removed in a future
-                    major version. Access notes via <code>node.notes</code> instead.</td>
-            </tr>
-            <tr>
                 <td><code>extractAttachments</code></td>
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
@@ -133,13 +118,6 @@
                     non-selectable PDF layers. <em>Requires Tesseract.js.</em></td>
             </tr>
             <tr>
-                <td><del><code>ocrLanguage</code></del></td>
-                <td><code>string</code></td>
-                <td><code>eng</code></td>
-                <td><strong>Deprecated</strong>: Use <code>ocrConfig.language</code>. Specifies which Tesseract data
-                    files to load.</td>
-            </tr>
-            <tr>
                 <td><code>pdfWorkerSrc</code></td>
                 <td><code>string</code></td>
                 <td>(CDN)</td>
@@ -165,12 +143,6 @@
                 <td><strong>2-D OCR Layout</strong>: Rebuild the recognized text's spatial page layout from per-word
                     bounding boxes (columns line up, right-hand text stays on the right) instead of a flat
                     reading-order string. Set <code>false</code> for the plain linearized text.</td>
-            </tr>
-            <tr>
-                <td><del><code>ocrConfig.autoTerminateTimeout</code></del></td>
-                <td><code>number</code></td>
-                <td><code>10000</code></td>
-                <td><strong>Deprecated</strong>: Use <code>ocrConfig.timeout.autoTerminate</code> instead. Inactivity timeout in ms before workers are killed. Set to `0` to disable.</td>
             </tr>
             <tr>
                 <td><code>ocrConfig.timeout</code></td>
