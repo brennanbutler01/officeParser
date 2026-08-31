@@ -11,7 +11,7 @@
     <meta property="og:title"
         content="officeParser | The Most Versatile Office Parser & Generator for Node.js & Browser">
     <meta property="og:description"
-        content="The industry's first dual-purpose Office Parser & Generator. Extract structured AST from 12+ formats (including EPUB) and generate DOCX, RAG-ready Markdown, HTML, EPUB, and high-fidelity PDF with native document awareness.">
+        content="The industry's first dual-purpose Office Parser & Generator. Extract structured AST from 12+ formats (including EPUB) and generate DOCX, ODT, RAG-ready Markdown, HTML, EPUB, and high-fidelity PDF with native document awareness.">
     <meta property="og:image"
         content="https://raw.githubusercontent.com/harshankur/officeParser/master/docs/favicon.png">
     <meta property="og:url" content="https://officeparser.harshankur.com">
@@ -3679,6 +3679,7 @@
                                 <div class="dropdown-menu-divider"></div>
                                 <button class="dropdown-menu-item" data-export-fmt="pdf">PDF (print)</button>
                                 <button class="dropdown-menu-item" data-export-fmt="docx">DOCX (.docx)</button>
+                                <button class="dropdown-menu-item" data-export-fmt="odt">ODT (.odt)</button>
                                 <button class="dropdown-menu-item" data-export-fmt="epub">EPUB (.epub)</button>
                             </div>
                         </div>
@@ -6010,6 +6011,17 @@
                             const result = await window.officeParser.OfficeGenerator.generate(window.currentAst, 'docx', genConfig);
                             const name = (lastFileName || 'output').replace(/\.[^/.]+$/, "") + '.docx';
                             downloadFile(result.value, name, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                        }
+                    },
+                    odt: {
+                        kind: 'binary',
+                        run: async () => {
+                            // OdtGenerator writes an OpenDocument Text package straight from the AST; it ignores
+                            // the html-specific keys in the derived config.
+                            const genConfig = htmlDerivedConfig(false);
+                            const result = await window.officeParser.OfficeGenerator.generate(window.currentAst, 'odt', genConfig);
+                            const name = (lastFileName || 'output').replace(/\.[^/.]+$/, "") + '.odt';
+                            downloadFile(result.value, name, 'application/vnd.oasis.opendocument.text');
                         }
                     }
                 }
