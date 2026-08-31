@@ -3,6 +3,7 @@ import { ConversionResult, GeneratorConfig, OfficeParserAST } from '../types.js'
 import { BaseGenerator } from './BaseGenerator.js';
 import { HtmlGenerator } from './HtmlGenerator.js';
 import { escapeXml } from '../utils/sanitize.js';
+import { decodeBase64, resolveZipInstant } from '../utils/officeGenUtils.js';
 
 const VOID_TAGS = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'];
 
@@ -118,14 +119,6 @@ const MIME_EXT: Record<string, string> = {
     'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/tiff': 'tiff'
 };
 
-/** Decodes a base64 string to raw bytes, cross-env (atob exists in Node 16+ and browsers). */
-const decodeBase64 = (b64: string): Uint8Array => {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-};
-
 /**
  * Generates a minimal, valid EPUB 3 file from an AST.
  *
@@ -162,35 +155,7 @@ export class EpubGenerator extends BaseGenerator<'epub'> {
      * emits milliseconds, so they are stripped.
      */
     private resolveModified(): { iso: string; mtime: Date } {
-        const raw: unknown = this.effectiveMetadata.modified;
-        let resolved: Date | null = null;
-        if (raw instanceof Date && !isNaN(raw.getTime())) {
-            resolved = raw;
-        } else if (typeof raw === 'string' && raw !== '') {
-            // A parser may hand back a date-like string rather than a Date.
-            const parsed = new Date(raw);
-            if (!isNaN(parsed.getTime())) resolved = parsed;
-        }
-        resolved ??= new Date();
-
-        return {
-            iso: resolved.toISOString().replace(/\.\d+Z$/, 'Z'),
-            mtime: this.clampToZipRange(resolved),
-        };
-    }
-
-    /**
-     * Zip's DOS timestamp field cannot represent dates outside 1980-2099, and fflate throws
-     * rather than clamping. A document legitimately carrying a date outside that window (an
-     * unset/epoch-zero mtime is the common case) must not take EPUB generation down with it.
-     */
-    private clampToZipRange(date: Date): Date {
-        const MIN = Date.UTC(1980, 0, 1);
-        const MAX = Date.UTC(2099, 11, 31, 23, 59, 59);
-        const t = date.getTime();
-        if (t < MIN) return new Date(MIN);
-        if (t > MAX) return new Date(MAX);
-        return date;
+        return resolveZipInstant(this.effectiveMetadata.modified);
     }
 
     async generate(): Promise<ConversionResult<'epub'>> {

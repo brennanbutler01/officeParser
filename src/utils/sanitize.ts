@@ -263,15 +263,16 @@ export function sanitizeRtfUrl(url: string): string {
 }
 
 /**
- * Validates a hyperlink URL for a DOCX package, returning the raw (un-escaped) validated string or
- * `''` when rejected. The caller is responsible for `escapeXml`-ing the result at the relationship
- * `Target` sink (unlike {@link sanitizeRtfUrl}, which RTF-escapes because RTF has no separate
- * attribute-quoting layer). The validation policy is identical to RTF's, and for the same reason: a
- * DOCX hyperlink is the same click target as an RTF field, so a UNC target (`\\host\share`) is a
- * live SMB/NTLM credential-leak vector in Word, not the inert relative path a browser sees. Only
+ * Validates a hyperlink URL for an office package (DOCX/ODT), returning the raw (un-escaped)
+ * validated string or `''` when rejected. The caller is responsible for `escapeXml`-ing the result
+ * at the sink (the relationship `Target` in DOCX, the `xlink:href` attribute in ODT) - unlike
+ * {@link sanitizeRtfUrl}, which RTF-escapes because RTF has no separate attribute-quoting layer. The
+ * validation policy is identical to RTF's, and for the same reason: an office-document hyperlink is
+ * the same click target as an RTF field, so a UNC target (`\\host\share`) is a live SMB/NTLM
+ * credential-leak vector in Word and Writer, not the inert relative path a browser sees. Only
  * `https`/`http`/`mailto`/`tel` schemes (plus relative and fragment URLs) are allowed.
  */
-export function sanitizeDocxUrl(url: string): string {
+export function sanitizeOfficePackageUrl(url: string): string {
     if (typeof url !== 'string') return '';
     const stripped = url.trim().replace(/[\x00-\x1F\x7F]+/g, '');
     if (/^[\\/]{2}[^\\/]/.test(stripped)) return '';   // UNC
@@ -279,6 +280,9 @@ export function sanitizeDocxUrl(url: string): string {
     if (schemeMatch && !/^(https?|mailto|tel)$/i.test(schemeMatch[1])) return '';
     return stripped;
 }
+
+/** @deprecated Named after one consumer; use {@link sanitizeOfficePackageUrl}. Kept for surface stability. */
+export const sanitizeDocxUrl = sanitizeOfficePackageUrl;
 
 /**
  * Removes characters that are illegal in XML 1.0 even when escaped, so a single stray control byte
