@@ -477,8 +477,8 @@ export interface PdfParserConfig {
     headingDetection?: 'auto' | 'font-size' | 'off';
     /**
      * Restrict parsing to a subset of pages, e.g. '1-3,7' or '2,4,6'. Pages are 1-based and the
-     * output keeps their original page numbers. An empty string parses all pages; an unparseable
-     * value warns and parses all pages.
+     * output keeps their original page numbers. An empty string parses all pages; an unparseable or
+     * out-of-order value is ignored and all pages are parsed.
      *
      * Default is '' (all pages).
      */

@@ -24,7 +24,7 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
         if (this.config.pdfConfig.engine === 'native') {
             if (this.config.abortSignal?.aborted) throw getAbortError();
             try {
-                const value = await renderNativePdf(this.ast, this.config);
+                const value = await renderNativePdf(this.ast, this.config, this.effectiveMetadata);
                 return { value, messages: this.messages };
             } catch (err: any) {
                 if (this.config.abortSignal?.aborted) throw getAbortError();

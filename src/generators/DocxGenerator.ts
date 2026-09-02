@@ -1,8 +1,8 @@
 import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, DocxGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
-import { escapeXml, isSafeStyleMapTag, sanitizeDocxUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, hexColor, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 
 /** Page dimensions in twips (1/20 pt), portrait. */
@@ -64,6 +64,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private numbering: { listId: string; numId: number; levels: Map<number, 'ordered' | 'unordered'>; startAt: Map<number, number> }[] = [];
     private numByListId = new Map<string, number>();
     private needsNumbering = false;
+    private syntheticListRun = 0; // per-run id counter for lists that carry no listId
     private mathWarned = false;
 
     constructor(ast: OfficeParserAST, config?: GeneratorConfig<'docx'>) {
@@ -173,28 +174,34 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private async renderBlocks(nodes: OfficeContentNode[] | undefined): Promise<string> {
         let out = '';
         let prevPaginated: string | null = null;
+        let prevBareList = false; // previous block was a list carrying no listId
         for (const node of nodes || []) {
             checkAbortSignal(this.config.abortSignal);
             const override = await this.handleOnNode(node);
-            if (override === false) continue;
-            if (typeof override === 'string') { out += override; prevPaginated = null; continue; }
+            if (override === false) { prevBareList = false; continue; }
+            if (typeof override === 'string') { out += override; prevPaginated = null; prevBareList = false; continue; }
             // Preserve source pagination: a page break between consecutive page (or slide) nodes.
             if ((node.type === 'page' || node.type === 'slide') && prevPaginated === node.type) {
                 out += '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
             }
-            out += await this.renderBlockNode(node);
+            // A run of consecutive lists that carry no listId of their own gets one synthetic id, so a
+            // later separate list starts fresh instead of continuing the first one's numbering.
+            const isBareList = node.type === 'list' && !(node.metadata as any)?.listId;
+            if (isBareList && !prevBareList) this.syntheticListRun++;
+            out += await this.renderBlockNode(node, isBareList ? `__run${this.syntheticListRun}` : undefined);
             prevPaginated = (node.type === 'page' || node.type === 'slide') ? node.type : null;
+            prevBareList = isBareList;
         }
         return out;
     }
 
-    private async renderBlockNode(node: OfficeContentNode): Promise<string> {
+    private async renderBlockNode(node: OfficeContentNode, bareListId?: string): Promise<string> {
         switch (node.type) {
             case 'paragraph': return this.paragraph(node);
             case 'heading': return this.paragraph(node, this.headingStyle(node));
-            case 'list': return this.listItem(node);
+            case 'list': return this.listItem(node, bareListId);
             case 'table': return this.table(node);
-            case 'image': return this.wrapP(await this.imageRun(node), this.jc((node.metadata as any)?.align));
+            case 'image': { const r = await this.imageRun(node); return r ? this.wrapP(r, this.jc((node.metadata as any)?.align)) : ''; }
             case 'code': return this.codeBlock(node);
             case 'break': return this.blockBreak(node);
             case 'note': return this.standaloneNote(node); // orphan note definition: keep it as a trailing note
@@ -218,6 +225,12 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 return '';
             }
         }
+    }
+
+    /** Body blocks of a note/comment: its children, or a synthesized paragraph from its `text`. */
+    private bodyBlocks(node: OfficeContentNode): OfficeContentNode[] {
+        if (node.children && node.children.length) return node.children;
+        return [{ type: 'paragraph', text: node.text || '' } as OfficeContentNode];
     }
 
     // ── paragraph family ─────────────────────────────────────────────────────────
@@ -302,29 +315,27 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     // ── inline runs ──────────────────────────────────────────────────────────────
 
     private async renderInline(nodes: OfficeContentNode[]): Promise<string> {
+        // Group consecutive text children that share the same link into one hyperlink wrapper, while
+        // still running handleOnNode for every node (a grouped member can be overridden or skipped).
         let out = '';
-        // Group consecutive children that share the same link into one hyperlink wrapper.
-        let i = 0;
-        const items = nodes || [];
-        while (i < items.length) {
-            const node = items[i];
+        let group: OfficeContentNode[] = [];
+        let groupLink: any = null;
+        let groupType: any = null;
+        const flush = async () => { if (group.length) { out += await this.hyperlink(groupLink, groupType, group); group = []; groupLink = null; } };
+        for (const node of nodes || []) {
             const override = await this.handleOnNode(node);
-            if (override === false) { i++; continue; }
-            if (typeof override === 'string') { out += override; i++; continue; }
+            if (override === false) { await flush(); continue; }
+            if (typeof override === 'string') { await flush(); out += override; continue; }
             const link = (node.type === 'text') ? (node.metadata as any)?.link : undefined;
             if (link && node.type === 'text') {
-                let j = i;
-                const group: OfficeContentNode[] = [];
-                while (j < items.length && items[j].type === 'text' && (items[j].metadata as any)?.link === link) {
-                    group.push(items[j]); j++;
-                }
-                out += await this.hyperlink(link, (node.metadata as any)?.linkType, group);
-                i = j;
+                if (group.length && groupLink === link) group.push(node);
+                else { await flush(); group = [node]; groupLink = link; groupType = (node.metadata as any)?.linkType; }
                 continue;
             }
+            await flush();
             out += await this.inlineNode(node);
-            i++;
         }
+        await flush();
         return out;
     }
 
@@ -342,17 +353,17 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         }
     }
 
+    /** Text as run content: newlines become `<w:br/>` and tabs `<w:tab/>`, literal segments escaped. */
+    private runContent(text: string): string {
+        return text.split(/\r\n|\r|\n/).map((line, li) => {
+            const parts = line.split('\t').map(seg => seg ? `<w:t xml:space="preserve">${xmlText(seg)}</w:t>` : '').join('<w:tab/>');
+            return (li > 0 ? '<w:br/>' : '') + parts;
+        }).join('');
+    }
+
     private run(text: string, fmt: TextFormatting | undefined): string {
         if (!text) return '';
-        const rPr = this.buildRPr(fmt);
-        // Split on newlines into <w:br/>-separated segments.
-        const segs = text.split(/\r\n|\r|\n/);
-        let t = '';
-        segs.forEach((seg, idx) => {
-            if (idx > 0) t += '<w:br/>';
-            if (seg) t += `<w:t xml:space="preserve">${xmlText(seg)}</w:t>`;
-        });
-        return `<w:r>${rPr}${t}</w:r>`;
+        return `<w:r>${this.buildRPr(fmt)}${this.runContent(text)}</w:r>`;
     }
 
     private textRuns(node: OfficeContentNode): string {
@@ -392,16 +403,15 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             const name = this.anchorName(link.replace(/^#/, ''));
             return `<w:hyperlink w:anchor="${escapeXml(name)}">${runs}</w:hyperlink>${trailing}`;
         }
-        const safe = sanitizeDocxUrl(link);
+        const safe = sanitizeOfficePackageUrl(link);
         if (!safe) return group.map(n => this.textRuns(n)).join('') + trailing;
-        const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(safe), 'External');
+        const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(encUrl(safe)), 'External');
         return `<w:hyperlink r:id="${rid}">${runs}</w:hyperlink>${trailing}`;
     }
 
     private styledRun(text: string, fmt: TextFormatting | undefined, styleId: string): string {
         if (!text) return '';
-        const rPr = this.buildRPr(fmt, styleId);
-        return `<w:r>${rPr}<w:t xml:space="preserve">${xmlText(text)}</w:t></w:r>`;
+        return `<w:r>${this.buildRPr(fmt, styleId)}${this.runContent(text)}</w:r>`;
     }
 
     // ── notes & comments ─────────────────────────────────────────────────────────
@@ -425,7 +435,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (!this.noteBodies.has(key)) {
             (kind === 'endnote' ? this.endnotes : this.footnotes).push({ key, kind, node: note });
             const owner = kind === 'endnote' ? 'word/endnotes.xml' : 'word/footnotes.xml';
-            const body = (await this.withRelOwner(owner, () => this.renderBlocks(note.children))) || '<w:p/>';
+            const body = (await this.withRelOwner(owner, () => this.renderBlocks(this.bodyBlocks(note)))) || '<w:p/>';
             this.noteBodies.set(key, this.withNoteMarker(this.styleNoteBody(body), kind));
         }
         const id = this.noteId(key);
@@ -469,7 +479,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private async registerComment(node: OfficeContentNode, ownParagraph: boolean): Promise<string> {
         const id = this.commentCounter++;
         this.comments.push({ id, node });
-        const body = (await this.withRelOwner('word/comments.xml', () => this.renderBlocks(node.children))) || '<w:p/>';
+        const body = (await this.withRelOwner('word/comments.xml', () => this.renderBlocks(this.bodyBlocks(node)))) || '<w:p/>';
         this.commentBodies.set(id, body);
         const ref = `<w:r><w:commentReference w:id="${id}"/></w:r>`;
         return ownParagraph ? `<w:p>${ref}</w:p>` : ref;
@@ -492,8 +502,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
      * lazily during rendering (not a pre-pass) so lists inside notes, comments, headers and footers -
      * which the content walk never reaches - still get a numbering entry and a numbering.xml part.
      */
-    private ensureNumbering(meta: any): number {
-        const listId = String(meta?.listId ?? 'pdf-list');
+    private ensureNumbering(meta: any, bareListId?: string): number {
+        const listId = String(meta?.listId ?? bareListId ?? 'pdf-list');
         let numId = this.numByListId.get(listId);
         let entry: { listId: string; numId: number; levels: Map<number, 'ordered' | 'unordered'>; startAt: Map<number, number> };
         if (numId === undefined) {
@@ -513,9 +523,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         return numId;
     }
 
-    private async listItem(node: OfficeContentNode): Promise<string> {
+    private async listItem(node: OfficeContentNode, bareListId?: string): Promise<string> {
         const meta = node.metadata as any;
-        const numId = this.ensureNumbering(meta);
+        const numId = this.ensureNumbering(meta, bareListId);
         const lvl = Math.max(0, Math.min(8, meta?.indentation | 0));
         const numPr = `<w:numPr><w:ilvl w:val="${lvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
         const pPr = this.buildPPr({ style: 'ListParagraph', numPr, meta });
@@ -568,14 +578,13 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
         const active = new Map<number, number>(); // grid col -> remaining vMerge rows
         let trs = '';
-        for (const row of rows) {
+        for (let ri = 0; ri < rows.length; ri++) {
+            const row = rows[ri];
             const cells = (row.children || []).filter(c => c.type === 'cell');
-            const isHeaderRow = (row.metadata as any)?.isHeader
-                || (cells.length > 0 && cells.every(c => (c.metadata as any)?.isHeader));
-            const trPr = isHeaderRow ? '<w:trPr><w:tblHeader/></w:trPr>' : '';
+            const trPr = isHeaderRow(row, ri === 0) ? '<w:trPr><w:tblHeader/></w:trPr>' : '';
             let tcs = '';
             let col = 0, ci = 0;
-            while (ci < cells.length || [...active.entries()].some(([c]) => c >= col)) {
+            while (ci < cells.length || [...active.keys()].some(c => c >= col)) {
                 if ((active.get(col) || 0) > 0) {
                     // continuation cell for an active vertical merge
                     tcs += `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:vMerge/></w:tcPr><w:p/></w:tc>`;
@@ -584,7 +593,15 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                     col++;
                     continue;
                 }
-                if (ci >= cells.length) break;
+                if (ci >= cells.length) {
+                    // No explicit cells left. A vertical merge is still pending at a later column, so
+                    // fill this gap column with an empty cell and advance until the merges are placed;
+                    // breaking here would drop the continuation and shift the grid a row down.
+                    if (![...active.keys()].some(c => c > col)) break;
+                    tcs += `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p/></w:tc>`;
+                    col++;
+                    continue;
+                }
                 const cell = cells[ci++];
                 const cmeta = cell.metadata as any;
                 const colSpan = Math.max(1, Math.min(cols, cmeta?.colSpan || 1));
@@ -616,9 +633,13 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             let col = 0;
             const cells = (row.children || []).filter(c => c.type === 'cell');
             let ci = 0;
-            while (ci < cells.length || [...active.values()].some(v => v > 0)) {
+            while (ci < cells.length || [...active.keys()].some(c => c >= col)) {
                 if ((active.get(col) || 0) > 0) { active.set(col, active.get(col)! - 1); if (active.get(col)! <= 0) active.delete(col); col++; continue; }
-                if (ci >= cells.length) break;
+                if (ci >= cells.length) {
+                    if (![...active.keys()].some(c => c > col)) break;
+                    col++; // gap column before a still-pending vertical merge
+                    continue;
+                }
                 const cmeta = cells[ci++].metadata as any;
                 const colSpan = Math.max(1, Math.min(1000, cmeta?.colSpan || 1));
                 const rowSpan = Math.max(1, Math.min(1000, cmeta?.rowSpan || 1));
@@ -663,8 +684,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
         } else if (meta?.url) {
             // Remote-only image: degrade to a link on the alt text (never fetch bytes: SSRF).
-            const safe = sanitizeDocxUrl(meta.url);
-            if (safe) { const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(safe), 'External'); drawing = `<w:hyperlink r:id="${rid}">${this.styledRun(meta.altText || safe, undefined, 'Hyperlink')}</w:hyperlink>`; }
+            const safe = sanitizeOfficePackageUrl(meta.url);
+            if (safe) { const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(encUrl(safe)), 'External'); drawing = `<w:hyperlink r:id="${rid}">${this.styledRun(meta.altText || safe, undefined, 'Hyperlink')}</w:hyperlink>`; }
         }
         // No renderable image (unresolvable/unsupported attachment, no url): keep the alt text or OCR
         // so the content is not silently lost.
@@ -771,13 +792,13 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
     private embed(node: OfficeContentNode): string {
         const meta = node.metadata as any;
-        const url = meta?.url ? sanitizeDocxUrl(meta.url) : '';
+        const url = meta?.url ? sanitizeOfficePackageUrl(meta.url) : '';
         if (!url) {
             this.warn(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, { format: 'docx', feature: 'embed' });
             const fallback = meta?.label || node.text || this.getNodeText(node);
             return fallback ? `<w:p>${this.styledRun(fallback, undefined, '')}</w:p>` : '';
         }
-        const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(url), 'External');
+        const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(encUrl(url)), 'External');
         return `<w:p><w:hyperlink r:id="${rid}">${this.styledRun(meta?.label || url, undefined, 'Hyperlink')}</w:hyperlink></w:p>`;
     }
 

@@ -13,6 +13,7 @@
 import { OcrConfig } from '../types.js';
 import { isBrowser } from './envUtils.js';
 import { getAbortError } from './errorUtils.js';
+import { median } from './numberUtils.js';
 
 /**
  * Internal interface for tracking jobs in the scheduler queue.
@@ -36,13 +37,6 @@ interface ManagedWorker {
     lastUsed: number;
     isBusy: boolean;
     activeJob?: OcrJob;
-}
-
-/** Median of a numeric list (0 for empty). */
-function median(values: number[]): number {
-    if (!values.length) return 0;
-    const s = [...values].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
 }
 
 /**

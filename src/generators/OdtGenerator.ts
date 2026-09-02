@@ -2,7 +2,7 @@ import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, GeneratorConfig, ImageMode, OdtGeneratorConfig, OfficeContentNode, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, hexColor, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 
 /** Page dimensions in inches, portrait. */
@@ -37,6 +37,20 @@ function fmtIn(n: number): string { return `${fmtNum(n)}in`; }
 
 /** Escapes text/attribute content after stripping XML-illegal characters. */
 function xmlText(s: string | undefined): string { return escapeXml(stripInvalidXmlChars(s ?? '')); }
+
+/**
+ * Collapses a concatenated ` name="value"` attribute string so no name appears twice - a duplicate
+ * attribute (e.g. `fo:margin-left` contributed by both an admonition border and a paragraph indent)
+ * is malformed XML. Last value wins; earliest position is kept, so output is deterministic per input.
+ */
+function dedupeXmlAttrs(s: string): string {
+    if (!s) return '';
+    const map = new Map<string, string>();
+    for (const m of s.matchAll(/\s([\w:-]+)="([^"]*)"/g)) map.set(m[1], m[2]);
+    let out = '';
+    for (const [k, v] of map) out += ` ${k}="${v}"`;
+    return out;
+}
 
 /** Quotes a font family for `svg:font-family` when it contains spaces. */
 function quoteFontFamily(name: string): string { return /\s/.test(name) ? `'${name}'` : name; }
@@ -190,15 +204,10 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         for (let idx = 0; idx < items.length; idx++) {
             const node = items[idx];
             checkAbortSignal(this.config.abortSignal);
-            const override = await this.handleOnNode(node);
-            if (override === false) { prevPaginated = null; continue; }
-            if (typeof override === 'string') { out += override; prevPaginated = null; continue; }
-            if ((node.type === 'page' || node.type === 'slide') && prevPaginated === node.type) {
-                out += `<text:p text:style-name="${this.pageBreakStyle()}"/>`;
-            }
             if (node.type === 'list') {
                 // Consume the maximal run of consecutive sibling lists sharing a listId, so the parser
-                // rejoins them (it keys the logical list off the shared list style name).
+                // rejoins them (it keys the logical list off the shared list style name). handleOnNode
+                // is applied per item inside renderListRun, so every item still gets the callback.
                 const listId = String((node.metadata as any)?.listId ?? 'odt-list');
                 const run: OfficeContentNode[] = [];
                 while (idx < items.length && items[idx].type === 'list'
@@ -209,6 +218,12 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
                 out += await this.renderListRun(run);
                 prevPaginated = null;
                 continue;
+            }
+            const override = await this.handleOnNode(node);
+            if (override === false) { prevPaginated = null; continue; }
+            if (typeof override === 'string') { out += override; prevPaginated = null; continue; }
+            if ((node.type === 'page' || node.type === 'slide') && prevPaginated === node.type) {
+                out += `<text:p text:style-name="${this.pageBreakStyle()}"/>`;
             }
             out += await this.renderBlockNode(node);
             prevPaginated = (node.type === 'page' || node.type === 'slide') ? node.type : null;
@@ -247,6 +262,12 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         }
     }
 
+    /** Body blocks of a note/comment: its children, or a synthesized paragraph from its `text`. */
+    private bodyBlocks(node: OfficeContentNode): OfficeContentNode[] {
+        if (node.children && node.children.length) return node.children;
+        return [{ type: 'paragraph', text: node.text || '' } as OfficeContentNode];
+    }
+
     // ── paragraph family ─────────────────────────────────────────────────────────
 
     private async paragraph(node: OfficeContentNode, opts: { named?: string; extraAttrs?: string; boldTerm?: boolean } = {}): Promise<string> {
@@ -276,9 +297,10 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
 
     /** Interns an automatic paragraph style from an attribute string, optionally parented to a named style. */
     private internPara(propsAttrs: string, parentName?: string): string {
-        if (!propsAttrs && !parentName) return '';
-        if (!propsAttrs && parentName) return parentName;
-        const props = `<style:paragraph-properties${propsAttrs}/>`;
+        const deduped = dedupeXmlAttrs(propsAttrs);
+        if (!deduped && !parentName) return '';
+        if (!deduped && parentName) return parentName;
+        const props = `<style:paragraph-properties${deduped}/>`;
         const extra = parentName ? ` style:parent-style-name="${parentName}"` : '';
         return this.activeStyles.intern('paragraph', 'P', props, extra);
     }
@@ -407,7 +429,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         }
         const safe = sanitizeOfficePackageUrl(link);
         if (!safe) return spans + trailing;
-        return `<text:a xlink:type="simple" xlink:href="${xmlText(safe)}">${spans}</text:a>${trailing}`;
+        return `<text:a xlink:type="simple" xlink:href="${xmlText(encUrl(safe))}">${spans}</text:a>${trailing}`;
     }
 
     private inlineCode(node: OfficeContentNode): string {
@@ -437,7 +459,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
     private async note(node: OfficeContentNode, cls: 'footnote' | 'endnote'): Promise<string> {
         const ord = cls === 'footnote' ? ++this.footnoteOrd : ++this.endnoteOrd;
         const id = `${cls === 'footnote' ? 'ftn' : 'edn'}${ord}`;
-        const body = this.styleNoteBody((await this.renderBlocks(node.children)) || '<text:p/>');
+        const body = this.styleNoteBody((await this.renderBlocks(this.bodyBlocks(node))) || '<text:p/>');
         return `<text:note text:id="${id}" text:note-class="${cls}"><text:note-citation>${ord}</text:note-citation><text:note-body>${body}</text:note-body></text:note>`;
     }
 
@@ -467,7 +489,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         const creator = meta?.author ? `<dc:creator>${xmlText(meta.author)}</dc:creator>` : '';
         const date = toW3CDTF(meta?.date);
         const dateEl = date ? `<dc:date>${date}</dc:date>` : '';
-        const body = (await this.renderBlocks(node.children)) || '<text:p/>';
+        const body = (await this.renderBlocks(this.bodyBlocks(node))) || '<text:p/>';
         return `<office:annotation office:name="${name}">${creator}${dateEl}${body}</office:annotation>`;
     }
 
@@ -498,6 +520,8 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         let out = '';
         let depth = -1;
         for (const item of items) {
+            const override = await this.handleOnNode(item);
+            if (override === false) continue; // omit this item; the list continues
             const meta = item.metadata as any;
             const lvl = Math.max(0, Math.min(9, meta?.indentation | 0));
             this.registerListLevel(listId, lvl, meta);
@@ -515,6 +539,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
                 out += '</text:list-item><text:list-item>';
                 depth = lvl;
             }
+            if (typeof override === 'string') { out += `<text:p>${override}</text:p>`; continue; }
             let prefix = '';
             if (meta?.isTask) prefix = this.span(meta.checked ? '☑ ' : '☐ ', undefined);
             const blockRefs = (await this.notesFor(item)) + (await this.commentsFor(item));
@@ -552,12 +577,13 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
 
         const active = new Map<number, number>();
         const rendered: { xml: string; header: boolean }[] = [];
-        for (const row of rows) {
+        for (let ri = 0; ri < rows.length; ri++) {
+            const row = rows[ri];
             const cells = (row.children || []).filter(c => c.type === 'cell');
-            const header = !!((row.metadata as any)?.isHeader || (cells.length > 0 && cells.every(c => (c.metadata as any)?.isHeader)));
+            const header = isHeaderRow(row, ri === 0);
             let cellsXml = '';
             let col = 0, ci = 0;
-            while (ci < cells.length || [...active.entries()].some(([c]) => c >= col)) {
+            while (ci < cells.length || [...active.keys()].some(c => c >= col)) {
                 if ((active.get(col) || 0) > 0) {
                     cellsXml += '<table:covered-table-cell/>';
                     active.set(col, active.get(col)! - 1);
@@ -565,7 +591,14 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
                     col++;
                     continue;
                 }
-                if (ci >= cells.length) break;
+                if (ci >= cells.length) {
+                    // No explicit cells left, but a vertical merge is still pending at a later column:
+                    // fill this gap with an empty cell and advance, so the covered cell lands correctly.
+                    if (![...active.keys()].some(c => c > col)) break;
+                    cellsXml += '<table:table-cell><text:p/></table:table-cell>';
+                    col++;
+                    continue;
+                }
                 const cell = cells[ci++];
                 const cmeta = cell.metadata as any;
                 const colSpan = Math.max(1, Math.min(cols, cmeta?.colSpan || 1));
@@ -601,9 +634,13 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
             let col = 0;
             const cells = (row.children || []).filter(c => c.type === 'cell');
             let ci = 0;
-            while (ci < cells.length || [...active.values()].some(v => v > 0)) {
+            while (ci < cells.length || [...active.keys()].some(c => c >= col)) {
                 if ((active.get(col) || 0) > 0) { active.set(col, active.get(col)! - 1); if (active.get(col)! <= 0) active.delete(col); col++; continue; }
-                if (ci >= cells.length) break;
+                if (ci >= cells.length) {
+                    if (![...active.keys()].some(c => c > col)) break;
+                    col++; // gap column before a still-pending vertical merge
+                    continue;
+                }
                 const cmeta = cells[ci++].metadata as any;
                 const colSpan = Math.max(1, Math.min(1000, cmeta?.colSpan || 1));
                 const rowSpan = Math.max(1, Math.min(1000, cmeta?.rowSpan || 1));
@@ -663,10 +700,10 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
             const title = meta?.altText ? `<svg:title>${xmlText(meta.altText)}</svg:title>` : '';
             frame = `<draw:frame draw:name="${frameName}" text:anchor-type="as-char" svg:width="${fmtPt(w)}" svg:height="${fmtPt(h)}" draw:z-index="0">`
                 + `<draw:image xlink:href="${media.href}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${title}</draw:frame>`;
-            if (meta?.link) { const safe = sanitizeOfficePackageUrl(meta.link); if (safe) frame = `<draw:a xlink:type="simple" xlink:href="${xmlText(safe)}">${frame}</draw:a>`; }
+            if (meta?.link) { const safe = sanitizeOfficePackageUrl(meta.link); if (safe) frame = `<draw:a xlink:type="simple" xlink:href="${xmlText(encUrl(safe))}">${frame}</draw:a>`; }
         } else if (meta?.url) {
             const safe = sanitizeOfficePackageUrl(meta.url);
-            if (safe) frame = `<text:a xlink:type="simple" xlink:href="${xmlText(safe)}">${this.span(meta.altText || safe, undefined)}</text:a>`;
+            if (safe) frame = `<text:a xlink:type="simple" xlink:href="${xmlText(encUrl(safe))}">${this.span(meta.altText || safe, undefined)}</text:a>`;
         }
         if (!frame) { const fb = meta?.altText || ocr; return fb ? this.span(fb, undefined) : ''; }
         if (mode === 'image+ocrtext' && ocr) return frame + this.span('\n' + ocr, undefined);
@@ -778,7 +815,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
             const fb = meta?.label || node.text || this.getNodeText(node);
             return fb ? `<text:p>${this.span(fb, undefined)}</text:p>` : '';
         }
-        return `<text:p><text:a xlink:type="simple" xlink:href="${xmlText(url)}">${this.span(meta?.label || url, undefined)}</text:a></text:p>`;
+        return `<text:p><text:a xlink:type="simple" xlink:href="${xmlText(encUrl(url))}">${this.span(meta?.label || url, undefined)}</text:a></text:p>`;
     }
 
     // ── styleMap / named-style helpers ────────────────────────────────────────────

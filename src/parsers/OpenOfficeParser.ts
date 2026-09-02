@@ -1976,21 +1976,25 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
     }
 
 
-    // Master-page headers/footers (ODT). ODF keeps them in styles.xml, not content.xml, so they
-    // are otherwise invisible to every destination. Parse the first master page's header/footer
-    // through the same block traversal, into `auxiliary` (the shape WordParser populates).
+    // Master-page headers/footers (ODT only). ODF text documents keep authored headers/footers in
+    // styles.xml, not content.xml, so they are otherwise invisible to every destination. Restricted
+    // to `odt`: a Calc (ODS) or Impress (ODP) master page is print furniture built from auto-fields
+    // (`text:sheet-name`, `text:page-number`), whose placeholder text (e.g. LibreOffice's "???")
+    // would otherwise leak in as literal header content. Only the first master page's visible
+    // header/footer is read, through the same block traversal (the shape WordParser populates).
     let auxiliary: OfficeAuxiliaryContent | undefined;
-    if (!config.ignoreHeadersAndFooters && stylesDom) {
+    if (!config.ignoreHeadersAndFooters && stylesDom && fileType === 'odt') {
         const stylesXmlStr = stylesFile ? stylesFile.content.toString() : undefined;
         const masterStyles = getFirstElementByTagName(stylesDom, "office:master-styles");
         const masterPage = masterStyles ? getFirstElementByTagName(masterStyles, "style:master-page") : undefined;
         if (masterPage) {
+            const visible = (el: Element | null | undefined): el is Element => !!el && el.getAttribute("style:display") !== "false";
             const headerEl = getFirstElementByTagName(masterPage, "style:header");
             const footerEl = getFirstElementByTagName(masterPage, "style:footer");
             const headers: OfficeContentNode[] = [];
             const footers: OfficeContentNode[] = [];
-            if (headerEl) traverse(headerEl, headers, false, stylesXmlStr);
-            if (footerEl) traverse(footerEl, footers, false, stylesXmlStr);
+            if (visible(headerEl)) traverse(headerEl, headers, false, stylesXmlStr);
+            if (visible(footerEl)) traverse(footerEl, footers, false, stylesXmlStr);
             if (headers.length || footers.length) {
                 auxiliary = {
                     ...(headers.length ? { headers } : {}),

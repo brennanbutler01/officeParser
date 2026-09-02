@@ -9,6 +9,40 @@
  * @module officeGenUtils
  */
 
+import { OfficeContentNode } from '../types.js';
+
+/**
+ * Whether a table row should be treated as a header row, mirroring the HtmlGenerator heuristic so
+ * every generator agrees. A field a parser actually sets (never the test-only `isHeader`): the row's
+ * or a cell's `style` containing "header" (PDF `TH` cells set `style: 'header'`), an explicit
+ * `isHeader` flag, or - for the first row only, where it is a reliable signal - every cell bold.
+ */
+export function isHeaderRow(row: OfficeContentNode, isFirstRow: boolean): boolean {
+    const cells = (row.children || []).filter(c => c.type === 'cell');
+    if (!cells.length) return false;
+    const meta = row.metadata as any;
+    if (meta?.isHeader) return true;
+    if (typeof meta?.style === 'string' && meta.style.toLowerCase().includes('header')) return true;
+    const cellIsHeader = (c: OfficeContentNode) => {
+        const cm = c.metadata as any;
+        if (cm?.isHeader) return true;
+        return typeof cm?.style === 'string' && cm.style.toLowerCase().includes('header');
+    };
+    if (cells.every(cellIsHeader)) return true;
+    if (isFirstRow && cells.every(c => !!c.children?.length && c.children.every(ch => ch.formatting?.bold === true))) return true;
+    return false;
+}
+
+/**
+ * Percent-encodes URL-unsafe characters (space, `<>"{}|^[]` and the like) for an href/Target sink.
+ * `encodeURI` leaves existing `%xx` escapes and structural characters (`/?:@&=#`) intact, so it is
+ * idempotent for already-valid URLs; Word rejects some of those raw characters in a relationship
+ * Target with an "unreadable content" dialog. Falls back to the raw string if encoding throws.
+ */
+export function encUrl(url: string): string {
+    try { return encodeURI(url); } catch { return url; }
+}
+
 /** Decodes a base64 string to raw bytes, cross-env (atob exists in Node 16+ and browsers). */
 export function decodeBase64(b64: string): Uint8Array {
     const bin = atob(b64);

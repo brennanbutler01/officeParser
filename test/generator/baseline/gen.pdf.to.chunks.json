@@ -531,15 +531,7 @@
     }
   },
   {
-    "text": "Footnotes1 and endnotesi are automatically recognized and both are converted to endnotes, with backlinks for maximum ease of use in ebook devices.",
-    "metadata": {
-      "sourceType": "pdf",
-      "closestHeading": "Footnotes & Endnotes",
-      "pageNumber": 5
-    }
-  },
-  {
-    "text": "In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This conversion is handled automatically by calibre.",
+    "text": "Footnotes1 and endnotesi are automatically recognized and both are converted to endnotes, with backlinks for maximum ease of use in ebook devices.\nIn paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This conversion is handled automatically by calibre.",
     "metadata": {
       "sourceType": "pdf",
       "closestHeading": "Footnotes & Endnotes",

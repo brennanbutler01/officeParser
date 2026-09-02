@@ -59,11 +59,11 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
         for (const [key, value] of Object.entries(named)) {
             if (value !== undefined) (merged as any)[key] = value;
         }
-        // `language` has no slot on OfficeMetadata; parsers already surface it through
-        // nativeProperties, so an override belongs in the same place rather than widening the
-        // parser-side type for a generator concern. Generators reading `nativeProperties.language`
-        // then pick it up with no change.
+        // `language` lives in two places generators read from: the top-level `OfficeMetadata.language`
+        // (what PdfParser sets and the DOCX/ODT generators read) and `nativeProperties.language` (what
+        // EpubGenerator reads). Write the override to both so it reaches every generator.
         if (language !== undefined) {
+            merged.language = language;
             merged.nativeProperties = { ...(base.nativeProperties || {}), language };
         }
         if (custom && Object.keys(custom).length > 0) {

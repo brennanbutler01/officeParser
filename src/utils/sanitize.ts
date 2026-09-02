@@ -281,8 +281,6 @@ export function sanitizeOfficePackageUrl(url: string): string {
     return stripped;
 }
 
-/** @deprecated Named after one consumer; use {@link sanitizeOfficePackageUrl}. Kept for surface stability. */
-export const sanitizeDocxUrl = sanitizeOfficePackageUrl;
 
 /**
  * Removes characters that are illegal in XML 1.0 even when escaped, so a single stray control byte
@@ -293,7 +291,7 @@ export const sanitizeDocxUrl = sanitizeOfficePackageUrl;
 export function stripInvalidXmlChars(text: string): string {
     if (typeof text !== 'string') return '';
     return text
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F￾￿]/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F\uFFFE\uFFFF]/g, '')
         .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')   // high surrogate not followed by low
         .replace(/(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '$1'); // low surrogate not preceded by high
 }

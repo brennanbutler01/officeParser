@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { OfficeContentNode, OfficeParserAST } from '../src/types';
 import { parseXmlString } from '../src/utils/xmlUtils';
+import { decodeBase64, hexColor, isHeaderRow, lengthToPt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw } from '../src/utils/officeGenUtils';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1349,7 +1350,7 @@ async function testDocxGeneration(): Promise<void> {
             { type: 'paragraph', comments: [comment], children: [
                 { type: 'text', text: 'See ', notes: [footnote] } ] },
             { type: 'table', children: [
-                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, isHeader: true }, children: [{ type: 'text', text: 'H' }] }] },
+                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, style: 'header' }, children: [{ type: 'text', text: 'H' }] }] },
                 { type: 'row', children: [
                     { type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'R' }] },
                     { type: 'cell', children: [{ type: 'text', text: 'b' }] } ] },
@@ -1507,7 +1508,7 @@ async function testOdtGeneration(): Promise<void> {
             { type: 'paragraph', comments: [comment], children: [{ type: 'text', text: 'See ', notes: [footnote] }] },
             { type: 'paragraph', children: [{ type: 'text', text: 'a  b\tc', metadata: { link: '#intro', linkType: 'internal' } }] },
             { type: 'table', children: [
-                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, isHeader: true }, children: [{ type: 'text', text: 'H' }] }] },
+                { type: 'row', children: [{ type: 'cell', metadata: { colSpan: 2, style: 'header' }, children: [{ type: 'text', text: 'H' }] }] },
                 { type: 'row', children: [
                     { type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'R' }] },
                     { type: 'cell', children: [{ type: 'text', text: 'b' }] } ] },
@@ -1578,6 +1579,65 @@ async function testOdtGeneration(): Promise<void> {
     assert.ok(/<office:text><text:p\/><\/office:text>/.test(econtent), 'ODT empty: emits one empty paragraph');
 }
 
+/**
+ * Unit coverage for the shared package-generator helpers. `lengthToPt` in particular pins the
+ * units contract: a bare number/string is pixels, so a font size must carry 'pt' or it shrinks to
+ * 75% - the exact PDF-parser regression this locks down.
+ */
+async function testOfficeGenUtils(): Promise<void> {
+    assert.strictEqual(lengthToPt('11pt'), 11, 'lengthToPt: pt honored');
+    assert.strictEqual(lengthToPt('1in'), 72, 'lengthToPt: in -> pt');
+    assert.strictEqual(Math.round(lengthToPt('96px')!), 72, 'lengthToPt: px -> pt');
+    assert.strictEqual(lengthToPt('11'), 8.25, 'lengthToPt: a bare string is pixels (x0.75)');
+    assert.strictEqual(lengthToPt(96), 72, 'lengthToPt: a number is pixels');
+    assert.strictEqual(lengthToPt(undefined), null, 'lengthToPt: undefined -> null');
+
+    assert.strictEqual(hexColor('#f00'), 'FF0000', 'hexColor: #rgb expands');
+    assert.strictEqual(hexColor('112233'), '112233', 'hexColor: bare 6-hex');
+    assert.strictEqual(hexColor('red'), null, 'hexColor: named -> null');
+    assert.strictEqual(hexColor('red"/><x'), null, 'hexColor: hostile -> null');
+
+    assert.strictEqual(toBookmarkNameRaw('a b!'), 'a_b_', 'toBookmarkNameRaw sanitizes to [A-Za-z0-9_]');
+    assert.ok(/^[A-Za-z_]/.test(toBookmarkNameRaw('9x')), 'toBookmarkNameRaw: forces a leading letter/_');
+
+    const sz = sniffImageSize(decodeBase64(TINY_PNG_B64));
+    assert.ok(sz && sz.w === 1 && sz.h === 1, 'sniffImageSize: reads a 1x1 PNG');
+
+    const a = resolveZipInstant(new Date('2024-01-01T00:00:00Z'));
+    assert.strictEqual(a.iso, '2024-01-01T00:00:00Z', 'resolveZipInstant: whole-second ISO');
+    assert.strictEqual(a.iso, resolveZipInstant('2024-01-01T00:00:00Z').iso, 'resolveZipInstant: Date and string agree');
+    assert.strictEqual(resolveZipInstant(new Date('1900-01-01')).mtime.getUTCFullYear(), 1980, 'resolveZipInstant: clamps below the zip 1980 floor');
+
+    // Header-row inference from the signals parsers actually set (not the test-only `isHeader`).
+    const cell = (text: string, style?: string, bold?: boolean) => ({ type: 'cell', metadata: style ? { style } : undefined, children: [{ type: 'text', text, formatting: bold ? { bold: true } : undefined }] });
+    const row = (cells: any[], meta?: any) => ({ type: 'row', metadata: meta, children: cells });
+    assert.ok(isHeaderRow(row([cell('H', 'header')]) as any, true), 'isHeaderRow: cell style "header" (PDF TH)');
+    assert.ok(isHeaderRow(row([cell('H')], { style: 'Table Header' }) as any, false), 'isHeaderRow: row style contains "header"');
+    assert.ok(isHeaderRow(row([cell('A', undefined, true), cell('B', undefined, true)]) as any, true), 'isHeaderRow: an all-bold first row');
+    assert.ok(!isHeaderRow(row([cell('A', undefined, true), cell('B', undefined, true)]) as any, false), 'isHeaderRow: all-bold is NOT a header beyond row 0');
+    assert.ok(!isHeaderRow(row([cell('a'), cell('b')]) as any, true), 'isHeaderRow: a plain first row is not a header');
+}
+
+/**
+ * The native PDF engine (pdf-lib, Standard-14 fonts) must not throw on characters outside WinAnsi -
+ * Greek, arrows, CJK, emoji are all common - and must warn instead of crashing the whole conversion.
+ */
+async function testNativePdfEngine(): Promise<void> {
+    const md = '# Heading Ω → ✓\n\nGreek Ω, arrow →, CJK 日本語, emoji 😀, Café.\n\n- item →\n- plain item\n\n```\nconst x = "日本"; // 😀\n```\n';
+    const src = await OfficeParser.parseOffice(Buffer.from(md), { fileType: 'md' });
+    const warnings: string[] = [];
+    const { value } = await src.to('pdf', { pdfConfig: { engine: 'native' }, onWarning: (i: any) => warnings.push(i.code) } as any);
+    const bytes = value as Uint8Array;
+    assert.ok(bytes instanceof Uint8Array && bytes.length > 100, 'native PDF: produced non-trivial bytes (no crash on Unicode)');
+    assert.strictEqual(strFromU8(bytes.slice(0, 5)), '%PDF-', 'native PDF: has the %PDF- signature');
+    assert.ok(warnings.includes('CONTENT_NOT_REPRESENTABLE'), 'native PDF: warns that non-WinAnsi characters were replaced');
+    // A purely-Latin document draws cleanly with no such warning.
+    const latin = await OfficeParser.parseOffice(Buffer.from('# Hello\n\nPlain ASCII text.\n'), { fileType: 'md' });
+    const w2: string[] = [];
+    await latin.to('pdf', { pdfConfig: { engine: 'native' }, onWarning: (i: any) => w2.push(i.code) } as any);
+    assert.ok(!w2.includes('CONTENT_NOT_REPRESENTABLE'), 'native PDF: no spurious warning for Latin-only text');
+}
+
 async function runTests(): Promise<void> {
     console.log('Starting exhaustive officeParser test suite...');
     let passed = 0;
@@ -1595,6 +1655,8 @@ async function runTests(): Promise<void> {
         ['ODG', testOdg],
         ['DOCX', testDocxGeneration],
         ['ODT', testOdtGeneration],
+        ['OfficeGenUtils', testOfficeGenUtils],
+        ['NativePdfEngine', testNativePdfEngine],
     ];
 
     for (const [name, fn] of tests) {

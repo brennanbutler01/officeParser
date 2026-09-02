@@ -1605,15 +1605,26 @@ async function runEpubDeterminismTests(): Promise<GenFeatureTest[]> {
     }
     const ast = await OfficeParser.parseOffice(srcPath, PARSER_CONFIG);
 
-    // Explicitly pinned: the reproducible-build contract callers rely on.
+    // Explicitly pinned: the reproducible-build contract callers rely on. The other hand-built zip
+    // generators (DOCX, ODT) make the same reproducibility claim, so check them across the same tick.
     const pinned = { metadataOverrides: { modified: BASELINE_MODIFIED } } as any;
     const p1 = (await OfficeGenerator.generate(ast as any, 'epub', pinned)).value as Uint8Array;
+    const dx1 = (await OfficeGenerator.generate(ast as any, 'docx', pinned)).value as Uint8Array;
+    const ot1 = (await OfficeGenerator.generate(ast as any, 'odt', pinned)).value as Uint8Array;
     await overOneZipTick();
     const p2 = (await OfficeGenerator.generate(ast as any, 'epub', pinned)).value as Uint8Array;
+    const dx2 = (await OfficeGenerator.generate(ast as any, 'docx', pinned)).value as Uint8Array;
+    const ot2 = (await OfficeGenerator.generate(ast as any, 'odt', pinned)).value as Uint8Array;
     results.push(mk('pinned metadataOverrides.modified is byte-identical across runs',
         'identical bytes', bytesEqual(p1, p2) ? 'identical' : `differ (${p1.length} vs ${p2.length} bytes)`,
         bytesEqual(p1, p2),
         'an explicit modified timestamp must fully determine the archive, including zip entry mtimes'));
+    for (const [dest, a, b] of [['docx', dx1, dx2], ['odt', ot1, ot2]] as [string, Uint8Array, Uint8Array][]) {
+        results.push({
+            category, feature: `${dest} pinned modified is byte-identical across runs`, sourceFormat: 'docx', destFormat: dest,
+            result: { status: bytesEqual(a, b) ? 'PASS' : 'FAIL', expected: 'identical bytes', actual: bytesEqual(a, b) ? 'identical' : `differ (${a.length} vs ${b.length})`, details: 'pinned mtimes + deterministic ids must fully determine the package', duration: 0 }
+        });
+    }
 
     // Unpinned but the document carries its own modification date: must also be reproducible,
     // since that is what every baseline regeneration relies on.

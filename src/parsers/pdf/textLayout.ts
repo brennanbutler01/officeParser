@@ -14,14 +14,9 @@
 import { ListMetadata, NodeBounds, OfficeContentNode, TextFormatting, TextMetadata } from '../../types.js';
 import { rotateBoundsToRendered, roundBounds, unionAll, unionBounds } from './geometry.js';
 import { PdfLayoutConfig, PdfLine, RawRun, TextFragment } from './pdfTypes.js';
+import { median } from '../../utils/numberUtils.js';
 
 // ── small numeric helpers ───────────────────────────────────────────────────
-
-function median(values: number[]): number {
-    if (!values.length) return 0;
-    const s = [...values].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-}
 
 /** Rounds a font size to the nearest 0.5, the granularity used for size comparisons. */
 function roundSize(n: number): number {

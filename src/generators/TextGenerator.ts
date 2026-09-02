@@ -1,5 +1,6 @@
 import { ConversionResult, GeneratorConfig, OfficeContentNode, OfficeParserAST } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
+import { median } from '../utils/numberUtils.js';
 
 const escapeRegExpChars = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -228,6 +229,26 @@ export class TextGenerator extends BaseGenerator<'text'> {
                     if (text) atoms.push({ text, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
                 }
                 return;
+            } else if (n.type === 'list') {
+                // The parser strips the item's marker into metadata; re-synthesize it (as flow mode does)
+                // and fold it into the item's first placed atom so bullets/numbers survive layout mode.
+                const before = atoms.length;
+                for (const c of n.children || []) await collect(c);
+                if (atoms.length > before) {
+                    const meta = n.metadata as any;
+                    const marker = meta?.listType === 'ordered' ? `${(meta.itemIndex ?? 0) + 1}. ` : '- ';
+                    let firstIdx = before;
+                    for (let k = before + 1; k < atoms.length; k++) {
+                        const f = atoms[firstIdx];
+                        if (atoms[k].y < f.y - 0.5 || (Math.abs(atoms[k].y - f.y) < 1 && atoms[k].x < f.x)) firstIdx = k;
+                    }
+                    const f = atoms[firstIdx];
+                    const perChar = f.text.length ? f.w / f.text.length : 6;
+                    f.text = marker + f.text;
+                    f.x = Math.max(0, f.x - marker.length * perChar);
+                    f.w = f.w + marker.length * perChar;
+                }
+                return;
             }
             for (const c of n.children || []) await collect(c);
         };
@@ -242,7 +263,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
         if (!atoms.length) return flowFallback();
 
         const charWidths = atoms.filter(a => a.text.trim().length >= 3).map(a => a.w / a.text.length);
-        const charW = TextGenerator.median(charWidths);
+        const charW = median(charWidths);
         if (!(charW >= 2 && charW <= 20)) return flowFallback();
 
         const sortedX = atoms.map(a => a.x).sort((p, q) => p - q);
@@ -267,13 +288,22 @@ export class TextGenerator extends BaseGenerator<'text'> {
         const rowStrings = rows.map(row => {
             row.sort((a, b) => a.x - b.x);
             let line = '';
+            let prevRight: number | null = null; // right edge (x) of the last placed atom
             for (const a of row) {
                 let col = Math.round((a.x - marginX) / charW);
                 if (col < 0) col = 0;
                 if (col > maxCols) col = maxCols;
-                if (col > line.length) line += ' '.repeat(col - line.length);
-                else if (line.length > 0) line += ' ';
+                if (col > line.length) {
+                    line += ' '.repeat(col - line.length);
+                } else if (line.length > 0) {
+                    // The column is at or before the current line end. Only insert a space when this
+                    // atom is separated from the previous one by a real horizontal gap; adjacent runs
+                    // (a formatting/link boundary inside a word) must join with no space.
+                    const gap = prevRight != null ? a.x - prevRight : 0;
+                    if (gap > 0.25 * charW) line += ' ';
+                }
                 line += a.text;
+                prevRight = a.x + a.w;
             }
             return line.replace(/\s+$/, '');
         });
@@ -281,7 +311,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
         const centers = rows.map(r => r[0].y + r[0].h / 2);
         const deltas: number[] = [];
         for (let i = 1; i < centers.length; i++) deltas.push(centers[i] - centers[i - 1]);
-        const pitch = TextGenerator.median(deltas) || 12;
+        const pitch = median(deltas) || 12;
 
         let out = '';
         for (let i = 0; i < rowStrings.length; i++) {
@@ -294,12 +324,6 @@ export class TextGenerator extends BaseGenerator<'text'> {
         return out + newline;
     }
 
-    /** Median of a numeric list (0 for empty). */
-    private static median(values: number[]): number {
-        if (!values.length) return 0;
-        const s = [...values].sort((a, b) => a - b);
-        return s[Math.floor(s.length / 2)];
-    }
 
     private async renderTable(node: OfficeContentNode, processor: any, newline: string): Promise<string> {
         if (!node.children || node.children.length === 0) return '';

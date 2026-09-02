@@ -667,7 +667,10 @@ async function collectPage(
         if (font.name) formatting.font = font.name;
         if (font.bold) formatting.bold = true;
         if (font.italic) formatting.italic = true;
-        formatting.size = String(Math.round(box.fontSize * 2) / 2);
+        // Font size carries its unit, per the AST contract (TextFormatting.size); every other parser
+        // appends 'pt', and generators that read it as a length (lengthToPt, CSS font-size) otherwise
+        // misread a bare number as pixels and shrink the text to 75%.
+        formatting.size = `${Math.round(box.fontSize * 2) / 2}pt`;
         // Fill color (opt-in): skip near-black, the default, so only real colors are reported.
         if (colorFor) {
             const color = colorFor(box.x, box.yBaseline, box.fontSize, box.width);
@@ -1070,10 +1073,15 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
             const coverage = textMcids.size ? coveredText / textMcids.size : 1;
             if (coverage >= 0.7) {
                 pageContent = nodes;
-                // Stitch in any runs the tags did not cover, via the geometric path.
+                // Stitch in any runs the tags did not cover, via the geometric path, splicing each
+                // recovered node into reading order by its y instead of dumping them at the page end.
                 const leftover = bodyRuns.filter(r => r.text.trim() && (!r.mcid || !coveredMcids.has(r.mcid)));
                 if (leftover.length) {
-                    pageContent.push(...geometricNodes(leftover, pageCtx, docCtx, pdfCfg));
+                    for (const ln of geometricNodes(leftover, pageCtx, docCtx, pdfCfg)) {
+                        const y = ln.bounds?.y ?? Infinity;
+                        const at = pageContent.findIndex(n => (n.bounds?.y ?? Infinity) > y);
+                        if (at < 0) pageContent.push(ln); else pageContent.splice(at, 0, ln);
+                    }
                     warnStruct('some text on a page was outside the tag tree');
                 }
             } else {

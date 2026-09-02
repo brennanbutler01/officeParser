@@ -16,8 +16,28 @@
  * @module generators/pdf/nativePdfEngine
  */
 
-import { FullGeneratorConfig, OfficeContentNode, OfficeErrorType, OfficeParserAST, TextFormatting } from '../../types.js';
-import { getAbortError, getOfficeError } from '../../utils/errorUtils.js';
+import { FullGeneratorConfig, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
+import { getAbortError, getOfficeError, getWarningMessage } from '../../utils/errorUtils.js';
+
+/**
+ * Code points WinAnsi (CP1252) encodes beyond Latin-1, which the Standard-14 fonts accept (smart
+ * quotes, dashes, bullet, ellipsis, trademark, euro, etc.). Everything outside Latin-1 and this set
+ * has no glyph in those fonts and makes pdf-lib throw, so it is replaced rather than drawn.
+ */
+const CP1252_EXTRA = new Set([0x20AC, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017D, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x017E, 0x0178]);
+
+/** Maps a string to the WinAnsi-encodable subset the Standard-14 fonts can draw, flagging any loss. */
+function toWinAnsi(text: string): { text: string; changed: boolean } {
+    let out = '', changed = false;
+    for (const ch of text) {
+        const cp = ch.codePointAt(0)!;
+        if ((cp >= 0x20 && cp <= 0x7E) || (cp >= 0xA0 && cp <= 0xFF) || CP1252_EXTRA.has(cp)) out += ch;
+        else if (cp === 0x09) out += '    ';                          // tab -> spaces
+        else if (cp === 0x0A || cp === 0x0D) out += ' ';             // stray newline in a single line
+        else { out += '?'; changed = true; }
+    }
+    return { text: out, changed };
+}
 
 /** Paper sizes in PDF points (1/72"), keyed by the lowercased `pdfConfig.format`. */
 const PAGE_SIZES: Record<string, [number, number]> = {
@@ -118,6 +138,18 @@ class NativeLayout {
         return this.lib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
     }
 
+    private winAnsiWarned = false;
+    /** WinAnsi-sanitizes text before it is measured or drawn, warning once if any character is lost. */
+    private enc(text: string): string {
+        const r = toWinAnsi(text);
+        if (r.changed && !this.winAnsiWarned) {
+            this.winAnsiWarned = true;
+            const info = { format: 'pdf', feature: 'non-WinAnsi characters (native engine)' };
+            this.config.onWarning?.({ type: 'warning', code: OfficeWarningType.CONTENT_NOT_REPRESENTABLE, message: getWarningMessage(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info), details: info });
+        }
+        return r.text;
+    }
+
     /** Flattens a node into inline text runs (text + formatting + link flag), recursing into children. */
     private collectRuns(node: OfficeContentNode): { text: string; fmt: TextFormatting; link: boolean }[] {
         const out: { text: string; fmt: TextFormatting; link: boolean }[] = [];
@@ -147,7 +179,7 @@ class NativeLayout {
             const size = parseFontSize(run.fmt.size) ?? (mono ? 10 : 11);
             const color = run.link ? this.lib.rgb(0.1, 0.32, 0.72) : (this.color(run.fmt.color) ?? this.lib.rgb(0.12, 0.12, 0.12));
             const underline = !!(run.fmt.underline || run.link);
-            const words = run.text.split(/(\s+)/);
+            const words = this.enc(run.text).split(/(\s+)/);
             for (const w of words) {
                 if (w === '') continue;
                 if (/^\s+$/.test(w)) { if (pieces.length) pieces[pieces.length - 1].space = true; continue; }
@@ -192,9 +224,17 @@ class NativeLayout {
         flush();
     }
 
-    /** Entry point: renders any node, dispatching by type. */
-    async render(node: OfficeContentNode): Promise<void> {
+    private prevPaginated: string | null = null;
+    /** Entry point: renders any node, dispatching by type. `topLevel` drives inter-page pagination. */
+    async render(node: OfficeContentNode, topLevel = false): Promise<void> {
         if (this.config.abortSignal?.aborted) throw getAbortError();
+        // Preserve source pagination: start a fresh page between consecutive page (or slide) nodes.
+        if (topLevel && (node.type === 'page' || node.type === 'slide')) {
+            if (this.prevPaginated === node.type) this.newPage();
+            this.prevPaginated = node.type;
+        } else if (topLevel) {
+            this.prevPaginated = null;
+        }
         switch (node.type) {
             case 'page':
             case 'slide':
@@ -246,7 +286,7 @@ class NativeLayout {
         // Draw the marker, then the item body hanging-indented past it.
         const markerX = this.margin.left + indent - 14;
         const baseline = this.pageH - this.y - size;
-        this.page.drawText(marker, { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
+        this.page.drawText(this.enc(marker), { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
         // Body: the item's own text runs (its non-list children); nested list children render after.
         const bodyRuns = this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
         if (bodyRuns.length) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
@@ -259,7 +299,7 @@ class NativeLayout {
         this.y += 2;
         // Draw each source line verbatim in a monospace font so leading indentation is preserved
         // (word-splitting would trim it); over-wide lines wrap at character boundaries.
-        for (const raw of (node.text || '').split('\n')) {
+        for (const raw of this.enc(node.text || '').split('\n')) {
             const expanded = raw.replace(/\t/g, '    ');
             const chunks = splitToWidth(expanded || ' ', this.fonts.mono, size, this.contentWidth - 12);
             for (const chunk of (chunks.length ? chunks : [' '])) {
@@ -346,7 +386,7 @@ class NativeLayout {
                 let col = typeof meta?.col === 'number' ? meta.col : -1;
                 if (col < 0) { while ((carry.get(cursor) || 0) > 0) cursor++; col = cursor; }
                 const cw = colW * span - 2 * pad;
-                placed.push({ col, span, lines: wrapPlain(cell.text || '', this.fonts.regular, size, Math.max(10, cw)), header: meta?.style === 'header' });
+                placed.push({ col, span, lines: wrapPlain(this.enc(cell.text || ''), this.fonts.regular, size, Math.max(10, cw)), header: meta?.style === 'header' });
                 cursor = col + span;
             }
             const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * size * 1.35)) + 2 * pad;
@@ -391,6 +431,7 @@ function parseFontSize(size: string | undefined): number | null {
  * page. Returns the token unchanged when it already fits.
  */
 function splitToWidth(text: string, font: any, size: number, width: number): string[] {
+    text = toWinAnsi(text).text; // defensive: callers enc first, but never measure raw (pdf-lib throws)
     if (width <= 0 || font.widthOfTextAtSize(text, size) <= width) return [text];
     const chunks: string[] = [];
     let cur = '';
@@ -404,6 +445,7 @@ function splitToWidth(text: string, font: any, size: number, width: number): str
 
 /** Greedy word-wrap of plain text to a pixel width, returning the wrapped lines. */
 function wrapPlain(text: string, font: any, size: number, width: number): string[] {
+    text = toWinAnsi(text).text; // defensive (see splitToWidth)
     const out: string[] = [];
     for (const para of text.split('\n')) {
         const words = para.split(/\s+/).filter(Boolean);
@@ -427,22 +469,25 @@ function base64ToBytes(b64: string): Uint8Array {
     return bytes;
 }
 
-/** Writes the document metadata (title, author, dates, keywords) onto the pdf-lib document. */
-function applyMetadata(pdf: any, ast: OfficeParserAST, config: FullGeneratorConfig): void {
-    const m = ast.metadata || {};
-    const o = config.metadataOverrides || {};
+/**
+ * Writes the document metadata (title, author, dates, keywords) onto the pdf-lib document. `m` is the
+ * generator's already-resolved `effectiveMetadata` (overrides merged), so this does not re-merge.
+ */
+function applyMetadata(pdf: any, m: OfficeMetadata): void {
     const set = (fn: string, v: any) => { try { if (v != null && typeof pdf[fn] === 'function') pdf[fn](v); } catch { /* best effort */ } };
-    set('setTitle', o.title ?? m.title);
-    set('setAuthor', o.author ?? m.author);
-    set('setSubject', o.subject ?? (m as any).subject);
-    const kw = o.keywords ?? (m as any).keywords;
-    if (kw) set('setKeywords', String(kw).split(/[,;]\s*/).filter(Boolean));
+    const asDate = (v: unknown): Date | null => {
+        if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+        if (typeof v === 'string' && v) { const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+        return null;
+    };
+    set('setTitle', m.title);
+    set('setAuthor', m.author);
+    set('setSubject', m.subject);
+    if (m.keywords) set('setKeywords', String(m.keywords).split(/[,;]\s*/).filter(Boolean));
     set('setCreator', 'officeParser (native engine)');
     set('setProducer', 'officeParser (pdf-lib)');
-    const created = o.created ?? m.created;
-    const modified = o.modified ?? m.modified;
-    if (created instanceof Date) set('setCreationDate', created);
-    if (modified instanceof Date) set('setModificationDate', modified);
+    const created = asDate(m.created); if (created) set('setCreationDate', created);
+    const modified = asDate(m.modified); if (modified) set('setModificationDate', modified);
 }
 
 /**
@@ -450,10 +495,10 @@ function applyMetadata(pdf: any, ast: OfficeParserAST, config: FullGeneratorConf
  *
  * @returns the PDF as bytes.
  */
-export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig): Promise<Uint8Array> {
+export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig, metadata: OfficeMetadata): Promise<Uint8Array> {
     const lib = await loadPdfLib(ast.config);
     const pdf = await lib.PDFDocument.create();
-    applyMetadata(pdf, ast, config);
+    applyMetadata(pdf, metadata);
 
     const fonts: Fonts = {
         regular: await pdf.embedFont(lib.StandardFonts.Helvetica),
@@ -476,7 +521,7 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
     const margin = { top: mv(pc.margin?.top), right: mv(pc.margin?.right), bottom: mv(pc.margin?.bottom), left: mv(pc.margin?.left) };
 
     const layout = new NativeLayout(pdf, lib, fonts, w, h, margin, config, ast);
-    for (const node of ast.content) await layout.render(node);
+    for (const node of ast.content) await layout.render(node, true);
 
     return await pdf.save();
 }

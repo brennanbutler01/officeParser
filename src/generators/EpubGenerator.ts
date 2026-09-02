@@ -3,7 +3,7 @@ import { ConversionResult, GeneratorConfig, OfficeParserAST } from '../types.js'
 import { BaseGenerator } from './BaseGenerator.js';
 import { HtmlGenerator } from './HtmlGenerator.js';
 import { escapeXml } from '../utils/sanitize.js';
-import { decodeBase64, resolveZipInstant } from '../utils/officeGenUtils.js';
+import { decodeBase64, MIME_EXT, resolveZipInstant } from '../utils/officeGenUtils.js';
 
 const VOID_TAGS = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'];
 
@@ -113,11 +113,6 @@ const EPUB_STYLESHEET = `img { max-width: 100%; height: auto; }
 table { border-collapse: collapse; margin: 1em 0; }
 td, th { border: 1px solid #ccc; padding: 4px 8px; }`;
 
-/** Maps an image MIME type to a file extension for the packaged resource. */
-const MIME_EXT: Record<string, string> = {
-    'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
-    'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/tiff': 'tiff'
-};
 
 /**
  * Generates a minimal, valid EPUB 3 file from an AST.

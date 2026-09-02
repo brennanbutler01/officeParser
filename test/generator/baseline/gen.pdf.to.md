@@ -203,9 +203,7 @@ Miscellaneous structural elements you can add to your document, like footnotes, 
 
 ## Footnotes & Endnotes {#footnotes-endnotes}
 
-Footnotes[<sup>1 </sup>](#table-of-contents)and endnotes[<sup>i </sup>](#continued-lists)are automatically recognized and both are converted to endnotes, with backlinks for maximum ease of use in ebook devices.
-
-[^1]: In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This conversion is handled automatically by calibre.
+Footnotes[<sup>1 </sup>](#table-of-contents)and endnotes[<sup>i </sup>](#continued-lists)are automatically recognized and both are converted to endnotes, with backlinks for maximum ease of use in ebook devices.[^1]
 
 ## Dropcaps {#dropcaps}
 
@@ -313,3 +311,5 @@ An interruption in our regularly scheduled listing, for this essential and very 
 
 3. We now resume our normal programming
 4. Four
+
+[^1]: In paged media, footnotes are usually displayed at the bottom of the text. However, in ebooks, a better paradigm is to make them clickable endnotes that the user can browse at her pleasure. This conversion is handled automatically by calibre.

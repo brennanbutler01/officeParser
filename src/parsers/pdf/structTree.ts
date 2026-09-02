@@ -13,6 +13,7 @@
 import { CellMetadata, ListMetadata, NoteMetadata, OfficeContentNode } from '../../types.js';
 import { unionAll } from './geometry.js';
 import { RawRun } from './pdfTypes.js';
+import { median } from '../../utils/numberUtils.js';
 import { DocContext, PageContext, runsToParagraph } from './textLayout.js';
 
 interface StructNode {
@@ -130,17 +131,36 @@ function collectRuns(node: StructNode, ctx: WalkCtx, skip?: Set<string>): RawRun
     return out;
 }
 
-/** Emits a block paragraph/heading followed by any footnotes nested inside it. */
+/** Emits a block paragraph/heading, attaching any nested footnotes to its last text run. */
 function blockWithNotes(node: StructNode, ctx: WalkCtx, level: number): OfficeContentNode[] {
     const out: OfficeContentNode[] = [];
     const p = paragraphFrom(node, ctx, level);
     if (p) out.push(p);
+    const notes: OfficeContentNode[] = [];
     for (const noteNode of findNotes(node)) {
         if (ctx.opts.ignoreNotes) { markCovered(noteNode, ctx); continue; }
         const n = buildNote(noteNode, ctx);
-        if (n) out.push(n);
+        if (n) notes.push(n);
+    }
+    if (notes.length) {
+        // Attach to the paragraph's last text child so generators anchor the reference inline (the
+        // convention WordParser uses); fall back to trailing sibling nodes when there is no text run.
+        const anchor = p ? lastTextChild(p) : undefined;
+        if (anchor) anchor.notes = [...(anchor.notes || []), ...notes];
+        else out.push(...notes);
     }
     return out;
+}
+
+/** The last descendant `text` node of a block, or undefined. */
+function lastTextChild(node: OfficeContentNode): OfficeContentNode | undefined {
+    let found: OfficeContentNode | undefined;
+    const walk = (n: OfficeContentNode) => {
+        if (n.type === 'text') found = n;
+        for (const c of n.children || []) walk(c);
+    };
+    for (const c of node.children || []) walk(c);
+    return found;
 }
 
 /** Finds Note/FENote subtrees anywhere under a node. */
@@ -179,12 +199,6 @@ function collectRows(node: StructNode): StructNode[] {
 }
 
 /** Median of a numeric list (robust to alignment jitter); 0 for an empty list. */
-function medianOf(values: number[]): number {
-    if (!values.length) return 0;
-    const s = [...values].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-}
-
 /**
  * True when a cell is an empty placeholder: no text and no geometry. A tagged PDF pads the columns
  * (and rows) a merged cell covers with exactly these, keeping the grid rectangular. They are the
@@ -216,7 +230,7 @@ function inferColSpans(rows: OfficeContentNode[]): void {
     }
     const colLeft = (c: number): number => {
         const xs = colLefts[c];
-        return xs && xs.length ? medianOf(xs) : NaN;
+        return xs && xs.length ? median(xs) : NaN;
     };
     for (const row of rows) {
         const cells = row.children || [];
@@ -276,7 +290,7 @@ function inferRowSpans(rows: OfficeContentNode[]): void {
     for (let r = 1; r < rowTop.length; r++) {
         if (Number.isFinite(rowTop[r]) && Number.isFinite(rowTop[r - 1])) pitches.push(rowTop[r] - rowTop[r - 1]);
     }
-    const pitch = medianOf(pitches.filter(p => p > 0));
+    const pitch = median(pitches.filter(p => p > 0));
     if (!(pitch > 0)) return;
     const margin = 0.4 * pitch;
 
