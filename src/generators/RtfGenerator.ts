@@ -279,7 +279,24 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                     return `${pPr}\\sa120 ${safeUrl}\\par\n`;
                 }
 
-                default:
+                // Rendered through their children only (RTF has no native form for these). Listed
+                // explicitly, with no `default`, so that under `noImplicitReturns` a new
+                // OfficeContentNodeType fails to compile until it is classified here.
+                case 'chart':
+                case 'drawing':
+                case 'slide':
+                case 'note':
+                case 'sheet':
+                case 'page':
+                case 'code':
+                case 'comment':
+                case 'header':
+                case 'footer':
+                case 'slideMaster':
+                case 'admonition':
+                case 'definitionList':
+                case 'definitionTerm':
+                case 'definitionDescription':
                     return childrenOutput;
             }
         };

@@ -41,6 +41,7 @@ import { parseCsv } from './parsers/CsvParser.js';
 import { parseEpub } from './parsers/EpubParser.js';
 import { parseExcel } from './parsers/ExcelParser.js';
 import { parseHtml } from './parsers/HtmlParser.js';
+import { parseImage } from './parsers/ImageParser.js';
 import { parseMarkdown } from './parsers/MarkdownParser.js';
 import { parseOpenOffice } from './parsers/OpenOfficeParser.js';
 import { parsePdf } from './parsers/PdfParser.js';
@@ -51,6 +52,7 @@ import { BlobLike, OfficeErrorType, OfficeIssue, OfficeParserAST, OfficeParserCo
 import { resolveParserConfig } from './utils/configUtils.js';
 import { assertNode } from './utils/envUtils.js';
 import { getOfficeError, getWrappedError, logWarning } from './utils/errorUtils.js';
+import { getMimeFromBytes } from './utils/imageUtils.js';
 import { loadFileType } from './utils/moduleLoader.js';
 import { terminateOcr } from './utils/ocrUtils.js';
 import { detectOfficeTypeFromZip } from './utils/zipUtils.js';
@@ -60,6 +62,24 @@ const GENERIC_ZIP_EXTENSION = 'zip';
 
 /** The formats that are ZIP archives, and so cannot be contradicted by a bare `zip` result. */
 const ZIP_BACKED_FILE_TYPES: ReadonlySet<string> = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'epub']);
+
+/**
+ * Alternate spellings folded onto the canonical image type, so a `.jpeg`/`.tif` file, a
+ * `fileType: 'jpeg'` hint and magic-byte sniffing (which reports `jpg`/`tif`) all agree and never
+ * trip a spurious BUFFER_TYPE_MISMATCH against each other.
+ */
+const IMAGE_EXT_ALIASES: Readonly<Record<string, string>> = { jpeg: 'jpg', jpe: 'jpg', tif: 'tiff' };
+
+/** Image MIME (from {@link getMimeFromBytes}) to canonical type, for buffers the generic sniffer cannot place. */
+const IMAGE_MIME_TO_TYPE: Readonly<Record<string, string>> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp', 'image/tiff': 'tiff', 'image/webp': 'webp',
+};
+
+/** Lowercases an extension and folds image aliases onto their canonical spelling. */
+const canonicalExt = (ext: string): string => {
+    const lower = ext.toLowerCase();
+    return IMAGE_EXT_ALIASES[lower] ?? lower;
+};
 
 /**
  * Upgrades a magic-byte result of `zip` (or none at all) into the specific office format the
@@ -229,6 +249,13 @@ export class OfficeParser {
                 }
 
                 ext = await resolveZipBackedType(detected, buffer, internalConfig) ?? '';
+                // The generic sniffer does not place every raster format (TIFF in particular) and
+                // may not load at all on older runtimes; image signatures are trivial, so check
+                // them ourselves before giving up on a bare buffer.
+                if (!ext) {
+                    const mime = getMimeFromBytes(buffer);
+                    if (mime) ext = IMAGE_MIME_TO_TYPE[mime] ?? '';
+                }
             } else if (buffer.length > 0 && ext) {
                 // If extension is known, we can optionally verify it, but we wrap it
                 // in a try-catch to avoid breaking Node 18 if file-type fails to load.
@@ -246,7 +273,7 @@ export class OfficeParser {
                     // A bare `zip` says only that the bytes are an archive, which every format
                     // on this path already is. Reporting it as a mismatch against the caller's
                     // own extension is noise, so only a resolved format is worth comparing.
-                    if (detected && detected !== GENERIC_ZIP_EXTENSION && detected.toLowerCase() !== ext.toLowerCase()) {
+                    if (detected && detected !== GENERIC_ZIP_EXTENSION && canonicalExt(detected) !== canonicalExt(ext)) {
                         // Mismatch found between authoritative extension and detected content
                         logWarning(OfficeWarningType.BUFFER_TYPE_MISMATCH, internalConfig, { detected, expected: ext });
                     }
@@ -259,9 +286,10 @@ export class OfficeParser {
             if (!ext) {
                 throw getOfficeError(OfficeErrorType.IMPROPER_BUFFERS, internalConfig);
             }
+            ext = canonicalExt(ext);
 
             let result: OfficeParserAST;
-            switch (ext.toLowerCase()) {
+            switch (ext) {
                 case 'docx':
                     result = await parseWord(buffer, internalConfig);
                     break;
@@ -289,6 +317,15 @@ export class OfficeParser {
                     break;
                 case 'pdf':
                     result = await parsePdf(buffer, internalConfig);
+                    break;
+                case 'png':
+                case 'jpg':
+                case 'gif':
+                case 'bmp':
+                case 'tiff':
+                case 'webp':
+                    // A raster image is a one-page document whose only text is what OCR recognizes.
+                    result = await parseImage(buffer, ext as SupportedFileType, internalConfig);
                     break;
                 case 'rtf':
                     result = await parseRtf(buffer, internalConfig);

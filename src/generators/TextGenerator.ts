@@ -1,4 +1,4 @@
-import { ConversionResult, GeneratorConfig, OfficeContentNode, OfficeParserAST } from '../types.js';
+import { ConversionResult, GeneratorConfig, OfficeContentNode, OfficeContentNodeType, OfficeParserAST } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { median } from '../utils/numberUtils.js';
 
@@ -11,6 +11,21 @@ const escapeRegExpChars = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g
  * already contains spaces.
  */
 const CELL_SEPARATOR = '\t';
+
+/**
+ * How plain text treats each node type once the explicit branches in the processor have had their
+ * say: a `block` is its rendered children followed by a newline (a paragraph-like unit), an
+ * `inline` contributes its children as-is. A full `Record` rather than an allowlist so the compiler
+ * rejects a new OfficeContentNodeType until it is classified here.
+ */
+const TEXT_NODE_CLASS: Readonly<Record<OfficeContentNodeType, 'block' | 'inline'>> = {
+    paragraph: 'block', heading: 'block', row: 'block', sheet: 'block', slide: 'block', note: 'block',
+    list: 'block', table: 'block', code: 'block',
+    text: 'inline', image: 'inline', chart: 'inline', drawing: 'inline', cell: 'inline', page: 'inline',
+    break: 'inline', comment: 'inline', header: 'inline', footer: 'inline', slideMaster: 'inline',
+    embed: 'inline', admonition: 'inline', definitionList: 'inline', definitionTerm: 'inline',
+    definitionDescription: 'inline',
+};
 
 /**
  * Generates plain text from an AST.
@@ -118,7 +133,6 @@ export class TextGenerator extends BaseGenerator<'text'> {
             }
 
             // Append newline for block-level elements to maintain structure.
-            const blockTypes = ['paragraph', 'heading', 'row', 'sheet', 'slide', 'note', 'list', 'table', 'code'];
             if (node.type === 'row') {
                 // Trailing separator on the final cell is an artifact of appending one per cell, not
                 // content, so drop it rather than leaving every row ending in a stray tab.
@@ -128,7 +142,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 if (row === '') return '';
                 return row + (row.endsWith(newline) ? '' : newline);
             }
-            if (blockTypes.includes(node.type)) {
+            if (TEXT_NODE_CLASS[node.type] === 'block') {
                 // Drop a block only when it is genuinely empty, not merely whitespace. A paragraph
                 // containing spaces is content the document actually holds - discarding it silently
                 // deletes an author's blank-but-not-empty line, so filter on `!== ''` rather than on

@@ -2,7 +2,7 @@
 
 A robust, strictly-typed **Node.js and Browser** library for parsing office files into a rich **Abstract Syntax Tree (AST)** and generating high-fidelity output in multiple formats.
 
-**Parses:** [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`odt`](https://en.wikipedia.org/wiki/OpenDocument) · [`odp`](https://en.wikipedia.org/wiki/OpenDocument) · [`ods`](https://en.wikipedia.org/wiki/OpenDocument) · [`odg`](https://en.wikipedia.org/wiki/OpenDocument) · [`pdf`](https://en.wikipedia.org/wiki/PDF) · [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) · [`csv`](https://en.wikipedia.org/wiki/Comma-separated_values) · [`md`](https://en.wikipedia.org/wiki/Markdown) · [`html`](https://en.wikipedia.org/wiki/HTML) · [`epub`](https://en.wikipedia.org/wiki/EPUB)
+**Parses:** [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) · [`odt`](https://en.wikipedia.org/wiki/OpenDocument) · [`odp`](https://en.wikipedia.org/wiki/OpenDocument) · [`ods`](https://en.wikipedia.org/wiki/OpenDocument) · [`odg`](https://en.wikipedia.org/wiki/OpenDocument) · [`pdf`](https://en.wikipedia.org/wiki/PDF) · [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) · [`csv`](https://en.wikipedia.org/wiki/Comma-separated_values) · [`md`](https://en.wikipedia.org/wiki/Markdown) · [`html`](https://en.wikipedia.org/wiki/HTML) · [`epub`](https://en.wikipedia.org/wiki/EPUB) · [`png`/`jpg`/`gif`/`bmp`/`tiff`/`webp`](#3-images--ocr) (images, via OCR)
 
 **Generates:** `DOCX` · `ODT` · `Markdown` · `HTML` · `CSV` · `RTF` · `PDF` · `EPUB` · `Plain Text` · `RAG Chunks`
 
@@ -123,7 +123,7 @@ npx officeparser my_document --fileType=docx --to=json
 |------|--------|---------|-------------|
 | `--to` | `json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks` | `json` | Output format |
 | `--output` | path | — | Write output to a file |
-| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
+| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub\|png\|jpg\|gif\|bmp\|tiff\|webp` | — | Explicitly override input file type detection |
 | `--ocr` | boolean | `false` | Enable OCR for images |
 | `--extractAttachments` | boolean | `false` | Extract images/charts as Base64 |
 | `--ignoreNotes` | boolean | `false` | Ignore footnotes/endnotes/speaker notes |
@@ -632,6 +632,13 @@ Image Node (type: 'image')
 
 - Set `extractAttachments: true` to populate `attachment.data`
 - Set `ocr: true` (requires `extractAttachments: true`) to populate `ocrText`
+
+**Image files as input.** A raster image (`png`, `jpg`, `gif`, `bmp`, `tiff`, `webp`: a scan, a photo of a page, a screenshot) parses as a one-page document whose text is recognized with OCR. With `ocr: true` you get one `page` node holding a `paragraph` per recognized block (so `.to('md')`, `.to('docx')`, etc. produce the text), the image itself in `attachments` (with `ocrText`) when `extractAttachments` is also set, and the pixel size in `metadata.nativeProperties`. Unlike PDF, OCR runs on the input bytes directly, so it does not need `extractAttachments`. With `ocr` off the page is empty and an `IMAGE_NO_TEXT_EXTRACTED` warning says why. Images are detected by extension or magic bytes, so a bare `Buffer` needs no `fileType` hint; `jpeg`/`tif` spellings are aliases.
+
+```ts
+const ast = await OfficeParser.parseOffice('scan.png', { ocr: true });
+const { value: markdown } = await ast.to('md');
+```
 
 ### 4. Charts
 

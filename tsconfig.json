@@ -12,6 +12,7 @@
         "declaration": true,
         "resolveJsonModule": true,
         "noImplicitAny": true,
+        "noImplicitReturns": true,
         "types": ["node"]
     },
     "include": [

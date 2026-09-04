@@ -1351,7 +1351,14 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             case 'definitionDescription':
                 return `${extraAnchors}<dd${idAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</dd>`;
 
-            default:
+            // Rendered through their children only. Listed explicitly, with no `default`, so that
+            // under `noImplicitReturns` a new OfficeContentNodeType fails to compile until it is
+            // classified here rather than silently degrading to its children.
+            case 'drawing':
+            case 'comment':
+            case 'header':
+            case 'footer':
+            case 'slideMaster':
                 return childrenOutput;
         }
     }
@@ -1365,7 +1372,30 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 return `h${Math.min(Math.max(level, 1), 6)}`;
             }
             case 'list': return 'li';
-            default: return 'div';
+            // Every other type is a generic block. No `default`, so a new node type must be placed.
+            case 'text':
+            case 'table':
+            case 'image':
+            case 'chart':
+            case 'drawing':
+            case 'slide':
+            case 'note':
+            case 'sheet':
+            case 'row':
+            case 'cell':
+            case 'page':
+            case 'break':
+            case 'code':
+            case 'comment':
+            case 'header':
+            case 'footer':
+            case 'slideMaster':
+            case 'embed':
+            case 'admonition':
+            case 'definitionList':
+            case 'definitionTerm':
+            case 'definitionDescription':
+                return 'div';
         }
     }
 

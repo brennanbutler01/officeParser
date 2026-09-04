@@ -113,7 +113,9 @@ export enum OfficeWarningType {
     /** A PDF page yielded mostly unmappable glyphs (broken/missing ToUnicode); extracted text is likely garbage */
     PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT',
     /** A PDF yielded essentially no text; it is very likely a scanned/image-only document needing OCR */
-    PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED'
+    PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED',
+    /** An image was given as the document but `ocr` is off, so it has no text to extract */
+    IMAGE_NO_TEXT_EXTRACTED = 'IMAGE_NO_TEXT_EXTRACTED'
 }
 
 /**
@@ -353,6 +355,7 @@ export interface CommonOfficeParserConfig {
      * When a Buffer or ArrayBuffer is passed, the parser relies on magic bytes to detect the file type.
      * Text-based formats like 'md', 'html', and 'csv' lack reliable magic bytes.
      * If you are parsing these formats from a Buffer, you must provide this fileType hint.
+     * Image inputs (png/jpg/gif/bmp/tiff/webp) carry reliable signatures and need no hint.
      * 
      * This is authoritative and is used to determine the file type, so it should be accurate.
      * If provided, this bypasses the magic bytes detection and the file extension-based detection either way.
@@ -1859,8 +1862,12 @@ export interface OfficeChunk {
 
 /**
  * Supported file types for parsing.
+ *
+ * The raster image types (`png`, `jpg`, `gif`, `bmp`, `tiff`, `webp`) parse as a one-page document
+ * whose text is recognized with OCR (`ocr: true`); see {@link CommonOfficeParserConfig.ocr}. The
+ * `jpeg`/`tif` spellings are accepted as aliases and reported under the canonical name.
  */
-export type SupportedFileType = 'docx' | 'pptx' | 'xlsx' | 'odt' | 'odp' | 'ods' | 'odg' | 'pdf' | 'rtf' | 'md' | 'html' | 'csv' | 'epub';
+export type SupportedFileType = 'docx' | 'pptx' | 'xlsx' | 'odt' | 'odp' | 'ods' | 'odg' | 'pdf' | 'rtf' | 'md' | 'html' | 'csv' | 'epub' | 'png' | 'jpg' | 'gif' | 'bmp' | 'tiff' | 'webp';
 
 /**
  * A structural stand-in for the web `Blob`/`File` so `parseOffice`/`convert` accept them in the
