@@ -51,6 +51,62 @@ export function decodeBase64(b64: string): Uint8Array {
     return bytes;
 }
 
+/**
+ * Decoded byte length of a base64 string, computed from its length and padding without decoding.
+ * (Standard base64 is 4 chars per 3 bytes; each trailing `=` drops one byte.) Assumes clean base64
+ * with no embedded whitespace, which is how attachment data is stored.
+ */
+export function base64ByteLength(b64: string | undefined): number {
+    if (!b64) return 0;
+    const len = b64.length;
+    let padding = 0;
+    if (len >= 1 && b64.charCodeAt(len - 1) === 0x3d) padding++; // '='
+    if (len >= 2 && b64.charCodeAt(len - 2) === 0x3d) padding++;
+    return Math.max(0, Math.floor(len * 3 / 4) - padding);
+}
+
+const PT_PER_IN = 72;
+const PT_PER_MM = 72 / 25.4;
+
+/**
+ * Portrait page dimensions in PostScript points (1/72 inch), keyed by lowercased paper-format name.
+ * The A-series is ISO 216 (mm-derived); Letter/Legal/Tabloid/Ledger are US/ANSI (inch-derived).
+ * Single source of truth for {@link paperSizePt}, so every generator lays out the same size the
+ * same way.
+ */
+const PAPER_SIZES_PT: Record<string, { w: number; h: number }> = {
+    letter: { w: 8.5 * PT_PER_IN, h: 11 * PT_PER_IN },
+    legal: { w: 8.5 * PT_PER_IN, h: 14 * PT_PER_IN },
+    tabloid: { w: 11 * PT_PER_IN, h: 17 * PT_PER_IN },
+    ledger: { w: 17 * PT_PER_IN, h: 11 * PT_PER_IN },
+    a0: { w: 841 * PT_PER_MM, h: 1189 * PT_PER_MM },
+    a1: { w: 594 * PT_PER_MM, h: 841 * PT_PER_MM },
+    a2: { w: 420 * PT_PER_MM, h: 594 * PT_PER_MM },
+    a3: { w: 297 * PT_PER_MM, h: 420 * PT_PER_MM },
+    a4: { w: 210 * PT_PER_MM, h: 297 * PT_PER_MM },
+    a5: { w: 148 * PT_PER_MM, h: 210 * PT_PER_MM },
+    a6: { w: 105 * PT_PER_MM, h: 148 * PT_PER_MM },
+};
+
+/** Portrait `{ w, h }` page size in points for a {@link PaperFormat} name (case-insensitive), defaulting to A4. */
+export function paperSizePt(format: string | undefined): { w: number; h: number } {
+    return PAPER_SIZES_PT[(format || 'a4').toLowerCase()] || PAPER_SIZES_PT.a4;
+}
+
+/**
+ * Resolves a margin that may be a number (points) or a unit-labeled string (`'1in'`, `'2cm'`,
+ * `'36pt'`, `'48px'`) to points. A bare number - or a bare numeric string - is points; a unit string
+ * is converted via {@link lengthToPt}. Unresolvable input falls back to `fallback` (default 72pt).
+ */
+export function marginPt(v: number | string | undefined, fallback = 72): number {
+    if (v == null) return fallback;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : fallback;
+    const t = v.trim();
+    if (/^-?\d*\.?\d+$/.test(t)) return parseFloat(t); // bare numeric string = points
+    const pt = lengthToPt(t);
+    return pt == null ? fallback : pt;
+}
+
 /** Image MIME to file extension for a packaged media part. */
 export const MIME_EXT: Record<string, string> = {
     'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',

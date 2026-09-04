@@ -48,7 +48,7 @@ const DEFAULT_HTML_PARSER_CONFIG: DeepRequired<HtmlParserConfig> = {
 /**
  * Default configuration for PDF parsing. Chosen so the out-of-the-box output is the highest-fidelity
  * one: tagged structure when present, column detection and hyphenation repair on, positions emitted
- * (governed by the flat `ignorePositions`).
+ * (governed by the flat `ignoreBounds`).
  */
 const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
     password: '',
@@ -62,7 +62,7 @@ const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
     spaceToleranceFactor: 0.25,
     headingDetection: 'auto',
     pageRange: '',
-    disableTextNormalization: false,
+    normalizeText: true,
     extractTextColor: false,
 };
 
@@ -86,7 +86,7 @@ export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     pdfWorkerSrc: DEFAULT_PDF_WORKER_SRC,
     includeBreakNodes: false,
     ignoreInternalLinks: false,
-    ignorePositions: false,
+    ignoreBounds: false,
     fileType: null,
     csvDelimiter: ',',
     decompressionLimits: {
@@ -236,13 +236,13 @@ const DEFAULT_CHUNKING_CONFIG: ChunkingConfig = DEFAULT_DOCUMENT_STRUCTURE_CHUNK
  * Default configuration for DOCX (Word) generation.
  */
 const DEFAULT_DOCX_GENERATOR_CONFIG: DeepRequired<DocxGeneratorConfig> = {
-    pageSize: 'A4',
+    format: 'A4',
     landscape: false,
     margin: { top: 72, right: 72, bottom: 72, left: 72 },
 };
 
 const DEFAULT_ODT_GENERATOR_CONFIG: DeepRequired<OdtGeneratorConfig> = {
-    pageSize: 'A4',
+    format: 'A4',
     landscape: false,
     margin: { top: 72, right: 72, bottom: 72, left: 72 },
 };
@@ -257,7 +257,7 @@ export const DEFAULT_GENERATOR_CONFIG: FullGeneratorConfig = {
     metadataOverrides: {},
     ignoreDefaultStyleMap: false,
     includeImages: true,
-    maxInlineImageBytes: 2000000,
+    maxInlineImageBytes: 1500000,
     includeCharts: true,
     ignoreInternalLinks: false,
     abortSignal: null,

@@ -31,7 +31,7 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
         if (v === 'false') v = false;
         if (v === false) return 'none';
         if (v === true || v === undefined) return 'image-only';
-        if (v === 'image-only' || v === 'image+ocrtext' || v === 'ocrtext-only' || v === 'none') return v;
+        if (v === 'image-only' || v === 'image+ocr-text' || v === 'ocr-text-only' || v === 'none') return v;
         return 'image-only';
     }
 

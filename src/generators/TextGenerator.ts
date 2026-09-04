@@ -65,11 +65,11 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 if (mode === 'none') return '';
                 const meta = node.metadata as any;
                 const ocr = (node.text || '').trim();
-                // Plain text cannot embed the image: 'ocrtext-only' is just the recognized text,
-                // 'image+ocrtext' is the placeholder plus the text, and 'image-only' is the placeholder.
-                if (mode === 'ocrtext-only') return ocr ? `${ocr}${newline}` : '';
+                // Plain text cannot embed the image: 'ocr-text-only' is just the recognized text,
+                // 'image+ocr-text' is the placeholder plus the text, and 'image-only' is the placeholder.
+                if (mode === 'ocr-text-only') return ocr ? `${ocr}${newline}` : '';
                 const label = `[Image: ${meta?.altText || meta?.attachmentName || 'Untitled'}]`;
-                if (mode === 'image+ocrtext' && ocr) return `${label}${newline}${ocr}${newline}`;
+                if (mode === 'image+ocr-text' && ocr) return `${label}${newline}${ocr}${newline}`;
                 return `${label}${newline}`;
             }
 
@@ -225,7 +225,7 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 if (mode !== 'none' && n.bounds) {
                     const m = n.metadata as any;
                     const ocr = (n.text || '').trim();
-                    const text = mode === 'ocrtext-only' ? ocr : `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`;
+                    const text = mode === 'ocr-text-only' ? ocr : `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`;
                     if (text) atoms.push({ text, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
                 }
                 return;

@@ -11,7 +11,7 @@
  * - Semantic structure from tagged PDFs (headings, tables, lists, footnotes) via the structure tree,
  *   with a geometric fallback for untagged files. (Tagged path: {@link module:parsers/pdf/structTree}.)
  * - Per-node page geometry (`bounds`) and page dimensions, on by default, opt out with
- *   `ignorePositions`.
+ *   `ignoreBounds`.
  * - Password-protected documents via `pdfParserConfig.password`, or the `pdfParserConfig.onPassword`
  *   callback to supply one lazily/interactively.
  * - Comprehensive metadata (including the document outline/bookmarks, page labels, and permissions),
@@ -202,9 +202,9 @@ function resolvePdfLayoutConfig(config: FullOfficeParserConfig): PdfLayoutConfig
         lineToleranceFactor: num(p.lineToleranceFactor, 0.35),
         spaceToleranceFactor: num(p.spaceToleranceFactor, 0.25),
         headingDetection: p.headingDetection ?? 'auto',
-        disableTextNormalization: !!p.disableTextNormalization,
+        normalizeText: p.normalizeText !== false,
         extractTextColor: !!p.extractTextColor,
-        includePositions: !config.ignorePositions,
+        includeBounds: !config.ignoreBounds,
     };
 }
 
@@ -581,7 +581,7 @@ function resolveSectionLinks(
         const pnum = t.pageIndex + 1;
         const info = pageInfo.get(pnum);
         const hs = headingsByPage.get(pnum);
-        // Match to the nearest heading only when geometry is present. Under `ignorePositions` every
+        // Match to the nearest heading only when geometry is present. Under `ignoreBounds` every
         // heading y is undefined, so fall back to the page anchor rather than binding every link to
         // the first heading (which a y=0 tie would otherwise do).
         if (t.pdfY != null && info && info.rotation === 0 && hs) {
@@ -621,7 +621,7 @@ async function collectPage(
     const width = rotation % 180 === 0 ? authoredW : authoredH;
     const height = rotation % 180 === 0 ? authoredH : authoredW;
 
-    const textContent = await page.getTextContent({ includeMarkedContent: true, disableNormalization: pdfCfg.disableTextNormalization });
+    const textContent = await page.getTextContent({ includeMarkedContent: true, disableNormalization: !pdfCfg.normalizeText });
     const styles: Record<string, any> = textContent.styles || {};
 
     // Resolve every font on the page once (document-scoped cache). Real font objects (with their
@@ -1114,7 +1114,7 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
             text: pageContent.map(n => n.text).join(config.newlineDelimiter),
             metadata: { pageNumber: extract.pageNumber },
         };
-        if (pdfCfg.includePositions && pageNode.type === 'page' && pageNode.metadata) {
+        if (pdfCfg.includeBounds && pageNode.type === 'page' && pageNode.metadata) {
             pageNode.metadata.pageWidth = Math.round(extract.width * 100) / 100;
             pageNode.metadata.pageHeight = Math.round(extract.height * 100) / 100;
             if (extract.rotation) pageNode.metadata.rotation = extract.rotation;
@@ -1182,7 +1182,7 @@ function rotatedTextNodes(runs: RawRun[], pageCtx: PageContext, pdfCfg: PdfLayou
         if (!text) continue;
         const node: OfficeContentNode = { type: 'paragraph', text, children: [{ type: 'text', text }] };
         const box = unionAll(group.map(r => ({ x: r.x, y: r.yTop, width: r.width, height: r.height })));
-        if (pdfCfg.includePositions && box) {
+        if (pdfCfg.includeBounds && box) {
             const rendered = roundBounds(rotateBoundsToRendered(box, pageCtx.rotation, pageCtx.authoredW, pageCtx.authoredH));
             node.bounds = rendered;
             if (node.children && node.children[0]) node.children[0].bounds = rendered;
@@ -1229,7 +1229,7 @@ async function emitImage(
         attachments.push(attachment);
         const metadata: ImageMetadata = { attachmentName };
         const node: OfficeContentNode = { type: 'image', text: attachment.ocrText || '', metadata };
-        if (pdfCfg.includePositions) node.bounds = roundBounds(rotateBoundsToRendered(img.bounds, page.rotation, page.authoredW, page.authoredH));
+        if (pdfCfg.includeBounds) node.bounds = roundBounds(rotateBoundsToRendered(img.bounds, page.rotation, page.authoredW, page.authoredH));
         return node;
     } catch (e) {
         logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, attachmentName, e);

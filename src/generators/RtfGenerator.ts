@@ -240,8 +240,8 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                     const meta = node.metadata as any;
                     const ocr = (node.text || '').trim();
                     const ocrRtf = ocr ? `${this.escapeRtf(ocr)}\\par\n` : '';
-                    // ocrtext-only: just the recognized text.
-                    if (mode === 'ocrtext-only') return ocrRtf;
+                    // ocr-text-only: just the recognized text.
+                    if (mode === 'ocr-text-only') return ocrRtf;
 
                     let pict = '';
                     const attachment = this.ast.attachments.find(a => a.name === meta?.attachmentName);
@@ -258,8 +258,8 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                         // Default goals (approx 3 inches wide at 1440 twips per inch)
                         pict = `{\\pict\\${type}\\picwgoal4320\\pichgoal3240\n${hex}\n}\n`;
                     }
-                    // image+ocrtext: the image, then its recognized text.
-                    return mode === 'image+ocrtext' ? pict + ocrRtf : pict;
+                    // image+ocr-text: the image, then its recognized text.
+                    return mode === 'image+ocr-text' ? pict + ocrRtf : pict;
                 }
 
                 case 'break': {

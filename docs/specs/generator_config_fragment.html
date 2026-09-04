@@ -52,22 +52,22 @@
             </tr>
             <tr>
                 <td><code>includeImages</code></td>
-                <td><code>boolean | 'image-only' | 'image+ocrtext' | 'ocrtext-only' | 'none'</code></td>
+                <td><code>boolean | 'image-only' | 'image+ocr-text' | 'ocr-text-only' | 'none'</code></td>
                 <td><code>true</code></td>
                 <td><strong>Resources</strong>: How to render an image node. <code>true</code>=<code>'image-only'</code>
-                    (embed the image, no OCR text); <code>'image+ocrtext'</code> (image then its recognized/OCR text);
-                    <code>'ocrtext-only'</code> (OCR text, no image); <code>false</code>=<code>'none'</code> (omit). In
+                    (embed the image, no OCR text); <code>'image+ocr-text'</code> (image then its recognized/OCR text);
+                    <code>'ocr-text-only'</code> (OCR text, no image); <code>false</code>=<code>'none'</code> (omit). In
                     plain-text output an image becomes an <code>[Image: name]</code> placeholder (plus OCR text for
-                    <code>'image+ocrtext'</code>), or just the OCR text for <code>'ocrtext-only'</code>.</td>
+                    <code>'image+ocr-text'</code>), or just the OCR text for <code>'ocr-text-only'</code>.</td>
             </tr>
             <tr>
                 <td><code>maxInlineImageBytes</code></td>
                 <td><code>number</code></td>
-                <td><code>2000000</code></td>
-                <td><strong>Resources</strong>: Max base64 size an image is inlined as a <code>data:</code> URI in
-                    HTML/Markdown. Larger images render their text (e.g. OCR text) or a name reference instead, so a
-                    scanned page cannot emit a multi-megabyte line that breaks downstream parsers. <code>0</code> never
-                    inlines; <code>Infinity</code> always inlines.</td>
+                <td><code>1500000</code></td>
+                <td><strong>Resources</strong>: Max decoded image size, in bytes, that is inlined as a <code>data:</code>
+                    URI in HTML/Markdown (the base64 URI itself is ~1/3 larger). Larger images render their text (e.g. OCR
+                    text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks
+                    downstream parsers. <code>0</code> never inlines; <code>Infinity</code> always inlines.</td>
             </tr>
             <tr>
                 <td><code>includeCharts</code></td>
@@ -510,10 +510,12 @@ await ast.to('md', {
         </thead>
         <tbody>
             <tr>
-                <td><code>pageSize</code></td>
-                <td><code>'A4' | 'Letter' | 'Legal'</code></td>
+                <td><code>format</code></td>
+                <td><code>PaperFormat</code></td>
                 <td><code>'A4'</code></td>
-                <td>Page size preset for the document section (<code>w:pgSz</code>).</td>
+                <td>Page size for the document section (<code>w:pgSz</code>). The same names <code>pdfConfig.format</code>
+                    accepts (<code>A4</code>, <code>Letter</code>, <code>Legal</code>, <code>A3</code>, <code>Tabloid</code>,
+                    …; case-insensitive).</td>
             </tr>
             <tr>
                 <td><code>landscape</code></td>
@@ -525,8 +527,9 @@ await ast.to('md', {
                 <td><code>margin</code></td>
                 <td><code>object</code></td>
                 <td><code>{72,72,72,72}</code></td>
-                <td>Page margins in points, 1/72 inch (<code>top</code>, <code>right</code>, <code>bottom</code>,
-                    <code>left</code>); 72 = Word's standard one inch.</td>
+                <td>Page margins (<code>top</code>, <code>right</code>, <code>bottom</code>, <code>left</code>). Each is a
+                    number of points (1/72 inch) or a unit string (<code>'1in'</code>, <code>'2cm'</code>,
+                    <code>'36pt'</code>); 72 = Word's standard one inch.</td>
             </tr>
         </tbody>
     </table>
@@ -548,10 +551,12 @@ await ast.to('md', {
         </thead>
         <tbody>
             <tr>
-                <td><code>pageSize</code></td>
-                <td><code>'A4' | 'Letter' | 'Legal'</code></td>
+                <td><code>format</code></td>
+                <td><code>PaperFormat</code></td>
                 <td><code>'A4'</code></td>
-                <td>Page size preset for the page layout (<code>style:page-layout</code>).</td>
+                <td>Page size for the page layout (<code>style:page-layout</code>). The same names
+                    <code>pdfConfig.format</code> accepts (<code>A4</code>, <code>Letter</code>, <code>Legal</code>,
+                    <code>A3</code>, <code>Tabloid</code>, …; case-insensitive).</td>
             </tr>
             <tr>
                 <td><code>landscape</code></td>
@@ -563,8 +568,9 @@ await ast.to('md', {
                 <td><code>margin</code></td>
                 <td><code>object</code></td>
                 <td><code>{72,72,72,72}</code></td>
-                <td>Page margins in points, 1/72 inch (<code>top</code>, <code>right</code>, <code>bottom</code>,
-                    <code>left</code>).</td>
+                <td>Page margins (<code>top</code>, <code>right</code>, <code>bottom</code>, <code>left</code>). Each is a
+                    number of points (1/72 inch) or a unit string (<code>'1in'</code>, <code>'2cm'</code>,
+                    <code>'36pt'</code>).</td>
             </tr>
         </tbody>
     </table>

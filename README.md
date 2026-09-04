@@ -336,7 +336,7 @@ const { value } = await ast.to('text', {
 | Footnotes/endnotes | emitted | emitted | `textConfig.renderNotes` (default `true`) |
 | Image placeholders | emitted | emitted | `includeImages` (default `true`) |
 
-For PDFs with page geometry (the default, unless `ignorePositions` is set), `preserveLayout` renders
+For PDFs with page geometry (the default, unless `ignoreBounds` is set), `preserveLayout` renders
 each page as a spatial monospace grid so multi-column text and tables line up much like the original
 page, similar to `pdftotext -layout`. Use `textConfig.pageSeparator` (default `'\n'`, or `'\f'` for a
 form feed) to control what goes between pages.
@@ -988,7 +988,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `preserveXmlWhitespace` | `boolean` | `false` | Preserve original XML whitespace during serialization |
 | `includeBreakNodes` | `boolean` | `false` | Include typed break nodes: DOCX `w:br`/`w:cr`, ODF `fo:break-before`/`fo:break-after` and `text:soft-page-break` |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal cross-references from AST (now honored for PDF too) |
-| `ignorePositions` | `boolean` | `false` | Omit per-node page-location data (`bounds`, page dimensions). Currently produced by the PDF parser |
+| `ignoreBounds` | `boolean` | `false` | Omit the geometric layout data: per-node bounding boxes (`node.bounds`) and page dimensions. Currently produced by the PDF parser |
 | `fileType` | `SupportedFileType \| null` | `null` | **Required for text-based binary data** (`'md'`, `'html'`, `'csv'`) as these lack magic bytes. |
 | `csvDelimiter` | `string` | `','` | Input delimiter when parsing CSV files |
 | `decompressionLimits` | `DecompressionLimits` | `{ maxUncompressedBytes: 512MB, maxZipEntries: 10000, maxTableCells: 1000000 }` | **New**: Limits applied during ZIP extraction (and ODF cell expansion) to protect against excessive memory and resource usage |
@@ -1013,9 +1013,9 @@ PDF-specific options, passed as `pdfParserConfig` on the parser config.
 | `mergeHyphenatedWords` | `boolean` | `true` | Join words split across a line break by a trailing hyphen |
 | `lineToleranceFactor` | `number` | `0.35` | Baseline tolerance (fraction of font size) for grouping fragments onto one line |
 | `spaceToleranceFactor` | `number` | `0.25` | Gap threshold (fraction of font size) for inserting a space between fragments |
-| `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | Heading detection strategy on the geometric path |
+| `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | How heading levels are decided. `'auto'`: from tags when tagged, else a size/weight heuristic. `'font-size'`: always the heuristic, even on a tagged PDF (tables/lists stay tagged; a tagged heading is re-leveled by size). `'off'`: never emit headings |
 | `pageRange` | `string` | `''` (all) | Restrict to given pages, e.g. `'1-3,7'`. Output keeps original page numbers |
-| `disableTextNormalization` | `boolean` | `false` | Return un-normalized text (preserve ligatures, combining marks, original whitespace) |
+| `normalizeText` | `boolean` | `true` | Unicode-normalize extracted text (expand ligatures, compose combining marks, regularize whitespace). Set `false` to preserve the raw source glyphs verbatim |
 | `extractTextColor` | `boolean` | `false` | Extract each run's fill color into `formatting.color`. Recovered from the operator list (fetched per page), so it roughly doubles parse time; pure black is left unset. Highlight annotations set `formatting.backgroundColor` regardless of this flag |
 
 ---
@@ -1030,8 +1030,8 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 | `generateIds` | `boolean` | `true` | Slug-based heading anchors: `id` attributes on HTML headings, and a `{#slug}` suffix on Markdown headings (`# Title {#title}`, kramdown/Pandoc). Set `false` to omit both — useful when the Markdown is rendered by GFM/CommonMark, which show `{#slug}` as literal text. Applies to all generator formats (it is a top-level option, not under `mdConfig`/`htmlConfig`). |
 | `renderMetadata` | `boolean` | `false` | Render title/author as visible header block |
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
-| `includeImages` | `boolean \| 'image-only' \| 'image+ocrtext' \| 'ocrtext-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocrtext'` (image then its recognized/OCR text); `'ocrtext-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocrtext'`), or just the OCR text for `'ocrtext-only'` |
-| `maxInlineImageBytes` | `number` | `2000000` | Max base64 size an image is inlined as a `data:` URI (HTML/Markdown). Larger images render their text (e.g. OCR text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. `0` never inlines, `Infinity` always inlines |
+| `includeImages` | `boolean \| 'image-only' \| 'image+ocr-text' \| 'ocr-text-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocr-text'` (image then its recognized/OCR text); `'ocr-text-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocr-text'`), or just the OCR text for `'ocr-text-only'` |
+| `maxInlineImageBytes` | `number` | `1500000` | Max decoded image size, in bytes, that is inlined as a `data:` URI (HTML/Markdown); the base64 URI itself is ~1/3 larger. Larger images render their text (e.g. OCR text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. `0` never inlines, `Infinity` always inlines |
 | `includeCharts` | `boolean` | `true` | Include interactive charts (HTML only) |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output |
 | `ignoreDefaultStyleMap` | `boolean` | `false` | Disable built-in style mappings (e.g., "Heading 1" → h1) |
@@ -1203,9 +1203,9 @@ Pass as `docxConfig` inside `GeneratorConfig`. The DOCX generator writes a real 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `pageSize` | `'A4' \| 'Letter' \| 'Legal'` | `'A4'` | Page size preset for the document section (`w:pgSz`) |
+| `format` | `PaperFormat` | `'A4'` | Page size for the document section (`w:pgSz`). Same names as `pdfConfig.format` (`A4`, `Letter`, `Legal`, `A3`, `Tabloid`, …; case-insensitive) |
 | `landscape` | `boolean` | `false` | Landscape orientation (swaps page dimensions and sets `w:orient`) |
-| `margin` | `object` | `{72,72,72,72}` | Page margins in points, 1/72 inch (`top`, `right`, `bottom`, `left`); 72 = Word's standard one inch |
+| `margin` | `object` | `{72,72,72,72}` | Page margins (`top`, `right`, `bottom`, `left`). Each is a number of points (1/72 inch) or a unit string (`'1in'`, `'2cm'`, `'36pt'`); 72 = Word's standard one inch |
 
 ```typescript
 import { OfficeConverter } from 'officeparser';
@@ -1213,7 +1213,7 @@ import { writeFileSync } from 'fs';
 
 // Any supported source → Word. Use --extractAttachments (CLI) or extractAttachments: true to embed images.
 const { value } = await OfficeConverter.convert('report.md', 'docx', {
-    docxConfig: { pageSize: 'Letter', margin: { top: 36, right: 36, bottom: 36, left: 36 } }
+    docxConfig: { format: 'Letter', margin: { top: 36, right: 36, bottom: 36, left: 36 } }
 });
 writeFileSync('report.docx', value); // value is a Uint8Array
 ```
@@ -1224,9 +1224,9 @@ Pass as `odtConfig` inside `GeneratorConfig`. The ODT generator writes a real Op
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `pageSize` | `'A4' \| 'Letter' \| 'Legal'` | `'A4'` | Page size preset for the page layout (`style:page-layout`) |
+| `format` | `PaperFormat` | `'A4'` | Page size for the page layout (`style:page-layout`). Same names as `pdfConfig.format` (`A4`, `Letter`, `Legal`, `A3`, `Tabloid`, …; case-insensitive) |
 | `landscape` | `boolean` | `false` | Landscape orientation (swaps page dimensions and sets `style:print-orientation`) |
-| `margin` | `object` | `{72,72,72,72}` | Page margins in points, 1/72 inch (`top`, `right`, `bottom`, `left`) |
+| `margin` | `object` | `{72,72,72,72}` | Page margins (`top`, `right`, `bottom`, `left`). Each is a number of points (1/72 inch) or a unit string (`'1in'`, `'2cm'`, `'36pt'`) |
 
 ```typescript
 import { OfficeConverter } from 'officeparser';

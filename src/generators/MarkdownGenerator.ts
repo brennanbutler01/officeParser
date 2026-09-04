@@ -1,5 +1,6 @@
 import { AdmonitionMetadata, AdmonitionSyntax, AttributeListSyntax, BreakMetadata, CitationSyntax, CodeMetadata, ConversionResult, DefinitionListSyntax, DeprecatedAdmonitionFlavor, EmbedMetadata, EmbedSyntax, FallbackToHtmlConfig, FootnoteSyntax, GeneratorConfig, HeadingMetadata, HighlightSyntax, ImageMetadata, ListMetadata, MarkdownDialectConfig, MarkdownDialectPreset, NoteMetadata, OfficeContentNode, OfficeParserAST, StrikethroughSyntax, TableMetadata, TextMetadata, WikilinkSyntax } from '../types.js';
 import { escapeHtml, markdownEscapeText, sanitizeCssValue, sanitizeMarkdownUrl, sanitizeUrl } from '../utils/sanitize.js';
+import { base64ByteLength } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 
@@ -508,8 +509,8 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     const anchorPrefix = anchors ? `${anchors}\n` : '';
                     const ocr = (node.text || '').trim();
 
-                    // ocrtext-only: emit just the recognized text, no image markup.
-                    if (mode === 'ocrtext-only') return ocr ? `${anchorPrefix}${markdownEscapeText(ocr)}` : '';
+                    // ocr-text-only: emit just the recognized text, no image markup.
+                    if (mode === 'ocr-text-only') return ocr ? `${anchorPrefix}${markdownEscapeText(ocr)}` : '';
 
                     // Build the image markup: inline as a data URI when small, otherwise reference by
                     // name (never inline a multi-MB image, which would emit a single line that overflows
@@ -517,7 +518,7 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     let src = meta?.url || meta?.attachmentName || '';
                     if (!meta?.url && meta?.attachmentName && this.ast) {
                         const attachment = this.ast.attachments.find(a => a.name === meta.attachmentName);
-                        if (attachment && (attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
+                        if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
                             src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                         }
                     }
@@ -527,8 +528,8 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     const imgTitle = meta?.title ? ` "${meta.title.replace(/"/g, '\\"')}"` : '';
                     const imageMd = `${anchorPrefix}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
 
-                    // image+ocrtext: the image, then its recognized text.
-                    if (mode === 'image+ocrtext' && ocr) return `${imageMd}\n\n${markdownEscapeText(ocr)}`;
+                    // image+ocr-text: the image, then its recognized text.
+                    if (mode === 'image+ocr-text' && ocr) return `${imageMd}\n\n${markdownEscapeText(ocr)}`;
                     return imageMd;
                 }
 

@@ -653,7 +653,7 @@ async function runTests() {
     const t41 = Date.now();
     const docxOut = fsPath.join(RESULTS_DIR, 'output_test.docx');
     if (fs.existsSync(docxOut)) fs.unlinkSync(docxOut);
-    const res41 = runCli(['--to', 'docx', '--docxConfig.pageSize=Letter', `--output=${docxOut}`]);
+    const res41 = runCli(['--to', 'docx', '--docxConfig.format=Letter', `--output=${docxOut}`]);
     const d41 = Date.now() - t41;
     if (res41.status === 0 && fs.existsSync(docxOut)) {
         const bytes = new Uint8Array(fs.readFileSync(docxOut));
@@ -679,7 +679,7 @@ async function runTests() {
     const t42 = Date.now();
     const odtOut = fsPath.join(RESULTS_DIR, 'output_test.odt');
     if (fs.existsSync(odtOut)) fs.unlinkSync(odtOut);
-    const res42 = runCli(['--to', 'odt', '--odtConfig.pageSize=Letter', `--output=${odtOut}`]);
+    const res42 = runCli(['--to', 'odt', '--odtConfig.format=Letter', `--output=${odtOut}`]);
     const d42 = Date.now() - t42;
     if (res42.status === 0 && fs.existsSync(odtOut)) {
         const bytes = new Uint8Array(fs.readFileSync(odtOut));

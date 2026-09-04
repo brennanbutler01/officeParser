@@ -1415,7 +1415,7 @@ async function testDocxGeneration(): Promise<void> {
 
     // ── Tier 3: docxConfig knobs actually take effect ─────────────────────────
     const land = (await OfficeGenerator.generate(synthetic, 'docx',
-        { docxConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
+        { docxConfig: { format: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
     const ldoc = docxParts(land)['word/document.xml'];
     assert.ok(/<w:pgSz w:w="20160"[^>]*w:orient="landscape"/.test(ldoc), 'DOCX config: Legal + landscape sets pgSz and orient');
     assert.ok(/<w:pgMar w:top="720" w:right="360" w:bottom="720" w:left="360"/.test(ldoc), 'DOCX config: margins (points) convert to twips');
@@ -1566,7 +1566,7 @@ async function testOdtGeneration(): Promise<void> {
 
     // ── Tier 3: odtConfig knobs actually take effect ──────────────────────────
     const land = (await OfficeGenerator.generate(synthetic, 'odt',
-        { odtConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
+        { odtConfig: { format: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as any)).value as Uint8Array;
     const lstyles = strFromU8(unzipSync(land)['styles.xml']);
     assert.ok(/fo:page-width="14in"/.test(lstyles) && /fo:page-height="8.5in"/.test(lstyles) && /style:print-orientation="landscape"/.test(lstyles), 'ODT config: Legal + landscape sets page geometry');
     assert.ok(/fo:margin-top="36pt"/.test(lstyles) && /fo:margin-left="18pt"/.test(lstyles), 'ODT config: margins (points) are written as fo:margin lengths');

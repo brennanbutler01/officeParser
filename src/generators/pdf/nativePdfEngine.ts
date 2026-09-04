@@ -18,6 +18,7 @@
 
 import { FullGeneratorConfig, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
 import { getAbortError, getOfficeError, getWarningMessage } from '../../utils/errorUtils.js';
+import { paperSizePt } from '../../utils/officeGenUtils.js';
 
 /**
  * Code points WinAnsi (CP1252) encodes beyond Latin-1, which the Standard-14 fonts accept (smart
@@ -38,13 +39,6 @@ function toWinAnsi(text: string): { text: string; changed: boolean } {
     }
     return { text: out, changed };
 }
-
-/** Paper sizes in PDF points (1/72"), keyed by the lowercased `pdfConfig.format`. */
-const PAGE_SIZES: Record<string, [number, number]> = {
-    letter: [612, 792], legal: [612, 1008], tabloid: [792, 1224], ledger: [1224, 792],
-    a0: [2383.94, 3370.39], a1: [1683.78, 2383.94], a2: [1190.55, 1683.78], a3: [841.89, 1190.55],
-    a4: [595.28, 841.89], a5: [419.53, 595.28], a6: [297.64, 419.53],
-};
 
 /** Lazily loads `pdf-lib`, throwing a typed, actionable error when it is not installed. */
 async function loadPdfLib(config: OfficeParserAST['config']): Promise<any> {
@@ -509,7 +503,8 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
     };
 
     const pc = config.pdfConfig;
-    let [w, h] = PAGE_SIZES[String(pc.format || 'a4').toLowerCase()] || PAGE_SIZES.a4;
+    const paper = paperSizePt(pc.format);
+    let w = paper.w, h = paper.h;
     if (pc.width) w = toPoints(pc.width, w);
     if (pc.height) h = toPoints(pc.height, h);
     if (pc.landscape && w < h) [w, h] = [h, w];

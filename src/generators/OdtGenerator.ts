@@ -2,15 +2,8 @@ import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, GeneratorConfig, ImageMode, OdtGeneratorConfig, OfficeContentNode, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
-
-/** Page dimensions in inches, portrait. */
-const PAGE_SIZES_IN: Record<string, { w: number; h: number }> = {
-    A4: { w: 8.2677, h: 11.6929 },
-    Letter: { w: 8.5, h: 11 },
-    Legal: { w: 8.5, h: 14 },
-};
 
 /**
  * The full ODF namespace set. Declared unconditionally on every part root (content.xml, styles.xml,
@@ -690,7 +683,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         if (mode === 'none') return '';
         const meta = node.metadata as any;
         const ocr = node.text || '';
-        if (mode === 'ocrtext-only') return ocr ? this.span(ocr, undefined) : '';
+        if (mode === 'ocr-text-only') return ocr ? this.span(ocr, undefined) : '';
 
         const media = meta?.attachmentName ? this.mediaRef(meta.attachmentName) : null;
         let frame = '';
@@ -706,7 +699,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
             if (safe) frame = `<text:a xlink:type="simple" xlink:href="${xmlText(encUrl(safe))}">${this.span(meta.altText || safe, undefined)}</text:a>`;
         }
         if (!frame) { const fb = meta?.altText || ocr; return fb ? this.span(fb, undefined) : ''; }
-        if (mode === 'image+ocrtext' && ocr) return frame + this.span('\n' + ocr, undefined);
+        if (mode === 'image+ocr-text' && ocr) return frame + this.span('\n' + ocr, undefined);
         return frame;
     }
 
@@ -752,10 +745,10 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
 
     private contentWidthPt(): number {
         const cfg = this.config.odtConfig;
-        const size = PAGE_SIZES_IN[cfg.pageSize] || PAGE_SIZES_IN.A4;
-        const widthPt = (cfg.landscape ? size.h : size.w) * 72;
-        const left = cfg.margin.left ?? 72;
-        const right = cfg.margin.right ?? 72;
+        const size = paperSizePt(cfg.format);
+        const widthPt = cfg.landscape ? size.h : size.w;
+        const left = marginPt(cfg.margin.left);
+        const right = marginPt(cfg.margin.right);
         return Math.max(36, widthPt - left - right);
     }
 
@@ -859,15 +852,15 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
 
     private buildStylesXml(headerXml: string, footerXml: string): string {
         const cfg = this.config.odtConfig;
-        const size = PAGE_SIZES_IN[cfg.pageSize] || PAGE_SIZES_IN.A4;
-        const pw = cfg.landscape ? size.h : size.w;
-        const ph = cfg.landscape ? size.w : size.h;
+        const size = paperSizePt(cfg.format);
+        const pw = (cfg.landscape ? size.h : size.w) / 72; // inches
+        const ph = (cfg.landscape ? size.w : size.h) / 72;
         const orient = cfg.landscape ? 'landscape' : 'portrait';
         const mar = cfg.margin;
         const pageLayout = `<style:page-layout style:name="pm1"><style:page-layout-properties`
             + ` fo:page-width="${fmtIn(pw)}" fo:page-height="${fmtIn(ph)}" style:print-orientation="${orient}"`
-            + ` fo:margin-top="${fmtPt(mar.top ?? 72)}" fo:margin-bottom="${fmtPt(mar.bottom ?? 72)}"`
-            + ` fo:margin-left="${fmtPt(mar.left ?? 72)}" fo:margin-right="${fmtPt(mar.right ?? 72)}"/></style:page-layout>`;
+            + ` fo:margin-top="${fmtPt(marginPt(mar.top))}" fo:margin-bottom="${fmtPt(marginPt(mar.bottom))}"`
+            + ` fo:margin-left="${fmtPt(marginPt(mar.left))}" fo:margin-right="${fmtPt(marginPt(mar.right))}"/></style:page-layout>`;
         const hf = (headerXml ? `<style:header>${headerXml}</style:header>` : '') + (footerXml ? `<style:footer>${footerXml}</style:footer>` : '');
         const masterPage = `<style:master-page style:name="Standard" style:page-layout-name="pm1">${hf}</style:master-page>`;
         return `<?xml version="1.0" encoding="UTF-8"?>\n`

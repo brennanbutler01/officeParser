@@ -48,6 +48,20 @@ interface WalkCtx {
 const HEADING = /^H([1-6])$/;
 const role = (n: StructNode): string => n.role || n.type || '';
 
+/**
+ * Resolves the heading level to force for a tagged heading node, honoring `headingDetection`:
+ * - `'off'`:       0 - never a heading, always a paragraph.
+ * - `'font-size'`: `undefined` - ignore the tag's own level and let the geometric font-size/weight
+ *                  heuristic in {@link runsToParagraph} decide (which may also demote it to a
+ *                  paragraph), i.e. "always use the heuristic, even on tagged PDFs".
+ * - `'auto'`:      the tag's declared level (`tagLevel`), trusting the document's own structure.
+ */
+function taggedHeadingLevel(cfg: DocContext['cfg'], tagLevel: number): number | undefined {
+    if (cfg.headingDetection === 'off') return 0;
+    if (cfg.headingDetection === 'font-size') return undefined;
+    return tagLevel;
+}
+
 /** Walks a page's struct tree into ordered AST nodes. */
 export function buildTaggedNodes(
     structTree: any, runsByMcid: Map<string, RawRun[]>, page: PageContext, doc: DocContext, opts: TaggedOptions,
@@ -72,13 +86,12 @@ function walkNode(node: StructNode, ctx: WalkCtx, sectionDepth: number): OfficeC
     const r = role(node);
     const hm = HEADING.exec(r);
     if (hm) {
-        const level = ctx.doc.cfg.headingDetection === 'off' ? 0 : parseInt(hm[1], 10);
-        const p = paragraphFrom(node, ctx, level);
+        const p = paragraphFrom(node, ctx, taggedHeadingLevel(ctx.doc.cfg, parseInt(hm[1], 10)));
         return p ? [p] : [];
     }
 
     switch (r) {
-        case 'H': return blockWithNotes(node, ctx, Math.min(6, Math.max(1, sectionDepth)));
+        case 'H': return blockWithNotes(node, ctx, taggedHeadingLevel(ctx.doc.cfg, Math.min(6, Math.max(1, sectionDepth))));
         case 'P': case 'Caption': case 'Title': case 'Lbl': case 'LBody': return blockWithNotes(node, ctx, 0);
         // A table-of-contents entry (TOCI) wraps a Link + Span + leader dots + page number; emit it as
         // one paragraph instead of letting the default recursion shatter each content leaf into its own.
@@ -132,7 +145,7 @@ function collectRuns(node: StructNode, ctx: WalkCtx, skip?: Set<string>): RawRun
 }
 
 /** Emits a block paragraph/heading, attaching any nested footnotes to its last text run. */
-function blockWithNotes(node: StructNode, ctx: WalkCtx, level: number): OfficeContentNode[] {
+function blockWithNotes(node: StructNode, ctx: WalkCtx, level: number | undefined): OfficeContentNode[] {
     const out: OfficeContentNode[] = [];
     const p = paragraphFrom(node, ctx, level);
     if (p) out.push(p);
@@ -182,7 +195,7 @@ function markCovered(node: StructNode, ctx: WalkCtx): void {
     for (const c of node.children || []) markCovered(c, ctx);
 }
 
-function paragraphFrom(node: StructNode, ctx: WalkCtx, level: number): OfficeContentNode | null {
+function paragraphFrom(node: StructNode, ctx: WalkCtx, level: number | undefined): OfficeContentNode | null {
     const runs = collectRuns(node, ctx);
     if (!runs.length) return null;
     return runsToParagraph(runs, ctx.page, ctx.doc, level);
@@ -356,7 +369,7 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     // Recover merged cells the tags padded with empty placeholders (needs geometry). Column spans
     // run first, on the still-rectangular grid (they use positional indices); row spans run after,
     // keyed by the geometry-stable `col`, so they tolerate the placeholders columns already dropped.
-    if (ctx.doc.cfg.includePositions) { inferColSpans(rows); inferRowSpans(rows); }
+    if (ctx.doc.cfg.includeBounds) { inferColSpans(rows); inferRowSpans(rows); }
     const table: OfficeContentNode = { type: 'table', children: rows, text: rows.map(r => r.text || '').join('\n') };
     const tb = unionAll(rows.map(r => r.bounds));
     if (tb) table.bounds = tb;

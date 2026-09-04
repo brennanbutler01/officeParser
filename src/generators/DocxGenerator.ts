@@ -2,15 +2,8 @@ import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, DocxGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, MIME_EXT, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
-
-/** Page dimensions in twips (1/20 pt), portrait. */
-const PAGE_SIZES: Record<string, { w: number; h: number }> = {
-    A4: { w: 11906, h: 16838 },
-    Letter: { w: 12240, h: 15840 },
-    Legal: { w: 12240, h: 20160 },
-};
 
 const EMU_PER_PT = 12700;
 const EMU_PER_IN = 914400;
@@ -665,7 +658,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         if (mode === 'none') return '';
         const meta = node.metadata as any;
         const ocr = node.text || '';
-        if (mode === 'ocrtext-only') return ocr ? this.run(ocr, undefined) : '';
+        if (mode === 'ocr-text-only') return ocr ? this.run(ocr, undefined) : '';
 
         const rel = meta?.attachmentName ? this.mediaRel(meta.attachmentName) : null;
         let drawing = '';
@@ -690,7 +683,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         // No renderable image (unresolvable/unsupported attachment, no url): keep the alt text or OCR
         // so the content is not silently lost.
         if (!drawing) { const fallback = meta?.altText || ocr; return fallback ? this.run(fallback, undefined) : ''; }
-        if (mode === 'image+ocrtext' && ocr) return drawing + this.run('\n' + ocr, undefined);
+        if (mode === 'image+ocr-text' && ocr) return drawing + this.run('\n' + ocr, undefined);
         return drawing;
     }
 
@@ -725,10 +718,10 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
     private contentWidthTwips(): number {
         const cfg = this.config.docxConfig;
-        const size = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.A4;
-        const w = cfg.landscape ? size.h : size.w;
-        const left = Math.round((cfg.margin.left ?? 72) * TWIPS_PER_PT);
-        const right = Math.round((cfg.margin.right ?? 72) * TWIPS_PER_PT);
+        const size = paperSizePt(cfg.format);
+        const w = Math.round((cfg.landscape ? size.h : size.w) * TWIPS_PER_PT);
+        const left = Math.round(marginPt(cfg.margin.left) * TWIPS_PER_PT);
+        const right = Math.round(marginPt(cfg.margin.right) * TWIPS_PER_PT);
         return Math.max(720, w - left - right);
     }
 
@@ -840,13 +833,13 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
     private buildDocumentXml(body: string, headerRid: string, footerRid: string): string {
         const cfg = this.config.docxConfig;
-        const size = PAGE_SIZES[cfg.pageSize] || PAGE_SIZES.A4;
-        const pw = cfg.landscape ? size.h : size.w;
-        const ph = cfg.landscape ? size.w : size.h;
+        const size = paperSizePt(cfg.format);
+        const pw = Math.round((cfg.landscape ? size.h : size.w) * TWIPS_PER_PT);
+        const ph = Math.round((cfg.landscape ? size.w : size.h) * TWIPS_PER_PT);
         const orient = cfg.landscape ? ' w:orient="landscape"' : '';
         const mar = cfg.margin;
-        const pgMar = `<w:pgMar w:top="${Math.round((mar.top ?? 72) * TWIPS_PER_PT)}" w:right="${Math.round((mar.right ?? 72) * TWIPS_PER_PT)}" `
-            + `w:bottom="${Math.round((mar.bottom ?? 72) * TWIPS_PER_PT)}" w:left="${Math.round((mar.left ?? 72) * TWIPS_PER_PT)}" w:header="708" w:footer="708" w:gutter="0"/>`;
+        const pgMar = `<w:pgMar w:top="${Math.round(marginPt(mar.top) * TWIPS_PER_PT)}" w:right="${Math.round(marginPt(mar.right) * TWIPS_PER_PT)}" `
+            + `w:bottom="${Math.round(marginPt(mar.bottom) * TWIPS_PER_PT)}" w:left="${Math.round(marginPt(mar.left) * TWIPS_PER_PT)}" w:header="708" w:footer="708" w:gutter="0"/>`;
         const sectPr = `<w:sectPr>`
             + (headerRid ? `<w:headerReference w:type="default" r:id="${headerRid}"/>` : '')
             + (footerRid ? `<w:footerReference w:type="default" r:id="${footerRid}"/>` : '')

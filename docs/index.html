@@ -2842,7 +2842,7 @@
                 { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false },
                 { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true },
                 { id: 'cfg_ignoreInternalLinks_parser', label: 'Ignore Internal Links', type: 'switch', default: false },
-                { id: 'cfg_ignorePositions', label: 'Ignore Positions (PDF geometry)', type: 'switch', default: false },
+                { id: 'cfg_ignoreBounds', label: 'Ignore Bounds (PDF geometry)', type: 'switch', default: false },
                 { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true },
                 { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true },
                 { id: 'cfg_pdfPassword', label: 'PDF Password', type: 'text', default: '', width: '120px' },
@@ -2867,7 +2867,7 @@
                 { id: 'cfg_includeFormatting', label: 'Include Formatting', type: 'switch', default: true },
                 { id: 'cfg_generateIds', label: 'Generate IDs', type: 'switch', default: true },
                 { id: 'cfg_renderMetadata', label: 'Render Metadata', type: 'switch', default: false },
-                { id: 'cfg_includeImages', label: 'Images', type: 'select', options: ['image-only', 'image+ocrtext', 'ocrtext-only', 'none'], names: ['Image only', 'Image + OCR text', 'OCR text only', 'None'], default: 'image-only', width: '130px' },
+                { id: 'cfg_includeImages', label: 'Images', type: 'select', options: ['image-only', 'image+ocr-text', 'ocr-text-only', 'none'], names: ['Image only', 'Image + OCR text', 'OCR text only', 'None'], default: 'image-only', width: '130px' },
                 { id: 'cfg_includeCharts', label: 'Include Charts', type: 'switch', default: true },
                 { id: 'cfg_ignoreInternalLinks_generator', label: 'Ignore Internal Links', type: 'switch', default: false },
                 { id: 'cfg_ignoreDefaultStyleMap', label: 'Ignore Default Style Map', type: 'switch', default: false }
@@ -4772,7 +4772,7 @@
                     extractAttachments: document.getElementById('cfg_extractAttachments').checked,
                     ocr: document.getElementById('cfg_ocr').checked,
                     ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
-                    ignorePositions: document.getElementById('cfg_ignorePositions').checked,
+                    ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
                     pdfParserConfig: {
                         useTags: document.getElementById('cfg_pdfUseTags').checked,
                         detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,
@@ -5093,7 +5093,7 @@
                         extractAttachments: document.getElementById('cfg_extractAttachments').checked,
                         ocr: document.getElementById('cfg_ocr').checked,
                         ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
-                        ignorePositions: document.getElementById('cfg_ignorePositions').checked,
+                        ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
                         pdfParserConfig: {
                             useTags: document.getElementById('cfg_pdfUseTags').checked,
                             detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,

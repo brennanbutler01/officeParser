@@ -23,7 +23,7 @@
  *   --serializeRawContent     Include stringified XML in metadata (default: true)
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX only, default: false)
- *   --ignorePositions         Omit per-node page-location data (default: false)
+ *   --ignoreBounds            Omit per-node bounding boxes and page dimensions (default: false)
  *   --pdfParserConfig.password=secret   Password for an encrypted PDF
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
  *   --verbose                 Show full error stack traces and warning logs
@@ -52,12 +52,12 @@ const knownParserBooleans = new Set([
     'ocr', 'extractAttachments', 'ignoreNotes', 'ignoreComments',
     'ignoreHeadersAndFooters', 'ignoreSlideMasters', 'ignoreInternalLinks',
     'includeRawContent', 'serializeRawContent', 'preserveXmlWhitespace', 'includeBreakNodes',
-    'ignorePositions',
+    'ignoreBounds',
     // Dotted boolean keys are listed so a bare `--group.flag` does not swallow the following file
     // argument as its value (the isKnownBoolean check keys off the full dotted name).
     'htmlParserConfig.preserveAttributes',
     'pdfParserConfig.useTags', 'pdfParserConfig.detectColumns',
-    'pdfParserConfig.mergeHyphenatedWords', 'pdfParserConfig.disableTextNormalization',
+    'pdfParserConfig.mergeHyphenatedWords', 'pdfParserConfig.normalizeText',
 ]);
 
 const knownGeneratorBooleans = new Set([
@@ -163,7 +163,7 @@ for (let i = 0; i < args.length; i++) {
                 if (boolValue !== undefined) {
                     target[path] = boolValue;
                 } else if (path === 'includeImages') {
-                    // includeImages also accepts an ImageMode string (e.g. --includeImages=image+ocrtext);
+                    // includeImages also accepts an ImageMode string (e.g. --includeImages=image+ocr-text);
                     // it stays in knownGeneratorBooleans so a bare flag is true and never eats a positional.
                     target[path] = val;
                 } else if (knownParserBooleans.has(path) || (isGeneratorOption && knownGeneratorBooleans.has(path))) {
@@ -296,7 +296,7 @@ if (fileArg && !showHelp) {
     console.log('  --serializeRawContent                       Serialize raw XML content (default: true)');
     console.log('  --preserveXmlWhitespace                     Keep raw formatting space (default: false)');
     console.log('  --includeBreakNodes                         Include break nodes (DOCX only, default: false)');
-    console.log('  --ignorePositions                           Omit per-node page-location data (default: false)');
+    console.log('  --ignoreBounds                              Omit per-node bounding boxes and page dimensions (default: false)');
     console.log('  --verbose                                   Show full error stack traces and warning logs');
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');

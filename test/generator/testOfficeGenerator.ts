@@ -91,7 +91,7 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxTableCells: 1000000
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
-    ignorePositions: false,
+    ignoreBounds: false,
     pdfParserConfig: {
         password: '',
         onPassword: () => undefined,
@@ -102,7 +102,7 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         spaceToleranceFactor: 0.25,
         headingDetection: 'auto',
         pageRange: '',
-        disableTextNormalization: false,
+        normalizeText: true,
         extractTextColor: true
     }
 };
@@ -242,13 +242,13 @@ const GENERATOR_CONFIG_TESTS = [
     {
         id: 'G-docx',
         name: 'DOCX Legal Landscape Margins',
-        config: { docxConfig: { pageSize: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
+        config: { docxConfig: { format: 'Legal', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
         formats: ['docx'] as GeneratorFormat[],
     },
     {
         id: 'G-odt',
         name: 'ODT Letter Landscape Margins',
-        config: { odtConfig: { pageSize: 'Letter', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
+        config: { odtConfig: { format: 'Letter', landscape: true, margin: { top: 36, right: 18, bottom: 36, left: 18 } } } as GeneratorConfig,
         formats: ['odt'] as GeneratorFormat[],
     },
 ];

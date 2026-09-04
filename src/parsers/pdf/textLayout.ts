@@ -336,7 +336,7 @@ export interface PageContext {
 }
 
 function emitBounds(box: NodeBounds, page: PageContext, cfg: PdfLayoutConfig): NodeBounds | undefined {
-    if (!cfg.includePositions) return undefined;
+    if (!cfg.includeBounds) return undefined;
     return roundBounds(rotateBoundsToRendered(box, page.rotation, page.authoredW, page.authoredH));
 }
 

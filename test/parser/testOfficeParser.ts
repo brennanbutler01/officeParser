@@ -132,7 +132,7 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxTableCells: 1000000
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
-    ignorePositions: false,
+    ignoreBounds: false,
     pdfParserConfig: {
         password: '',
         onPassword: () => undefined,
@@ -143,7 +143,7 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         spaceToleranceFactor: 0.25,
         headingDetection: 'auto',
         pageRange: '',
-        disableTextNormalization: false,
+        normalizeText: true,
         extractTextColor: true
     }
 };
@@ -3283,6 +3283,25 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('useTags:false parse', false, 'parsed', e?.message || String(e));
     }
 
+    // --- headingDetection:'font-size' re-levels headings by size even on a tagged PDF ---
+    try {
+        const collectHeadings = (ast: any) => { const hs: any[] = []; ast.content.forEach((p: any) => walk(p, (n: any) => { if (n.type === 'heading') hs.push(n); })); return hs; };
+        const isH = (hs: any[], t: string) => hs.some((h: any) => String(h.text || '').startsWith(t));
+        const autoH = collectHeadings(await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false }));
+        const fsH = collectHeadings(await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, pdfParserConfig: { headingDetection: 'font-size' } }));
+        // 'auto' trusts the tags: the calibre fixture tags many body-sized headings (e.g. "Text Formatting").
+        add("headingDetection:'auto' trusts tagged headings", isH(autoH, 'Text Formatting'), '"Text Formatting" is a heading', isH(autoH, 'Text Formatting') ? 'heading' : 'not heading');
+        // 'font-size' ignores the tag levels and applies the size/weight heuristic instead, so a body-sized
+        // tagged heading is demoted and the count drops below 'auto'. Before the option was wired up, this
+        // produced the identical result to 'auto' (the option did nothing).
+        add("headingDetection:'font-size' overrides tags via size heuristic",
+            fsH.length > 0 && fsH.length < autoH.length && !isH(fsH, 'Text Formatting'),
+            `fewer than ${autoH.length} headings, "Text Formatting" demoted`,
+            `${fsH.length} headings, "Text Formatting" heading=${isH(fsH, 'Text Formatting')}`);
+    } catch (e: any) {
+        add("headingDetection font-size", false, 'ran', e?.message || String(e));
+    }
+
     // --- layout-faithful .to('text') ---
     try {
         const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false });
@@ -3297,16 +3316,16 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('layout text', false, 'rendered', e?.message || String(e));
     }
 
-    // --- ignorePositions strips geometry ---
+    // --- ignoreBounds strips geometry ---
     try {
-        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignorePositions: true });
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignoreBounds: true });
         let anyBounds = false;
         ast.content.forEach((p: any) => walk(p, n => { if (n.bounds) anyBounds = true; }));
         const page1 = ast.content[0] as any;
-        add('ignorePositions strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
-        add('ignorePositions strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
+        add('ignoreBounds strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
+        add('ignoreBounds strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
     } catch (e: any) {
-        add('ignorePositions parse', false, 'parsed', e?.message || String(e));
+        add('ignoreBounds parse', false, 'parsed', e?.message || String(e));
     }
 
     // --- ignoreInternalLinks removes internal link runs ---

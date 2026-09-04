@@ -1,6 +1,7 @@
 import { AdmonitionMetadata, CellMetadata, CodeMetadata, ConversionResult, EmbedMetadata, GeneratorConfig, HeadingMetadata, ImageMetadata, ListMetadata, NoteMetadata, OfficeContentNode, OfficeParserAST, OfficeWarningType, PageMetadata, SlideMetadata, StandaloneConfig, TableMetadata, TextMetadata } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
+import { base64ByteLength } from '../utils/officeGenUtils.js';
 import { escapeHtml, isSafeHtmlAttributeName, isSafeStyleMapTag, sanitizeCssValue, sanitizeUrl, sanitizeImageUrl, serializeForInlineScript } from '../utils/sanitize.js';
 
 type ResolvedStandalone = Required<StandaloneConfig>;
@@ -792,14 +793,14 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const attachmentName = meta?.attachmentName;
                 const ocr = (node.text || '').trim();
 
-                // ocrtext-only: emit the recognized text as a visible block, no <img>. A <pre>
+                // ocr-text-only: emit the recognized text as a visible block, no <img>. A <pre>
                 // preserves the 2-D column layout the OCR reconstruction encodes with spaces.
-                if (mode === 'ocrtext-only') return ocr ? `${extraAnchors}<pre class="ocr-text"${idAttr}>${this.escape(ocr)}</pre>` : '';
+                if (mode === 'ocr-text-only') return ocr ? `${extraAnchors}<pre class="ocr-text"${idAttr}>${this.escape(ocr)}</pre>` : '';
 
                 let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
                     const attachment = this.ast.attachments.find(a => a.name === attachmentName);
-                    if (attachment && (attachment.data?.length || 0) <= this.config.maxInlineImageBytes) {
+                    if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
                         src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                     }
                     // Oversized attachments (e.g. a scanned PDF page) are not inlined as a
@@ -834,12 +835,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
                 const imgTitle = meta?.title ? ` title="${this.escape(meta.title)}"` : '';
                 // alt is the descriptive alt text, not the OCR text: OCR text is surfaced visibly under
-                // 'image+ocrtext' rather than hidden in alt (where a broken/referenced image would leak
+                // 'image+ocr-text' rather than hidden in alt (where a broken/referenced image would leak
                 // it into the rendered page).
                 const img = `<img src="${sanitizeImageUrl(src)}" alt="${this.escape(meta?.altText || '')}"${imgTitle}${className}${mappedAttrs}${imgDataAttrs}${imgStyleAttr}>`;
                 let content = this.config.includeFormatting ? `<div class="image-container">${img}<div class="caption">${this.escape(attachmentName || '')}</div></div>` : img;
-                // image+ocrtext: the image, then its recognized text (a <pre> keeps the 2-D layout).
-                if (mode === 'image+ocrtext' && ocr) content += `<pre class="ocr-text">${this.escape(ocr)}</pre>`;
+                // image+ocr-text: the image, then its recognized text (a <pre> keeps the 2-D layout).
+                if (mode === 'image+ocr-text' && ocr) content += `<pre class="ocr-text">${this.escape(ocr)}</pre>`;
                 return `${extraAnchors}<div${idAttr}>${content}</div>`;
             }
 

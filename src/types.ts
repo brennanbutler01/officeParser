@@ -371,26 +371,27 @@ export interface CommonOfficeParserConfig {
      */
     decompressionLimits?: DecompressionLimits;
     /**
-     * Flag to omit per-node page-location data from the AST.
+     * Omit the geometric layout data ("where on the page is this?") from the AST.
      *
-     * By default, parsers that know where content sits on the page attach a {@link NodeBounds}
-     * box to text runs, paragraphs, headings, tables, cells and images, and page dimensions to
-     * page nodes. Today only the PDF parser produces this. Set this to strip all of it, which
-     * makes the AST smaller and matches the pre-8.0 output shape.
+     * By default a parser that knows the geometry attaches, to every content node, a
+     * {@link NodeBounds} box (`node.bounds`: the node's `{ x, y, width, height }` rectangle on its
+     * page, in points) and, to each page node, the page dimensions ({@link PageMetadata.pageWidth},
+     * `pageHeight`, `rotation`). Today only the PDF parser produces any of this. Set this flag to
+     * drop all of it, giving a smaller AST that matches the pre-8.0 output shape.
      *
-     * Note this also disables the layout-faithful `.to('text')` rendering, which relies on those
-     * boxes; without them the text generator falls back to flowing text.
+     * Note this also turns off the layout-faithful `.to('text')` rendering, which needs the boxes to
+     * align columns and tables; without them the text generator falls back to plain flowing text.
      *
-     * Default is false.
+     * Default is false (bounds are emitted).
      */
-    ignorePositions?: boolean;
+    ignoreBounds?: boolean;
 }
 
 /**
  * Format-specific options for PDF parsing.
  *
  * Mirrors {@link HtmlParserConfig}: everything intrinsically PDF-only lives here, while
- * cross-format flags (e.g. `ignorePositions`, `ignoreInternalLinks`, `ignoreHeadersAndFooters`)
+ * cross-format flags (e.g. `ignoreBounds`, `ignoreInternalLinks`, `ignoreHeadersAndFooters`)
  * stay flat on {@link CommonOfficeParserConfig}.
  */
 export interface PdfParserConfig {
@@ -424,9 +425,13 @@ export interface PdfParserConfig {
      * Use the PDF's tagged-structure tree (headings, tables, lists, notes) when the document
      * declares one and it passes reliability checks.
      *
-     * When false, or when the tree is missing or flagged unreliable, structure is recovered from
+     * When false, or when the tree is missing or flagged unreliable, all structure is recovered from
      * geometry instead (column detection, line and paragraph reconstruction). Set false to force
      * the geometric path even on tagged PDFs.
+     *
+     * This is the whole-tree switch. To keep tagged tables/lists/notes but override only how heading
+     * levels are decided, leave this true and use `headingDetection: 'font-size'` (see below) instead
+     * of turning tags off entirely.
      *
      * Default is true.
      */
@@ -467,10 +472,16 @@ export interface PdfParserConfig {
      */
     spaceToleranceFactor?: number;
     /**
-     * How headings are detected on the geometric path.
-     * - 'auto': tagged roles when trusted, otherwise a font-size and weight heuristic.
-     * - 'font-size': always use the heuristic, even on tagged PDFs.
-     * - 'off': never emit headings; everything is a paragraph.
+     * How heading levels are decided. This is independent of `useTags`: it re-decides only the
+     * heading level, while `useTags` still governs whether tables/lists/notes come from the tags.
+     * - 'auto': trust the source. On the tagged path, a heading's level comes from its tag (`H1`..
+     *   `H6`); on the geometric path (untagged, or `useTags: false`), from a font-size and weight
+     *   heuristic.
+     * - 'font-size': always use the size/weight heuristic, even on a tagged PDF. Tagged tables and
+     *   lists are still honored, but each tagged heading is re-leveled by its font size (and demoted
+     *   to a paragraph when it is not visually heading-like). Use this when a PDF's heading tags are
+     *   present but wrong or flat.
+     * - 'off': never emit headings; every block is a paragraph.
      *
      * Default is 'auto'.
      */
@@ -484,12 +495,14 @@ export interface PdfParserConfig {
      */
     pageRange?: string;
     /**
-     * Return un-normalized text from pdf.js: ligatures, combining marks and original whitespace are
-     * preserved rather than Unicode-normalized. Use when you need byte-faithful source glyphs.
+     * Unicode-normalize the text pdf.js extracts: ligatures are expanded, combining marks composed,
+     * and original whitespace regularized, so the output is clean, searchable text. Turn this off to
+     * get the raw source glyphs verbatim (ligatures, combining marks and whitespace preserved) when
+     * you need byte-faithful fidelity to what the PDF actually stores.
      *
-     * Default is false.
+     * Default is true (text is normalized).
      */
-    disableTextNormalization?: boolean;
+    normalizeText?: boolean;
     /**
      * Extract each text run's fill color into `formatting.color` (hex `#rrggbb`). pdf.js exposes no
      * color on its text content, so this is recovered from the page's operator list, which must then
@@ -749,7 +762,7 @@ export interface MetadataOverrides {
  * How a generator renders an image node. See {@link CommonGeneratorConfig.includeImages}.
  * "OCR text" is the image node's recognized text (populated for scanned PDF images).
  */
-export type ImageMode = 'image-only' | 'image+ocrtext' | 'ocrtext-only' | 'none';
+export type ImageMode = 'image-only' | 'image+ocr-text' | 'ocr-text-only' | 'none';
 
 export interface CommonGeneratorConfig {
     /**
@@ -854,20 +867,20 @@ export interface CommonGeneratorConfig {
      * strings:
      * - `'image-only'` (default): embed the image (inlined as a `data:` URI when under
      *   `maxInlineImageBytes`, otherwise referenced by name); no OCR/recognized text.
-     * - `'image+ocrtext'`: embed the image, then its recognized (OCR) text below it.
-     * - `'ocrtext-only'`: only the recognized (OCR) text, no image.
+     * - `'image+ocr-text'`: embed the image, then its recognized (OCR) text below it.
+     * - `'ocr-text-only'`: only the recognized (OCR) text, no image.
      * - `'none'`: omit the image entirely.
      *
-     * Plain-text output cannot embed an image, so there `'image-only'`/`'image+ocrtext'` render an
-     * `[Image: name]` placeholder (plus the OCR text for `'image+ocrtext'`), `'ocrtext-only'` renders
+     * Plain-text output cannot embed an image, so there `'image-only'`/`'image+ocr-text'` render an
+     * `[Image: name]` placeholder (plus the OCR text for `'image+ocr-text'`), `'ocr-text-only'` renders
      * just the OCR text, and `'none'` renders nothing.
      *
      * Defaults to `true` (`'image-only'`).
      */
     includeImages?: boolean | ImageMode;
     /**
-     * Maximum size, in base64 characters, of an image that HTML/Markdown will inline as a `data:`
-     * URI. An attachment whose base64 exceeds this is not inlined: the image node renders its text
+     * Maximum size, in bytes of decoded image data, of an image that HTML/Markdown will inline as a
+     * `data:` URI. An attachment larger than this is not inlined: the image node renders its text
      * (e.g. OCR text) when it has any, otherwise a compact reference to the attachment name.
      *
      * This guards against pathologically large single lines. A scanned PDF page, for instance, is
@@ -875,7 +888,8 @@ export interface CommonGeneratorConfig {
      * parsers. Set to `0` to disable inlining entirely (always reference), or `Infinity` to always
      * inline regardless of size.
      *
-     * Defaults to 2000000 (about 1.5 MB of image data).
+     * Defaults to 1500000 (about 1.5 MB of image data). Note the `data:` URI itself is roughly a
+     * third larger, since base64 encodes 3 bytes as 4 characters.
      */
     maxInlineImageBytes?: number;
     /**
@@ -1127,6 +1141,15 @@ export interface HtmlGeneratorConfig {
 }
 
 /**
+ * Named paper sizes shared by every generator that lays out pages (PDF, DOCX, ODT), so a page size
+ * is written the same way whatever the destination. Case-insensitive: `'A4'` and `'a4'` are the same
+ * size. The A-series is ISO 216; Letter/Legal/Tabloid/Ledger are the US/ANSI sizes.
+ */
+export type PaperFormat =
+    'letter' | 'legal' | 'tabloid' | 'ledger' | 'a0' | 'a1' | 'a2' | 'a3' | 'a4' | 'a5' | 'a6' |
+    'Letter' | 'Legal' | 'Tabloid' | 'Ledger' | 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5' | 'A6';
+
+/**
  * Configuration options for PDF generation.
  * Maps closely to Puppeteer's PDF options.
  */
@@ -1157,8 +1180,8 @@ export interface PdfGeneratorConfig {
      * engine). Defaults to false.
      */
     outline?: boolean;
-    /** Paper format. Defaults to 'A4'. */
-    format?: 'letter' | 'legal' | 'tabloid' | 'ledger' | 'a0' | 'a1' | 'a2' | 'a3' | 'a4' | 'a5' | 'a6' | 'Letter' | 'Legal' | 'Tabloid' | 'Ledger' | 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5' | 'A6';
+    /** Paper format. Defaults to 'A4'. See {@link PaperFormat}. */
+    format?: PaperFormat;
     /** Paper width, accepts values labeled with units (e.g., '5in', '3cm') or numbers (in pixels). */
     width?: string | number;
     /** Paper height, accepts values labeled with units (e.g., '5in', '3cm') or numbers (in pixels). */
@@ -1277,32 +1300,38 @@ export interface StructuredStyleMapping {
  */
 export interface DocxGeneratorConfig {
     /**
-     * Page size preset for the document section (`w:pgSz`). Defaults to `'A4'`, matching
-     * {@link PdfGeneratorConfig.format}'s default.
+     * Page size for the document section (`w:pgSz`). One of the shared {@link PaperFormat} names,
+     * the same set and spelling {@link PdfGeneratorConfig.format} accepts. Defaults to `'A4'`.
      */
-    pageSize?: 'A4' | 'Letter' | 'Legal';
+    format?: PaperFormat;
     /** Landscape orientation (swaps the page dimensions and sets `w:orient`). Defaults to false. */
     landscape?: boolean;
     /**
-     * Page margins in points (1/72 inch), converted to twips for `w:pgMar`. Defaults to 72 on all
-     * sides (Word's standard one inch).
+     * Page margins, converted to twips for `w:pgMar`. Each side is a number of points (1/72 inch) or
+     * a unit-labeled string (`'1in'`, `'2cm'`, `'36pt'`, `'48px'`); a bare number is points. Defaults
+     * to 72 (Word's standard one inch) on every side.
      */
-    margin?: { top?: number; right?: number; bottom?: number; left?: number };
+    margin?: { top?: number | string; right?: number | string; bottom?: number | string; left?: number | string };
 }
 
 /**
  * Configuration options for ODT (OpenDocument Text) generation.
  */
 export interface OdtGeneratorConfig {
-    /** Page size preset for the page layout (`style:page-layout` in styles.xml). Defaults to `'A4'`. */
-    pageSize?: 'A4' | 'Letter' | 'Legal';
+    /**
+     * Page size for the page layout (`style:page-layout` in styles.xml). One of the shared
+     * {@link PaperFormat} names, the same set {@link PdfGeneratorConfig.format} accepts. Defaults to
+     * `'A4'`.
+     */
+    format?: PaperFormat;
     /** Landscape orientation (swaps page dimensions and sets `style:print-orientation`). Defaults to false. */
     landscape?: boolean;
     /**
-     * Page margins in points (1/72 inch), written as `fo:margin-*` lengths. Defaults to 72 on all
-     * sides (the standard one inch).
+     * Page margins, written as `fo:margin-*` lengths. Each side is a number of points (1/72 inch) or
+     * a unit-labeled string (`'1in'`, `'2cm'`, `'36pt'`, `'48px'`); a bare number is points. Defaults
+     * to 72 (the standard one inch) on every side.
      */
-    margin?: { top?: number; right?: number; bottom?: number; left?: number };
+    margin?: { top?: number | string; right?: number | string; bottom?: number | string; left?: number | string };
 }
 
 /**
@@ -2254,13 +2283,13 @@ export interface PageMetadata {
     pageNumber: number;
     /**
      * Page width in PDF points (1/72 inch), after applying the page's own rotation. Matches the
-     * coordinate space of child {@link NodeBounds}. Absent when `ignorePositions` is set.
+     * coordinate space of child {@link NodeBounds}. Absent when `ignoreBounds` is set.
      * @example 612 for US Letter portrait
      */
     pageWidth?: number;
     /**
      * Page height in PDF points (1/72 inch), after applying the page's own rotation.
-     * Absent when `ignorePositions` is set.
+     * Absent when `ignoreBounds` is set.
      * @example 792 for US Letter portrait
      */
     pageHeight?: number;
@@ -2463,7 +2492,7 @@ export type ContentMetadata = SlideMetadata | SheetMetadata | HeadingMetadata | 
  * page's top-left corner and y growing downward, i.e. exactly what pdf.js renders at scale 1. This
  * matches the `pageWidth`/`pageHeight` on {@link PageMetadata}. Values are rounded to 2 decimals.
  *
- * Populated by the PDF parser unless `ignorePositions` is set. Container nodes (paragraph, table,
+ * Populated by the PDF parser unless `ignoreBounds` is set. Container nodes (paragraph, table,
  * row, cell) carry the union of their children's boxes.
  */
 export interface NodeBounds {
@@ -2484,7 +2513,7 @@ export interface BaseContentNode {
     /**
      * Where this node sits on its page, as an axis-aligned box in page coordinates.
      * See {@link NodeBounds} for the coordinate convention. Present only when the parser knows
-     * the geometry (currently PDF) and `ignorePositions` is not set.
+     * the geometry (currently PDF) and `ignoreBounds` is not set.
      */
     bounds?: NodeBounds;
 
