@@ -39,6 +39,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
   - [`.to('text')`: Plain Text Extraction](#totext-plain-text-extraction)
 - [OfficeGenerator](#officegenerator)
 - [OfficeConverter: One-Step API](#officeconverter-one-step-api)
+- [OfficeTemplate: Mail-Merge / Document Generation](#officetemplate-mail-merge--document-generation)
 - [Native RAG Chunking](#native-rag-chunking)
 - [The AST Structure](#the-ast-structure)
 - [Deep Dive: Document Components](#deep-dive-document-components)
@@ -423,6 +424,45 @@ const { value: html, messages } = await OfficeConverter.convert('data.xlsx', 'ht
 > [!IMPORTANT]
 > The `OfficeConverterConfig` shape uses **nested** `parseConfig` and `generatorConfig` sub-objects.
 > Do **not** put parser or generator options at the top level; only `onWarning` lives there.
+
+---
+
+## OfficeTemplate: Mail-Merge / Document Generation
+
+`OfficeTemplate.render()` (alias `renderTemplate`) fills a **DOCX template**'s `{{placeholder}}` tags from your data and returns a new `.docx`. It is not parsing or conversion: the template is copied and only the placeholders are substituted, so **all of the template's formatting, layout and structure are preserved**. Give it one data object for one document, or an array for a batch (one document per entry, a classic mail-merge). Think of it as a zero-dependency take on Adobe's Document Generation API.
+
+```ts
+import { OfficeTemplate } from 'officeparser';
+import { writeFileSync } from 'fs';
+
+// One document.
+const bytes = await OfficeTemplate.render('invoice-template.docx', {
+    data: { name: 'Acme Corp', amount: '$1,250.00', due: '2026-10-01' },
+});
+writeFileSync('invoice-acme.docx', bytes); // Uint8Array
+
+// A batch: one .docx per row.
+const docs = await OfficeTemplate.render('invoice-template.docx', {
+    data: [
+        { name: 'Acme Corp', amount: '$1,250.00' },
+        { name: 'Globex',    amount: '$980.00'   },
+    ],
+});
+docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));
+```
+
+- **Run-aware.** Word often splits a typed `{{name}}` across several runs (`{{`, `na`, `me}}`); it is filled anyway, and a value takes the **formatting of the run its placeholder sat in** (a bold `{{amount}}` renders bold).
+- **Everywhere text lives.** Placeholders in the body, headers, footers, footnotes/endnotes and comments are all filled. Values may contain `\n` (rendered as line breaks).
+- **Deterministic** output (pinned zip timestamps): the same template + data always renders byte-identical bytes.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `data` | `TemplateData \| TemplateData[]` | — (required) | Field values. One object → one document; an array → one document per entry |
+| `delimiters` | `{ start: string; end: string }` | `{{ }}` | Placeholder delimiters |
+| `onMissing` | `'keep' \| 'empty' \| 'error'` | `'keep'` | A placeholder with no matching field: leave it, blank it, or reject with `TEMPLATE_FIELD_MISSING`. A field present but `null`/`undefined` always renders empty |
+| `password` | `string` | — | Decrypt the template first, if it is itself password-protected |
+
+Only DOCX is supported today (other OOXML/ODF formats will follow); a non-DOCX template rejects with `TEMPLATE_UNSUPPORTED_FORMAT`.
 
 ---
 

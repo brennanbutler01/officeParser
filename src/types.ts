@@ -27,6 +27,10 @@ export enum OfficeErrorType {
     PASSWORD_INCORRECT = 'PASSWORD_INCORRECT',
     /** An encrypted document could not be decrypted for a structural reason (malformed container, unsupported cipher/scheme) */
     DOCUMENT_DECRYPTION_FAILED = 'DOCUMENT_DECRYPTION_FAILED',
+    /** A template render was given a document type it cannot template */
+    TEMPLATE_UNSUPPORTED_FORMAT = 'TEMPLATE_UNSUPPORTED_FORMAT',
+    /** A template placeholder had no matching data field and `onMissing: 'error'` was set */
+    TEMPLATE_FIELD_MISSING = 'TEMPLATE_FIELD_MISSING',
     /** PDF generation failed (e.g. the puppeteer engine is unavailable or rendering errored) */
     PDF_GENERATION_FAILED = 'PDF_GENERATION_FAILED',
     /** Attempted to use Node.js-only features in a browser environment */
@@ -1863,6 +1867,42 @@ export interface OfficeChunk {
 }
 
 // ─── End Chunking Types ────────────────────────────────────────────────────────
+
+/** A single value substituted for a template placeholder. `null`/`undefined` render as empty text. */
+export type TemplateValue = string | number | boolean | Date | null | undefined;
+
+/**
+ * A flat map of placeholder name to value for {@link OfficeTemplate.render}. A key `name` fills the
+ * placeholder `{{name}}` (see `delimiters`). Keys absent from the map are governed by `onMissing`.
+ */
+export type TemplateData = Record<string, TemplateValue>;
+
+/**
+ * Options for {@link OfficeTemplate.render}. `data` is the only required field: a single
+ * {@link TemplateData} produces one document, an array of them produces one document per entry
+ * (a mail-merge).
+ */
+export interface TemplateConfig {
+    /** The field values. One object -> one rendered document; an array -> one document per entry. */
+    data: TemplateData | TemplateData[];
+    /**
+     * Placeholder delimiters. Defaults to `{{` and `}}`, so `{{name}}` is a placeholder. A placeholder
+     * name is matched even when the source splits it across several runs (a common Word quirk).
+     */
+    delimiters?: { start: string; end: string };
+    /**
+     * What to do with a placeholder whose name is absent from `data`:
+     * - `'keep'` (default): leave the placeholder text untouched.
+     * - `'empty'`: replace it with nothing.
+     * - `'error'`: reject with `TEMPLATE_FIELD_MISSING`.
+     * A key that is present but `null`/`undefined` always renders as empty (it is not "missing").
+     */
+    onMissing?: 'keep' | 'empty' | 'error';
+    /** Password, if the template document is itself encrypted; it is decrypted before rendering. */
+    password?: string;
+    /** Optional hint for the template's format. Only DOCX is supported today; detected from bytes otherwise. */
+    fileType?: 'docx';
+}
 
 /**
  * Supported file types for parsing.

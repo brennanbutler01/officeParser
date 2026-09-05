@@ -52,6 +52,7 @@
 import { OfficeParser } from './OfficeParser.js';
 import { OfficeGenerator } from './OfficeGenerator.js';
 import { OfficeConverter } from './OfficeConverter.js';
+import { OfficeTemplate, renderTemplate, TemplateInput } from './OfficeTemplate.js';
 
 import {
     OfficeParserConfig,
@@ -83,6 +84,9 @@ import {
     SemanticChunkingConfig,
     OfficeChunk,
     OfficeConverterConfig,
+    TemplateConfig,
+    TemplateData,
+    TemplateValue,
     OfficeErrorType,
     OfficeWarningType,
     OfficeError,
@@ -122,6 +126,7 @@ const parseOffice = OfficeParser.parseOffice;
 const terminateOcr = OfficeParser.terminateOcr;
 const convert = OfficeConverter.convert;
 const generate = OfficeGenerator.generate;
+const render = OfficeTemplate.render;
 
 export {
     OfficeParser,
@@ -160,6 +165,13 @@ export {
     OfficeConverterConfig,
     convert,
     generate,
+    OfficeTemplate,
+    renderTemplate,
+    render,
+    TemplateConfig,
+    TemplateData,
+    TemplateValue,
+    TemplateInput,
     OfficeErrorType,
     OfficeWarningType,
     OfficeError,
