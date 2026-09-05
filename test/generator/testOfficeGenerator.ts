@@ -92,9 +92,9 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
     ignoreBounds: false,
+    password: '',
+    onPassword: () => undefined,
     pdfParserConfig: {
-        password: '',
-        onPassword: () => undefined,
         useTags: true,
         detectColumns: true,
         mergeHyphenatedWords: true,

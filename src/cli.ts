@@ -24,7 +24,7 @@
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX only, default: false)
  *   --ignoreBounds            Omit per-node bounding boxes and page dimensions (default: false)
- *   --pdfParserConfig.password=secret   Password for an encrypted PDF
+ *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF)
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
  *   --verbose                 Show full error stack traces and warning logs
  */
@@ -303,7 +303,7 @@ if (fileArg && !showHelp) {
     console.log('  --htmlParserConfig.preserveIframes          Keep non-YouTube <iframe> embeds (dropped by default)');
     console.log('');
     console.log('PDF Parser Options (pdfParserConfig.*):');
-    console.log('  --pdfParserConfig.password=secret           Password for an encrypted PDF');
+    console.log('  --password=secret                           Password for an encrypted document (PDF, OOXML, or ODF)');
     console.log('  --pdfParserConfig.useTags=false             Ignore the tagged-structure tree, use geometry only (default: true)');
     console.log('  --pdfParserConfig.detectColumns=false       Disable multi-column reading-order detection (default: true)');
     console.log('  --pdfParserConfig.pageRange=1-3,7           Parse only the given pages (default: all)');

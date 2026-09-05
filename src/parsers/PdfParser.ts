@@ -12,8 +12,8 @@
  *   with a geometric fallback for untagged files. (Tagged path: {@link module:parsers/pdf/structTree}.)
  * - Per-node page geometry (`bounds`) and page dimensions, on by default, opt out with
  *   `ignoreBounds`.
- * - Password-protected documents via `pdfParserConfig.password`, or the `pdfParserConfig.onPassword`
- *   callback to supply one lazily/interactively.
+ * - Password-protected documents via the top-level `password`, or the `onPassword` callback to
+ *   supply one lazily/interactively (the same config every encryptable format uses).
  * - Comprehensive metadata (including the document outline/bookmarks, page labels, and permissions),
  *   hyperlink extraction, image extraction with optional OCR, and embedded file attachments.
  *
@@ -840,10 +840,12 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
         if (!resolved) pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
     }
 
-    const onPassword = config.pdfParserConfig?.onPassword;
+    // Password / onPassword are top-level (they apply to every encryptable format); PDF reads them
+    // the same way the OOXML/ODF decryptors do.
+    const onPassword = config.onPassword;
     // Cap callback-driven retries so an onPassword that keeps returning a wrong password can't loop.
     const MAX_PASSWORD_ATTEMPTS = 3;
-    let password: string | undefined = config.pdfParserConfig?.password || undefined;
+    let password: string | undefined = config.password || undefined;
     let passwordAttempts = 0;
 
     // Open the document, retrying with an onPassword-supplied password when the PDF is encrypted.
@@ -871,7 +873,7 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
                     const supplied = await onPassword(reason);
                     if (supplied) { password = supplied; continue; }
                 }
-                throw getOfficeError(reason === 'required' ? OfficeErrorType.PDF_PASSWORD_REQUIRED : OfficeErrorType.PDF_PASSWORD_INCORRECT, config);
+                throw getOfficeError(reason === 'required' ? OfficeErrorType.PASSWORD_REQUIRED : OfficeErrorType.PASSWORD_INCORRECT, config);
             }
             const message = e instanceof Error ? e.message : String(e);
             if (message.includes('workerSrc') || message.includes('No "GlobalWorkerOptions.workerSrc" specified')) {

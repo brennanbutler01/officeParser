@@ -21,10 +21,12 @@ export enum OfficeErrorType {
     INVALID_INPUT = 'INVALID_INPUT',
     /** PDF worker source is missing (required in browser) */
     PDF_WORKER_MISSING = 'PDF_WORKER_MISSING',
-    /** The PDF is encrypted and no password was supplied */
-    PDF_PASSWORD_REQUIRED = 'PDF_PASSWORD_REQUIRED',
-    /** The supplied password did not decrypt the PDF */
-    PDF_PASSWORD_INCORRECT = 'PDF_PASSWORD_INCORRECT',
+    /** The document is encrypted (PDF, or a password-protected OOXML/ODF) and no password was supplied */
+    PASSWORD_REQUIRED = 'PASSWORD_REQUIRED',
+    /** The supplied password did not decrypt the document */
+    PASSWORD_INCORRECT = 'PASSWORD_INCORRECT',
+    /** An encrypted document could not be decrypted for a structural reason (malformed container, unsupported cipher/scheme) */
+    DOCUMENT_DECRYPTION_FAILED = 'DOCUMENT_DECRYPTION_FAILED',
     /** PDF generation failed (e.g. the puppeteer engine is unavailable or rendering errored) */
     PDF_GENERATION_FAILED = 'PDF_GENERATION_FAILED',
     /** Attempted to use Node.js-only features in a browser environment */
@@ -251,6 +253,34 @@ export interface CommonOfficeParserConfig {
      */
     onWarning?: (issue: OfficeIssue) => void;
     /**
+     * Password for a password-protected document. Applies to every format that supports encryption:
+     * PDF, encrypted OOXML (`.docx`/`.xlsx`/`.pptx`, ECMA-376 agile or standard AES), and encrypted
+     * ODF (`.odt`/`.ods`/`.odp`/`.odg`, AES-CBC). Ignored for unencrypted files.
+     *
+     * When a document is encrypted and neither this nor `onPassword` yields a working password,
+     * parsing rejects with `PASSWORD_REQUIRED` (none supplied) or `PASSWORD_INCORRECT` (supplied but
+     * wrong).
+     *
+     * Default is '' (no password).
+     */
+    password?: string;
+    /**
+     * Callback invoked when an encrypted document needs a password that `password` did not satisfy,
+     * so it can be supplied lazily or interactively (a prompt, a vault lookup) instead of up front.
+     * Applies to every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's own `onPassword` hook.
+     *
+     * Called with `'required'` when the document is encrypted and no password was given, or
+     * `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to retry;
+     * return `undefined`/`''` to stop, in which case parsing rejects with `PASSWORD_REQUIRED` or
+     * `PASSWORD_INCORRECT` as it would with no callback. Retries are capped so a callback that keeps
+     * returning a wrong password cannot loop forever.
+     *
+     * By default this is unset, so an encrypted document without a valid `password` simply throws:
+     * an undecryptable document is unrecoverable for that call, so it is an error rather than a
+     * warning. The callback is the escape hatch for handling it gracefully.
+     */
+    onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
+    /**
      * The delimiter used for every new line in places that allow multiline text like word.
      * Default is \n.
      */
@@ -398,32 +428,6 @@ export interface CommonOfficeParserConfig {
  * stay flat on {@link CommonOfficeParserConfig}.
  */
 export interface PdfParserConfig {
-    /**
-     * Password for an encrypted (password-protected) PDF.
-     *
-     * When the document is encrypted and neither this nor `onPassword` yields a working password,
-     * parsing rejects with `PDF_PASSWORD_REQUIRED` (none supplied) or `PDF_PASSWORD_INCORRECT`
-     * (supplied but wrong).
-     *
-     * Default is '' (no password).
-     */
-    password?: string;
-    /**
-     * Callback invoked when an encrypted PDF needs a password that `password` did not satisfy,
-     * so the password can be supplied lazily or interactively (a prompt, a vault lookup) instead
-     * of up front. Mirrors pdf.js's own `onPassword` hook.
-     *
-     * Called with `'required'` when the document is encrypted and no password was given, or
-     * `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to retry;
-     * return `undefined`/`''` to stop, in which case parsing rejects with `PDF_PASSWORD_REQUIRED`
-     * or `PDF_PASSWORD_INCORRECT` as it would with no callback. Retries are capped so a callback
-     * that keeps returning a wrong password cannot loop forever.
-     *
-     * By default this is unset, so an encrypted PDF without a valid `password` simply throws. This
-     * is the conventional behavior: an undecryptable document is unrecoverable for that call, so it
-     * is an error rather than a warning. The callback is the escape hatch for handling it gracefully.
-     */
-    onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
     /**
      * Use the PDF's tagged-structure tree (headings, tables, lists, notes) when the document
      * declares one and it passes reliability checks.

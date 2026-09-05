@@ -51,10 +51,6 @@ const DEFAULT_HTML_PARSER_CONFIG: DeepRequired<HtmlParserConfig> = {
  * (governed by the flat `ignoreBounds`).
  */
 const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
-    password: '',
-    // No-op default returns undefined, i.e. "no password to offer", so an encrypted PDF without a
-    // valid `password` throws exactly as it would with the callback unset.
-    onPassword: () => undefined,
     useTags: true,
     detectColumns: true,
     mergeHyphenatedWords: true,
@@ -71,6 +67,10 @@ const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
  */
 export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     onWarning: () => { },
+    password: '',
+    // No-op default returns undefined, i.e. "no password to offer", so an encrypted document without
+    // a valid `password` throws exactly as it would with the callback unset.
+    onPassword: () => undefined,
     newlineDelimiter: '\n',
     ignoreNotes: false,
     ignoreComments: false,

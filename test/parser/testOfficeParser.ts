@@ -133,9 +133,9 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
     ignoreBounds: false,
+    password: '',
+    onPassword: () => undefined,
     pdfParserConfig: {
-        password: '',
-        onPassword: () => undefined,
         useTags: true,
         detectColumns: true,
         mergeHyphenatedWords: true,
@@ -3361,27 +3361,94 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('rotated parse', false, 'parsed', e?.message || String(e));
     }
 
-    // --- encrypted fixture: password handling ---
+    // --- encrypted fixture: password handling (top-level password/onPassword, shared with OOXML/ODF) ---
     const encPath = path.join(pdfDir, 'encrypted.pdf');
     try {
         await OfficeParser.parseOffice(encPath, { ocr: false });
-        add('Encrypted rejects without password', false, 'PDF_PASSWORD_REQUIRED', 'parsed');
+        add('Encrypted rejects without password', false, 'PASSWORD_REQUIRED', 'parsed');
     } catch (e: any) {
-        add('Encrypted rejects without password', e?.officeIssue?.code === 'PDF_PASSWORD_REQUIRED', 'PDF_PASSWORD_REQUIRED', e?.officeIssue?.code);
+        add('Encrypted rejects without password', e?.officeIssue?.code === 'PASSWORD_REQUIRED', 'PASSWORD_REQUIRED', e?.officeIssue?.code);
     }
     try {
-        const ast = await OfficeParser.parseOffice(encPath, { ocr: false, pdfParserConfig: { password: 'test123' } });
+        const ast = await OfficeParser.parseOffice(encPath, { ocr: false, password: 'test123' });
         add('Encrypted parses with password', textOf(ast).includes('SECRET CONTENT'), 'SECRET CONTENT', textOf(ast).trim().slice(0, 30));
     } catch (e: any) {
         add('Encrypted parses with password', false, 'SECRET CONTENT', e?.officeIssue?.code || e?.message);
     }
     try {
-        await OfficeParser.parseOffice(encPath, { ocr: false, pdfParserConfig: { password: 'wrongpw' } });
-        add('Encrypted rejects wrong password', false, 'PDF_PASSWORD_INCORRECT', 'parsed');
+        await OfficeParser.parseOffice(encPath, { ocr: false, password: 'wrongpw' });
+        add('Encrypted rejects wrong password', false, 'PASSWORD_INCORRECT', 'parsed');
     } catch (e: any) {
-        add('Encrypted rejects wrong password', e?.officeIssue?.code === 'PDF_PASSWORD_INCORRECT', 'PDF_PASSWORD_INCORRECT', e?.officeIssue?.code);
+        add('Encrypted rejects wrong password', e?.officeIssue?.code === 'PASSWORD_INCORRECT', 'PASSWORD_INCORRECT', e?.officeIssue?.code);
+    }
+    try {
+        const ast = await OfficeParser.parseOffice(encPath, { ocr: false, onPassword: (r) => r === 'required' ? 'test123' : undefined });
+        add('Encrypted parses via onPassword callback', textOf(ast).includes('SECRET CONTENT'), 'SECRET CONTENT', textOf(ast).trim().slice(0, 30));
+    } catch (e: any) {
+        add('Encrypted parses via onPassword callback', false, 'SECRET CONTENT', e?.officeIssue?.code || e?.message);
     }
 
+    return results;
+}
+
+/**
+ * Encrypted OOXML/ODF smoke tests. Decryption is CPU-light (a plain parse of a tiny document), so
+ * these run in both fast and full mode. Fixtures live in `test/files/encrypted/` and are generated,
+ * independently of `src/crypto`, by `scripts/generate-crypto-fixtures.mjs` (password `test123`,
+ * marker `SECRET CONTENT 42`): `agile.docx` (ECMA-376 agile), `standard.docx` (ECMA-376 standard
+ * AES-ECB) and `encrypted.odt` (ODF AES-256-CBC).
+ */
+async function testCryptoSmoke(): Promise<FeatureTest[]> {
+    const results: FeatureTest[] = [];
+    const category = 'Crypto Smoke';
+    const dir = path.join(__dirname, '..', 'files', 'encrypted');
+    const textOf = (ast: any) => ast.content.map((p: any) => p.text).join(' ');
+    const add = (feature: string, pass: boolean, expected: any, actual: any, fileType: string, note = '') =>
+        results.push({ category, feature, fileType, result: { status: pass ? 'PASS' : 'FAIL', expected, actual, details: note } });
+
+    for (const [file, type, label] of [
+        ['agile.docx', 'docx', 'OOXML agile'],
+        ['standard.docx', 'docx', 'OOXML standard'],
+        ['encrypted.odt', 'odt', 'ODF AES-256'],
+    ] as const) {
+        const p = path.join(dir, file);
+        // Correct password decrypts, detects the real type, and yields the marker.
+        try {
+            const ast: any = await OfficeParser.parseOffice(p, { password: 'test123' });
+            add(`${label}: decrypts with password`, ast.type === type && textOf(ast).includes('SECRET CONTENT 42'), `${type} + marker`, `${ast.type}: "${textOf(ast).trim().slice(0, 24)}"`, type);
+        } catch (e: any) {
+            add(`${label}: decrypts with password`, false, `${type} + marker`, e?.officeIssue?.code || e?.message, type);
+        }
+        // Missing password -> PASSWORD_REQUIRED.
+        try {
+            await OfficeParser.parseOffice(p, {});
+            add(`${label}: no password rejects`, false, 'PASSWORD_REQUIRED', 'parsed', type);
+        } catch (e: any) {
+            add(`${label}: no password rejects`, e?.officeIssue?.code === 'PASSWORD_REQUIRED', 'PASSWORD_REQUIRED', e?.officeIssue?.code, type);
+        }
+        // Wrong password -> PASSWORD_INCORRECT.
+        try {
+            await OfficeParser.parseOffice(p, { password: 'nope' });
+            add(`${label}: wrong password rejects`, false, 'PASSWORD_INCORRECT', 'parsed', type);
+        } catch (e: any) {
+            add(`${label}: wrong password rejects`, e?.officeIssue?.code === 'PASSWORD_INCORRECT', 'PASSWORD_INCORRECT', e?.officeIssue?.code, type);
+        }
+        // onPassword supplies it lazily on the 'required' prompt.
+        try {
+            const ast: any = await OfficeParser.parseOffice(p, { onPassword: (r) => r === 'required' ? 'test123' : undefined });
+            add(`${label}: onPassword supplies it`, textOf(ast).includes('SECRET CONTENT 42'), 'marker', textOf(ast).trim().slice(0, 24), type);
+        } catch (e: any) {
+            add(`${label}: onPassword supplies it`, false, 'marker', e?.officeIssue?.code || e?.message, type);
+        }
+    }
+
+    // Regression: an ordinary (unencrypted) zip document is untouched by the decryption pre-pass.
+    try {
+        const ast: any = await OfficeParser.parseOffice(getFilePath('docx'), { ocr: false });
+        add('Unencrypted docx passes through', ast.type === 'docx' && ast.content.length > 0, 'parsed', ast.type, 'docx');
+    } catch (e: any) {
+        add('Unencrypted docx passes through', false, 'parsed', e?.message, 'docx');
+    }
     return results;
 }
 
@@ -3536,6 +3603,10 @@ async function runAllTests() {
     // 10. Image-input smoke tests (OCR-free paths in every mode; the OCR path itself in full mode only)
     console.log('Running image smoke tests...');
     allResults.push(...await testImageSmoke());
+
+    // 11. Encrypted OOXML/ODF smoke tests (decryption is CPU-light, so they run in every mode)
+    console.log('Running crypto smoke tests...');
+    allResults.push(...await testCryptoSmoke());
 
     // 9. Generate report
     console.log('\n');

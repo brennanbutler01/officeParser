@@ -52,6 +52,7 @@ import { BlobLike, OfficeErrorType, OfficeIssue, OfficeParserAST, OfficeParserCo
 import { resolveParserConfig } from './utils/configUtils.js';
 import { assertNode } from './utils/envUtils.js';
 import { getOfficeError, getWrappedError, logWarning } from './utils/errorUtils.js';
+import { isCfb, isEncryptedOoxml, decryptOoxml, isEncryptedOdf, decryptOdf, WRONG_PASSWORD } from './crypto/index.js';
 import { getMimeFromBytes } from './utils/imageUtils.js';
 import { loadFileType } from './utils/moduleLoader.js';
 import { terminateOcr } from './utils/ocrUtils.js';
@@ -105,6 +106,57 @@ const resolveZipBackedType = async (
 
     const resolved = await detectOfficeTypeFromZip(buffer, config.decompressionLimits ?? {});
     return resolved ?? detected;
+};
+
+/** How many times an `onPassword` callback may be re-asked before parsing gives up. */
+const MAX_PASSWORD_ATTEMPTS = 3;
+
+/**
+ * Decrypts a password-protected OOXML or ODF container, returning the plaintext bytes; a buffer that
+ * is not an encrypted container is returned unchanged. Uses the top-level `password`, then retries
+ * through `onPassword` (capped), and rejects with `PASSWORD_REQUIRED`/`PASSWORD_INCORRECT` exactly
+ * as the PDF path does. PDF encryption is not handled here (pdf.js does it inside the PDF parser).
+ */
+const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Promise<Buffer> => {
+    let decrypt: ((buf: Uint8Array, password: string) => Uint8Array) | null = null;
+    if (isCfb(buffer)) {
+        // A CFB container is either an encrypted OOXML file or a legacy binary (.doc/.xls/.ppt).
+        // Only the former carries the encryption streams; the latter falls through as unsupported.
+        if (isEncryptedOoxml(buffer)) decrypt = decryptOoxml;
+    } else if (isEncryptedOdf(buffer)) {
+        decrypt = decryptOdf;
+    }
+    if (!decrypt) return buffer;
+
+    const onPassword = config.onPassword;
+    let password = config.password || '';
+    let attempts = 0;
+    while (true) {
+        if (!password) {
+            if (onPassword && attempts < MAX_PASSWORD_ATTEMPTS) {
+                attempts++;
+                const supplied = await onPassword('required');
+                if (supplied) { password = supplied; continue; }
+            }
+            throw getOfficeError(OfficeErrorType.PASSWORD_REQUIRED, config);
+        }
+        try {
+            return Buffer.from(decrypt(buffer, password));
+        } catch (e) {
+            if (e !== WRONG_PASSWORD) {
+                // A structural/unsupported-scheme failure (not a wrong password): surface it as a
+                // typed decryption error rather than a raw throw.
+                throw getOfficeError(OfficeErrorType.DOCUMENT_DECRYPTION_FAILED, config, e instanceof Error ? e.message : String(e));
+            }
+            password = '';
+            if (onPassword && attempts < MAX_PASSWORD_ATTEMPTS) {
+                attempts++;
+                const supplied = await onPassword('incorrect');
+                if (supplied) { password = supplied; continue; }
+            }
+            throw getOfficeError(OfficeErrorType.PASSWORD_INCORRECT, config);
+        }
+    }
 };
 
 /**
@@ -225,6 +277,13 @@ export class OfficeParser {
                 }
             } else {
                 throw getOfficeError(OfficeErrorType.INVALID_INPUT, internalConfig);
+            }
+
+            // Decrypt a password-protected OOXML/ODF container up front, so everything below (type
+            // detection and the format parsers) only ever sees the plaintext document. PDF encryption
+            // is handled inside pdf.js by the PDF parser, which reads the same password/onPassword.
+            if (buffer.length > 0) {
+                buffer = await decryptIfNeeded(buffer, internalConfig);
             }
 
             // Attempt to detect file type from buffer only if extension is unknown.

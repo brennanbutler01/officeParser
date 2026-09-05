@@ -2845,7 +2845,7 @@
                 { id: 'cfg_ignoreBounds', label: 'Ignore Bounds (PDF geometry)', type: 'switch', default: false },
                 { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true },
                 { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true },
-                { id: 'cfg_pdfPassword', label: 'PDF Password', type: 'text', default: '', width: '120px' },
+                { id: 'cfg_password', label: 'Password (PDF/OOXML/ODF)', type: 'text', default: '', width: '160px' },
                 { id: 'cfg_pdfPageRange', label: 'PDF Page Range', type: 'text', default: '', width: '80px' },
                 { id: 'cfg_pdfExtractTextColor', label: 'PDF Extract Text Color', type: 'switch', default: false },
                 { id: 'cfg_includeRawContent', label: 'Include Raw Source', type: 'switch', default: false },
@@ -4773,10 +4773,10 @@
                     ocr: document.getElementById('cfg_ocr').checked,
                     ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
                     ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
+                    password: document.getElementById('cfg_password').value,
                     pdfParserConfig: {
                         useTags: document.getElementById('cfg_pdfUseTags').checked,
                         detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,
-                        password: document.getElementById('cfg_pdfPassword').value,
                         pageRange: document.getElementById('cfg_pdfPageRange').value,
                         extractTextColor: document.getElementById('cfg_pdfExtractTextColor').checked
                     },
@@ -5094,10 +5094,10 @@
                         ocr: document.getElementById('cfg_ocr').checked,
                         ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
                         ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
+                        password: document.getElementById('cfg_password').value,
                         pdfParserConfig: {
                             useTags: document.getElementById('cfg_pdfUseTags').checked,
                             detectColumns: document.getElementById('cfg_pdfDetectColumns').checked,
-                            password: document.getElementById('cfg_pdfPassword').value,
                             pageRange: document.getElementById('cfg_pdfPageRange').value,
                             extractTextColor: document.getElementById('cfg_pdfExtractTextColor').checked
                         },

@@ -983,6 +983,8 @@ Pass as the second argument to `parseOffice(file, config)`.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `newlineDelimiter` | `string` | `'\n'` | Delimiter inserted between lines in text output |
+| `password` | `string` | `''` | Password for a password-protected document. Applies to every encryptable format: PDF, encrypted OOXML (`.docx`/`.xlsx`/`.pptx`, ECMA-376 agile or standard AES), and encrypted ODF (`.odt`/`.ods`/`.odp`/`.odg`, AES-CBC). A missing password rejects with `PASSWORD_REQUIRED`, a wrong one with `PASSWORD_INCORRECT`. Ignored for unencrypted files |
+| `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted document needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Works for every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's `onPassword` |
 | `ignoreNotes` | `boolean` | `false` | Ignore footnotes/endnotes (DOCX, RTF) and speaker notes (PPTX/ODP) |
 | `ignoreComments` | `boolean` | `false` | **New**: Ignore inline comments/annotations (DOCX, XLSX, PPTX), attached by default via `node.comments[]` |
 | `ignoreHeadersAndFooters` | `boolean` | `false` | **New**: Skip DOCX headers & footers (populated in `ast.auxiliary.headers/footers` by default) |
@@ -1013,8 +1015,6 @@ PDF-specific options, passed as `pdfParserConfig` on the parser config.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `password` | `string` | `''` | Password for an encrypted PDF. A missing password rejects with `PDF_PASSWORD_REQUIRED`, a wrong one with `PDF_PASSWORD_INCORRECT` |
-| `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted PDF needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Mirrors pdf.js's `onPassword` |
 | `useTags` | `boolean` | `true` | Use the tagged-structure tree (headings, tables, lists, notes) when present and reliable; set `false` to force geometry-only extraction |
 | `detectColumns` | `boolean` | `true` | Recover reading order for multi-column and float-beside-text pages (recursive XY-cut) |
 | `mergeHyphenatedWords` | `boolean` | `true` | Join words split across a line break by a trailing hyphen |
