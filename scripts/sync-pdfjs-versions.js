@@ -3,9 +3,17 @@ const path = require('path');
 
 /**
  * Synchronization Script for PDF.js Version
- * 
+ *
  * This script ensures that all documentation, examples, and type definitions
  * use the same version of pdfjs-dist as specified in package.json.
+ *
+ * PIN RATIONALE (do not bump pdfjs-dist casually): pdfjs-dist is pinned to an EXACT version, not a
+ * range, because its output feeds every committed PDF baseline and its tagged-structure API is
+ * behavior-sensitive. 6.3.289 was tried and REVERTED: its getMarkInfo() returns `{}` for a marked
+ * PDF (6.2.108 returns `{ Marked: true }`), so tagged-PDF heading/table/note extraction silently
+ * collapses to the geometry fallback (six PDF smoke assertions fail). Before raising the version,
+ * run `npm run test:parser` (full, not fast) and confirm the tagged-PDF assertions still pass, then
+ * regenerate the PDF baselines. Bump with: `node scripts/sync-pdfjs-versions.js <version>`.
  */
 
 function syncVersions() {
