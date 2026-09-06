@@ -39,9 +39,9 @@
       "preserveIframes": false,
       "embedFolkForms": false
     },
-    "ignorePositions": false,
+    "ignoreBounds": false,
+    "password": "",
     "pdfParserConfig": {
-      "password": "",
       "useTags": true,
       "detectColumns": true,
       "mergeHyphenatedWords": true,
@@ -49,7 +49,7 @@
       "spaceToleranceFactor": 0.25,
       "headingDetection": "auto",
       "pageRange": "",
-      "disableTextNormalization": false,
+      "normalizeText": true,
       "extractTextColor": true
     }
   },
