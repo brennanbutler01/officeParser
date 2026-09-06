@@ -3452,89 +3452,6 @@ async function testCryptoSmoke(): Promise<FeatureTest[]> {
     return results;
 }
 
-/**
- * Image-input smoke tests. A raster image is a one-page document whose only text is what OCR
- * recognizes, so the OCR-free paths (detection by extension and by magic bytes, the jpeg/tif alias
- * folding, attachment handling, the "OCR is off" warning) run in every mode, and the OCR path itself
- * runs in full mode only: Tesseract startup is the same cost that keeps the OCR-heavy PDF parse out
- * of fast mode. The fixtures are `test.png`/`test.jpg`: 900x640 renders of a heading and two short
- * paragraphs of large text, separated by gaps wide enough for the OCR layout pass to split them.
- */
-async function testImageSmoke(): Promise<FeatureTest[]> {
-    const results: FeatureTest[] = [];
-    const category = 'Image Smoke';
-    const add = (feature: string, pass: boolean, expected: any, actual: any, fileType = 'png', note = '') =>
-        results.push({ category, feature, fileType, result: { status: pass ? 'PASS' : 'FAIL', expected, actual, details: note } });
-    const hasCode = (ast: any, code: string) => (ast.warnings || []).some((w: any) => w.code === code);
-
-    // --- ocr:false: detected by extension, one empty page, an explicit warning, no attachment ---
-    try {
-        const ast = await OfficeParser.parseOffice(getFilePath('png'), { ocr: false });
-        add('PNG detected by extension', ast.type === 'png', 'png', ast.type);
-        add('One page node', ast.content.length === 1 && ast.content[0].type === 'page', '1 page', `${ast.content.length} x ${ast.content[0]?.type}`);
-        add('ocr:false warns IMAGE_NO_TEXT_EXTRACTED', hasCode(ast, 'IMAGE_NO_TEXT_EXTRACTED'), 'warning present', hasCode(ast, 'IMAGE_NO_TEXT_EXTRACTED'));
-        const kids = ast.content[0].children || [];
-        add('ocr:false yields no text and no attachment', kids.length === 0 && ast.attachments.length === 0, 'empty page, no attachments', `${kids.length} children, ${ast.attachments.length} attachments`);
-    } catch (e: any) {
-        add('png ocr:false parse', false, 'parsed', e?.message || String(e));
-    }
-
-    // --- extractAttachments without OCR: the image comes back and the page points at it ---
-    try {
-        const ast = await OfficeParser.parseOffice(getFilePath('png'), { ocr: false, extractAttachments: true });
-        const att = ast.attachments[0];
-        add('Attachment extracted', ast.attachments.length === 1 && att?.mimeType === 'image/png' && (att?.data?.length || 0) > 0, '1 image/png attachment', `${ast.attachments.length} x ${att?.mimeType}`);
-        const img = (ast.content[0].children || [])[0] as any;
-        add('Page holds image node when no text', img?.type === 'image' && img?.metadata?.attachmentName === att?.name, 'image node -> attachment', `${img?.type} -> ${img?.metadata?.attachmentName}`);
-        const np = (ast.metadata.nativeProperties || {}) as any;
-        add('Pixel size in nativeProperties', np.pixelWidth === 900 && np.pixelHeight === 640 && np.mimeType === 'image/png', '900x640 image/png', `${np.pixelWidth}x${np.pixelHeight} ${np.mimeType}`);
-    } catch (e: any) {
-        add('png extractAttachments parse', false, 'parsed', e?.message || String(e));
-    }
-
-    // --- a bare buffer with no name and no hint resolves through magic bytes ---
-    try {
-        const ast = await OfficeParser.parseOffice(fs.readFileSync(getFilePath('jpg')), { ocr: false });
-        add('JPEG buffer detected by magic bytes', ast.type === 'jpg', 'jpg', ast.type, 'jpg');
-    } catch (e: any) {
-        add('jpg buffer parse', false, 'parsed', e?.message || String(e), 'jpg');
-    }
-
-    // --- the 'jpeg' spelling is an alias: same type, and no spurious mismatch against the sniffer's 'jpg' ---
-    try {
-        const ast = await OfficeParser.parseOffice(fs.readFileSync(getFilePath('jpg')), { ocr: false, fileType: 'jpeg' as any });
-        add("fileType:'jpeg' aliases to jpg without a mismatch warning", ast.type === 'jpg' && !hasCode(ast, 'BUFFER_TYPE_MISMATCH'), 'jpg, no BUFFER_TYPE_MISMATCH', `${ast.type}, mismatch=${hasCode(ast, 'BUFFER_TYPE_MISMATCH')}`, 'jpg');
-    } catch (e: any) {
-        add('jpeg alias parse', false, 'parsed', e?.message || String(e), 'jpg');
-    }
-
-    // --- the OCR path: full mode only ---
-    if (FAST_MODE) {
-        results.push({ category, feature: 'OCR of image input', fileType: 'png', result: { status: 'SKIP', expected: 'Full coverage', actual: 'Skipped', details: "Fast mode: image OCR omitted (Tesseract startup). Run 'npm run test:parser' for full coverage." } });
-    } else {
-        try {
-            const ast = await OfficeParser.parseOffice(getFilePath('png'), { ocr: true, extractAttachments: true });
-            const text = ast.content.map((p: any) => p.text).join('\n');
-            const paras = (ast.content[0].children || []).filter((n: any) => n.type === 'paragraph');
-            add('OCR recognizes the heading', /OFFICEPARSER/i.test(text), 'OFFICEPARSER', /OFFICEPARSER/i.test(text) ? 'found' : text.slice(0, 60));
-            add('OCR recognizes body text', /quick brown fox/i.test(text) && /4821/.test(text), 'quick brown fox, 4821', text.replace(/\n/g, ' | ').slice(0, 120));
-            // The layout reconstruction opens a blank line at a vertical gap wide relative to the median
-            // line pitch, and the parser splits paragraphs there: the fixture's two body paragraphs sit
-            // either side of such a gap, so their lines must land in different paragraph nodes.
-            const paraOf = (re: RegExp) => paras.findIndex((p: any) => re.test(p.text || ''));
-            add('OCR text split into paragraphs at block gaps',
-                paras.length >= 3 && paraOf(/quick brown fox/i) >= 0 && paraOf(/4821/) >= 0 && paraOf(/quick brown fox/i) !== paraOf(/4821/),
-                '>=3 paragraphs; fox and invoice lines in different ones', `${paras.length} paragraphs; fox@${paraOf(/quick brown fox/i)} invoice@${paraOf(/4821/)}`);
-            add('Attachment carries ocrText', !!ast.attachments[0]?.ocrText && /fox/i.test(ast.attachments[0].ocrText), 'ocrText on attachment', (ast.attachments[0]?.ocrText || '').slice(0, 40));
-            const md = String((await ast.to('md')).value);
-            add("to('md') carries the recognized text", /quick brown fox/i.test(md), 'text in markdown', /quick brown fox/i.test(md) ? 'present' : md.slice(0, 60));
-        } catch (e: any) {
-            add('png ocr:true parse', false, 'parsed', e?.message || String(e));
-        }
-    }
-    return results;
-}
-
 async function runAllTests() {
     const outputDir = path.join(__dirname, 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
@@ -3600,11 +3517,7 @@ async function runAllTests() {
     console.log('Running PDF smoke tests...');
     allResults.push(...await testPdfSmoke());
 
-    // 10. Image-input smoke tests (OCR-free paths in every mode; the OCR path itself in full mode only)
-    console.log('Running image smoke tests...');
-    allResults.push(...await testImageSmoke());
-
-    // 11. Encrypted OOXML/ODF smoke tests (decryption is CPU-light, so they run in every mode)
+    // 10. Encrypted OOXML/ODF smoke tests (decryption is CPU-light, so they run in every mode)
     console.log('Running crypto smoke tests...');
     allResults.push(...await testCryptoSmoke());
 
