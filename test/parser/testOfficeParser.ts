@@ -3393,29 +3393,40 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
 
 /**
  * Encrypted OOXML/ODF smoke tests. Decryption is CPU-light (a plain parse of a tiny document), so
- * these run in both fast and full mode. Fixtures live in `test/files/encrypted/` and are generated,
- * independently of `src/crypto`, by `scripts/generate-crypto-fixtures.mjs` (password `test123`,
- * marker `SECRET CONTENT 42`): `agile.docx` (ECMA-376 agile), `standard.docx` (ECMA-376 standard
- * AES-ECB) and `encrypted.odt` (ODF AES-256-CBC).
+ * these run in both fast and full mode. Fixtures live in `test/files/encrypted/` (see the README
+ * there for provenance and the passwords/markers). Two kinds:
+ *  - Synthetic, from `scripts/generate-crypto-fixtures.mjs` (marker `SECRET CONTENT 42`), whose own
+ *    from-scratch encryptor cross-checks the decryptor against a second implementation: `agile.docx`
+ *    (ECMA-376 agile), `standard.docx` (ECMA-376 standard AES-ECB), `encrypted.odt` (ODF AES-256-CBC).
+ *  - Real LibreOffice 7.3 output (marker `REAL LIBRE MARKER 77`): `real-libreoffice.{odt,ods,odp}`,
+ *    which guard against only ever testing the decryptor against its sibling encoder (a real writer
+ *    differs in re-zip order, padding, entry set and content size).
  */
 async function testCryptoSmoke(): Promise<FeatureTest[]> {
     const results: FeatureTest[] = [];
     const category = 'Crypto Smoke';
     const dir = path.join(__dirname, '..', 'files', 'encrypted');
-    const textOf = (ast: any) => ast.content.map((p: any) => p.text).join(' ');
+    // Robust across every type: .ods/.odp keep body text nested under sheets/slides rather than on a
+    // top-level node, so join the flattened `to('text')` output rather than top-level `.text`.
+    const textOf = async (ast: any) => ((await ast.to('text')).value as string) || '';
     const add = (feature: string, pass: boolean, expected: any, actual: any, fileType: string, note = '') =>
         results.push({ category, feature, fileType, result: { status: pass ? 'PASS' : 'FAIL', expected, actual, details: note } });
 
-    for (const [file, type, label] of [
-        ['agile.docx', 'docx', 'OOXML agile'],
-        ['standard.docx', 'docx', 'OOXML standard'],
-        ['encrypted.odt', 'odt', 'ODF AES-256'],
+    for (const [file, type, label, marker] of [
+        ['agile.docx', 'docx', 'OOXML agile', 'SECRET CONTENT 42'],
+        ['standard.docx', 'docx', 'OOXML standard', 'SECRET CONTENT 42'],
+        ['encrypted.odt', 'odt', 'ODF AES-256', 'SECRET CONTENT 42'],
+        // Real LibreOffice 7.3 files: the decryptor must handle actual writer output, not just ours.
+        ['real-libreoffice.odt', 'odt', 'ODF real LibreOffice (Writer)', 'REAL LIBRE MARKER 77'],
+        ['real-libreoffice.ods', 'ods', 'ODF real LibreOffice (Calc)', 'REAL LIBRE MARKER 77'],
+        ['real-libreoffice.odp', 'odp', 'ODF real LibreOffice (Impress)', 'REAL LIBRE MARKER 77'],
     ] as const) {
         const p = path.join(dir, file);
         // Correct password decrypts, detects the real type, and yields the marker.
         try {
             const ast: any = await OfficeParser.parseOffice(p, { password: 'test123' });
-            add(`${label}: decrypts with password`, ast.type === type && textOf(ast).includes('SECRET CONTENT 42'), `${type} + marker`, `${ast.type}: "${textOf(ast).trim().slice(0, 24)}"`, type);
+            const text = await textOf(ast);
+            add(`${label}: decrypts with password`, ast.type === type && text.includes(marker), `${type} + marker`, `${ast.type}: "${text.trim().slice(0, 24)}"`, type);
         } catch (e: any) {
             add(`${label}: decrypts with password`, false, `${type} + marker`, e?.officeIssue?.code || e?.message, type);
         }
@@ -3436,7 +3447,8 @@ async function testCryptoSmoke(): Promise<FeatureTest[]> {
         // onPassword supplies it lazily on the 'required' prompt.
         try {
             const ast: any = await OfficeParser.parseOffice(p, { onPassword: (r) => r === 'required' ? 'test123' : undefined });
-            add(`${label}: onPassword supplies it`, textOf(ast).includes('SECRET CONTENT 42'), 'marker', textOf(ast).trim().slice(0, 24), type);
+            const text = await textOf(ast);
+            add(`${label}: onPassword supplies it`, text.includes(marker), 'marker', text.trim().slice(0, 24), type);
         } catch (e: any) {
             add(`${label}: onPassword supplies it`, false, 'marker', e?.officeIssue?.code || e?.message, type);
         }
