@@ -3002,6 +3002,7 @@
                     <a href="#rag">RAG & Chunking</a>
                     <a href="#specs">Specifications</a>
                     <a href="#visualizer">Visualizer</a>
+                    <a href="#template-studio">Template Studio</a>
                 </nav>
                 <div class="action-buttons">
                     <div class="theme-switcher">
@@ -3049,6 +3050,7 @@
             <a href="#rag">RAG & Chunking</a>
             <a href="#specs">Specifications</a>
             <a href="#visualizer">Visualizer</a>
+            <a href="#template-studio">Template Studio</a>
             <div class="theme-switcher-mobile"
                 style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
                 <p
@@ -3990,6 +3992,127 @@
         </div>
         </div>
         </section>
+
+        <style>
+            .ts-intro { max-width: 820px; margin: 0 auto 2rem; text-align: center; color: var(--text-dim); font-size: 0.95rem; line-height: 1.6; }
+            .ts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; max-width: 1100px; margin: 0 auto; }
+            .ts-panel { background: var(--card-bg); border: 1px solid var(--visual-card-border); border-radius: 14px; padding: 1.1rem 1.2rem; display: flex; flex-direction: column; min-width: 0; }
+            .ts-panel-title { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+            .ts-code { width: 100%; min-height: 190px; resize: vertical; font-family: 'Ubuntu Mono', monospace; font-size: 0.82rem; line-height: 1.5; padding: 0.7rem 0.8rem; border-radius: 8px; border: 1px solid var(--visual-card-border); background: var(--preview-bg); color: var(--preview-text); }
+            .ts-options { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; margin-top: 0.85rem; font-size: 0.82rem; color: var(--text-dim); }
+            .ts-options label { display: flex; align-items: center; gap: 0.4rem; }
+            .ts-mini { font-family: 'Ubuntu Mono', monospace; font-size: 0.8rem; padding: 0.25rem 0.4rem; width: 3rem; text-align: center; border-radius: 5px; border: 1px solid var(--visual-card-border); background: var(--preview-bg); color: var(--preview-text); }
+            select.ts-mini { width: auto; text-align: left; }
+            .ts-hint { font-size: 0.75rem; color: var(--text-dim); opacity: 0.85; margin-top: 0.6rem; }
+            .ts-hint code { font-family: 'Ubuntu Mono', monospace; }
+            .ts-sample-btn { margin-top: 0.8rem; align-self: flex-start; padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+            .ts-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: center; max-width: 1100px; margin: 1.5rem auto 0; }
+            .ts-status { font-size: 0.85rem; font-weight: 600; color: var(--accent); }
+            .ts-status.ts-error { color: #ef4444; }
+            .ts-summary { max-width: 1100px; margin: 1.75rem auto 0; overflow-x: auto; }
+            .ts-summary table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+            .ts-summary th, .ts-summary td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--visual-card-border); }
+            .ts-summary th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; }
+            .ts-summary code { font-family: 'Ubuntu Mono', monospace; }
+            .ts-ok { color: #16a34a; font-weight: 600; }
+            .ts-warn { color: #d97706; font-weight: 600; }
+            .ts-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; max-width: 1100px; margin: 1.75rem auto 0; }
+            .ts-preview { background: var(--preview-bg); color: var(--preview-text); border: 1px solid var(--visual-card-border); border-radius: 10px; padding: 1.1rem 1.3rem; max-height: 460px; overflow: auto; font-size: 0.9rem; line-height: 1.55; }
+            .ts-preview :is(h1,h2,h3,h4){ margin: 0.6em 0 0.3em; }
+            .ts-preview p { margin: 0.4em 0; }
+            .ts-preview table { border-collapse: collapse; margin: 0.5em 0; }
+            .ts-preview td, .ts-preview th { border: 1px solid var(--visual-card-border); padding: 0.3rem 0.5rem; }
+            mark.ts-ph { background: rgba(251, 191, 36, 0.35); color: inherit; border-radius: 3px; padding: 0 2px; font-family: 'Ubuntu Mono', monospace; }
+            mark.ts-val { background: rgba(34, 197, 94, 0.30); color: inherit; border-radius: 3px; padding: 0 2px; }
+            .ts-badge { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.1rem 0.4rem; border-radius: 4px; }
+            .ts-badge-before { background: rgba(251, 191, 36, 0.2); color: #b45309; }
+            .ts-badge-after { background: rgba(34, 197, 94, 0.2); color: #15803d; }
+            .ts-aux { margin-top: 1rem; padding: 0.6rem 0.8rem; border: 1px dashed var(--visual-card-border); border-radius: 8px; background: rgba(148, 163, 184, 0.08); font-size: 0.82rem; }
+            .ts-aux-label { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-bottom: 0.3rem; }
+            .ts-batch-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+            .ts-tab { padding: 0.25rem 0.7rem; font-size: 0.78rem; border-radius: 6px; border: 1px solid var(--visual-card-border); background: transparent; color: var(--text-dim); cursor: pointer; }
+            .ts-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+            @media (max-width: 820px) { .ts-grid, .ts-compare { grid-template-columns: 1fr; } }
+        </style>
+
+        <section id="template-studio" class="visualizer-section">
+            <div class="visualizer-container">
+                <div class="section-title">
+                    <h2>Template Studio</h2>
+                    <p>Fill a DOCX template's <code>{{placeholders}}</code> from your own data, right here in the browser,
+                        and see it happen &mdash; the template with its tags, and the finished document, side by side.</p>
+                </div>
+
+                <div class="ts-intro">
+                    Powered by <code>OfficeTemplate.render()</code>. The template's formatting, tables, headers and layout
+                    are preserved &mdash; only the placeholders change.
+                    <div class="privacy-note" style="justify-content:center; margin-top: 0.75rem;">
+                        <span>🔒</span> <span><strong>Private:</strong> the template, your data, and the result never leave
+                            your browser.</span>
+                    </div>
+                </div>
+
+                <div class="ts-grid">
+                    <div class="ts-panel">
+                        <div class="ts-panel-title">1 &middot; Template <span style="font-weight:400; text-transform:none; letter-spacing:0;">(.docx)</span></div>
+                        <div class="drop-zone" id="ts-drop-zone" style="padding: 1.5rem;">
+                            <div id="ts-drop-prompt">
+                                <i>📄</i>
+                                <p>Drop a <strong>.docx</strong> template or <span>Click to Browse</span></p>
+                            </div>
+                            <div id="ts-file-info" class="file-info hidden">
+                                <span class="file-icon">📄</span>
+                                <div style="text-align:left;"><div class="file-name" id="ts-filename">No file selected</div></div>
+                            </div>
+                            <input type="file" id="ts-file-input" class="hidden-input" accept=".docx">
+                        </div>
+                        <button class="btn btn-outline ts-sample-btn" id="ts-load-sample" type="button">↓ Load sample invoice template</button>
+                        <div class="ts-hint">Make your own: type <code>{{name}}</code>, <code>{{amount}}</code>, style them
+                            however you like in Word, and save as <code>.docx</code>.</div>
+                    </div>
+
+                    <div class="ts-panel">
+                        <div class="ts-panel-title">2 &middot; Data <span style="font-weight:400; text-transform:none; letter-spacing:0;">(JSON object, or an array for a batch)</span></div>
+                        <textarea id="ts-data" class="ts-code" spellcheck="false"></textarea>
+                        <div class="ts-options">
+                            <label>Delimiters
+                                <input id="ts-delim-start" class="ts-mini" value="{{" maxlength="8" aria-label="start delimiter">
+                                <input id="ts-delim-end" class="ts-mini" value="}}" maxlength="8" aria-label="end delimiter">
+                            </label>
+                            <label>Missing field
+                                <select id="ts-onmissing" class="ts-mini">
+                                    <option value="keep">keep the tag</option>
+                                    <option value="empty">leave blank</option>
+                                    <option value="error">throw error</option>
+                                </select>
+                            </label>
+                            <span class="ts-hint" id="ts-batch-hint" style="margin-top:0;"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ts-actions">
+                    <button class="btn btn-primary" id="ts-render" type="button">Render &amp; Compare →</button>
+                    <button class="btn btn-outline hidden" id="ts-download" type="button">⬇ Download filled .docx</button>
+                    <button class="btn btn-outline hidden" id="ts-to-visualizer" type="button">Open result in Visualizer ↗</button>
+                    <span id="ts-status" class="ts-status"></span>
+                </div>
+
+                <div id="ts-summary" class="ts-summary hidden"></div>
+
+                <div id="ts-compare" class="ts-compare hidden">
+                    <div class="ts-panel">
+                        <div class="ts-panel-title">Before <span class="ts-badge ts-badge-before">placeholders</span></div>
+                        <div id="ts-before" class="ts-preview"></div>
+                    </div>
+                    <div class="ts-panel">
+                        <div class="ts-panel-title">After <span class="ts-badge ts-badge-after">filled</span></div>
+                        <div id="ts-batch-tabs" class="ts-batch-tabs hidden"></div>
+                        <div id="ts-after" class="ts-preview"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <footer>
@@ -4020,6 +4143,7 @@
                 <a href="#features">Features</a>
                 <a href="#formats">Supported Formats</a>
                 <a href="#visualizer">Interactive Visualizer</a>
+                <a href="#template-studio">Template Studio</a>
             </div>
 
             <div class="footer-column">
@@ -6260,6 +6384,259 @@
                 }
             });
         }
+    </script>
+
+    <!-- ============================ Template Studio ============================ -->
+    <script>
+        (function () {
+            const $ = (id) => document.getElementById(id);
+            const els = {
+                dropZone: $('ts-drop-zone'), prompt: $('ts-drop-prompt'), fileInfo: $('ts-file-info'),
+                filename: $('ts-filename'), fileInput: $('ts-file-input'), loadSample: $('ts-load-sample'),
+                data: $('ts-data'), delimStart: $('ts-delim-start'), delimEnd: $('ts-delim-end'),
+                onMissing: $('ts-onmissing'), batchHint: $('ts-batch-hint'),
+                render: $('ts-render'), download: $('ts-download'), toVisualizer: $('ts-to-visualizer'),
+                status: $('ts-status'), summary: $('ts-summary'),
+                compare: $('ts-compare'), before: $('ts-before'), after: $('ts-after'), batchTabs: $('ts-batch-tabs'),
+            };
+            if (!els.render) return; // section not present
+
+            const SAMPLE_DATA = [
+                '{',
+                '  "name": "Acme Corp",',
+                '  "amount": "$1,250.00",',
+                '  "date": "2026-10-01",',
+                '  "item": "Premium Widgets",',
+                '  "company": "Globex",',
+                '  "note": "First line\\nSecond line"',
+                '}'
+            ].join('\n');
+
+            const state = { buffer: null, name: '', outputs: [], rows: [], active: 0 };
+
+            els.data.value = SAMPLE_DATA;
+
+            const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const setStatus = (msg, isError) => { els.status.textContent = msg; els.status.classList.toggle('ts-error', !!isError); };
+
+            // ---- template loading ----
+            async function setTemplate(buffer, name) {
+                state.buffer = buffer; state.name = name;
+                els.filename.textContent = name;
+                els.fileInfo.classList.remove('hidden');
+                els.prompt.classList.add('hidden');
+                setStatus('Template loaded. Edit the data, then Render & Compare.', false);
+            }
+            els.dropZone.addEventListener('click', () => els.fileInput.click());
+            els.fileInput.addEventListener('change', async (e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) await setTemplate(await f.arrayBuffer(), f.name);
+            });
+            ['dragover', 'dragenter'].forEach(ev => els.dropZone.addEventListener(ev, (e) => { e.preventDefault(); els.dropZone.classList.add('dragover'); }));
+            ['dragleave', 'drop'].forEach(ev => els.dropZone.addEventListener(ev, (e) => { e.preventDefault(); els.dropZone.classList.remove('dragover'); }));
+            els.dropZone.addEventListener('drop', async (e) => {
+                const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                if (f) await setTemplate(await f.arrayBuffer(), f.name);
+            });
+            els.loadSample.addEventListener('click', async () => {
+                try {
+                    setStatus('Loading sample template...', false);
+                    const res = await fetch('test/files/template/invoice.docx');
+                    if (!res.ok) throw new Error('sample not found (' + res.status + ')');
+                    await setTemplate(await res.arrayBuffer(), 'invoice.docx');
+                    if (!els.data.value.trim()) els.data.value = SAMPLE_DATA;
+                } catch (err) { setStatus('Could not load sample: ' + err.message, true); }
+            });
+
+            // ---- helpers ----
+            // Parse once and return everything the studio needs: body HTML (preview), body text (for
+            // placeholder detection) and header/footer text. Headers/footers live in ast.auxiliary, not
+            // the body, so they are otherwise invisible in both the preview and the summary — yet the
+            // template feature fills placeholders there too, so we surface them explicitly.
+            async function inspect(bytes) {
+                const ast = await window.officeParser.parseOffice(bytes, { onWarning: () => { } });
+                const html = (((await ast.to('html', { htmlConfig: { standalone: false } })).value) || '');
+                const text = ((((await ast.to('text')).value) || '')).toString();
+                const parts = [];
+                const walk = (n) => { if (!n) return; if (n.text) parts.push(n.text); (n.children || []).forEach(walk); };
+                if (ast.auxiliary) { (ast.auxiliary.headers || []).forEach(walk); (ast.auxiliary.footers || []).forEach(walk); }
+                return { html, text, auxText: [...new Set(parts)].join('\n') };
+            }
+            function auxBlock(auxText) {
+                if (!auxText) return '';
+                return '<div class="ts-aux"><div class="ts-aux-label">Header / Footer</div><div>' +
+                    escapeHtml(auxText).replace(/\n/g, '<br>') + '</div></div>';
+            }
+            // Wrap every regex match inside a container's text nodes with <mark class=...>.
+            function highlight(container, regex, cls) {
+                const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                    acceptNode: (n) => (n.parentNode && n.parentNode.nodeName === 'MARK') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+                });
+                const targets = [];
+                let node; while ((node = walker.nextNode())) { regex.lastIndex = 0; if (regex.test(node.nodeValue)) targets.push(node); }
+                for (const t of targets) {
+                    regex.lastIndex = 0;
+                    const frag = document.createDocumentFragment();
+                    let last = 0, m; const s = t.nodeValue;
+                    while ((m = regex.exec(s))) {
+                        if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+                        const mark = document.createElement('mark'); mark.className = cls; mark.textContent = m[0];
+                        frag.appendChild(mark);
+                        last = m.index + m[0].length;
+                        if (m.index === regex.lastIndex) regex.lastIndex++; // guard zero-width
+                    }
+                    if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+                    t.parentNode.replaceChild(frag, t);
+                }
+            }
+            const placeholderRe = (start, end) => new RegExp(escRe(start) + '\\s*[\\p{L}\\p{N}_.\\-]+\\s*' + escRe(end), 'gu');
+            function extractKeys(text, start, end) {
+                const re = new RegExp(escRe(start) + '\\s*([\\p{L}\\p{N}_.\\-]+)\\s*' + escRe(end), 'gu');
+                const keys = []; let m; while ((m = re.exec(text))) if (!keys.includes(m[1])) keys.push(m[1]);
+                return keys;
+            }
+            const valStr = (v) => v == null ? '' : (v instanceof Object && !(v instanceof Date) ? JSON.stringify(v) : String(v));
+
+            function renderBefore(html, auxText, start, end) {
+                els.before.innerHTML = html + auxBlock(auxText);
+                highlight(els.before, placeholderRe(start, end), 'ts-ph');
+            }
+            function renderAfter(html, auxText, row) {
+                els.after.innerHTML = html + auxBlock(auxText);
+                // Highlight the substituted values. Multiline values render as separate lines (a <w:br/>
+                // per newline), so split on newlines and highlight each part; skip very short parts.
+                const terms = [];
+                for (const v of Object.values(row || {})) {
+                    for (const part of valStr(v).split(/\r?\n|[\u2028\u2029]/)) { if (part.trim().length >= 2) terms.push(part); }
+                }
+                if (terms.length) {
+                    terms.sort((a, b) => b.length - a.length);
+                    highlight(els.after, new RegExp('(?:' + terms.map(escRe).join('|') + ')', 'g'), 'ts-val');
+                }
+            }
+
+            function buildSummary(templateKeys, rows, start, end, onMissing) {
+                const row0 = rows[0] || {};
+                const dataKeys = Object.keys(row0);
+                const all = [...new Set([...templateKeys, ...dataKeys])];
+                const filled = templateKeys.filter(k => dataKeys.includes(k)).length;
+                const missingBehavior = onMissing === 'empty' ? 'left blank' : onMissing === 'error' ? 'throws error' : 'tag kept';
+                let rowsHtml = all.map(k => {
+                    const inTemplate = templateKeys.includes(k);
+                    const hasData = dataKeys.includes(k);
+                    let status, val;
+                    if (inTemplate && hasData) { status = '<span class="ts-ok">✓ filled</span>'; val = '<code>' + escapeHtml(valStr(row0[k])) + '</code>'; }
+                    else if (inTemplate && !hasData) { status = '<span class="ts-warn">no data → ' + missingBehavior + '</span>'; val = '—'; }
+                    else { status = '<span class="ts-warn">unused (not in template)</span>'; val = '<code>' + escapeHtml(valStr(row0[k])) + '</code>'; }
+                    return '<tr><td><code>' + escapeHtml(start + k + end) + '</code></td><td>' + val + '</td><td>' + (inTemplate ? 'yes' : 'no') + '</td><td>' + status + '</td></tr>';
+                }).join('');
+                els.summary.innerHTML =
+                    '<div style="margin-bottom:0.75rem; font-weight:600;">' + filled + ' of ' + templateKeys.length +
+                    ' placeholder' + (templateKeys.length === 1 ? '' : 's') + ' in the template have data' +
+                    (rows.length > 1 ? ' &middot; batch of ' + rows.length + ' rows (summary shows row 1)' : '') + '.</div>' +
+                    '<table><thead><tr><th>Placeholder</th><th>Value (row 1)</th><th>In template</th><th>Status</th></tr></thead><tbody>' +
+                    rowsHtml + '</tbody></table>';
+                els.summary.classList.remove('hidden');
+            }
+            function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+            function renderBatchTabs() {
+                if (state.rows.length <= 1) { els.batchTabs.classList.add('hidden'); els.batchTabs.innerHTML = ''; return; }
+                els.batchTabs.classList.remove('hidden');
+                els.batchTabs.innerHTML = state.rows.map((r, i) =>
+                    '<button class="ts-tab' + (i === state.active ? ' active' : '') + '" data-i="' + i + '">Row ' + (i + 1) +
+                    (r && r.name ? ' · ' + escapeHtml(String(r.name)).slice(0, 20) : '') + '</button>').join('');
+                els.batchTabs.querySelectorAll('.ts-tab').forEach(b => b.addEventListener('click', async () => {
+                    state.active = parseInt(b.dataset.i, 10);
+                    renderBatchTabs();
+                    const a = await inspect(state.outputs[state.active]);
+                    renderAfter(a.html, a.auxText, state.rows[state.active]);
+                }));
+            }
+
+            // ---- main action ----
+            els.render.addEventListener('click', async () => {
+                if (!window.officeParser || !window.officeParser.OfficeTemplate) { setStatus('Library not loaded yet — try again in a moment.', true); return; }
+                if (!state.buffer) { setStatus('Load a .docx template first (upload or the sample).', true); return; }
+
+                let data;
+                try { data = JSON.parse(els.data.value); }
+                catch (e) { setStatus('Data is not valid JSON: ' + e.message, true); return; }
+                const rows = Array.isArray(data) ? data : [data];
+                if (!rows.every(r => r && typeof r === 'object' && !Array.isArray(r))) { setStatus('Data must be an object, or an array of objects.', true); return; }
+
+                const start = els.delimStart.value || '{{';
+                const end = els.delimEnd.value || '}}';
+                const onMissing = els.onMissing.value;
+                state.rows = rows; state.active = 0;
+
+                els.download.classList.add('hidden'); els.toVisualizer.classList.add('hidden');
+                setStatus('Rendering...', false);
+
+                try {
+                    const tmpl = new Uint8Array(state.buffer);
+                    // BEFORE + summary always render (even if substitution later errors), so the tags are visible.
+                    const before = await inspect(tmpl);
+                    const templateKeys = extractKeys(before.text + '\n' + before.auxText, start, end);
+                    renderBefore(before.html, before.auxText, start, end);
+                    buildSummary(templateKeys, rows, start, end, onMissing);
+                    els.compare.classList.remove('hidden');
+
+                    // AFTER: run the actual template fill.
+                    const result = await window.officeParser.OfficeTemplate.render(tmpl, { data, delimiters: { start, end }, onMissing });
+                    state.outputs = Array.isArray(result) ? result : [result];
+                    renderBatchTabs();
+                    const after0 = await inspect(state.outputs[0]);
+                    renderAfter(after0.html, after0.auxText, rows[0]);
+                    els.download.classList.remove('hidden');
+                    els.toVisualizer.classList.remove('hidden');
+                    setStatus('Done — ' + state.outputs.length + ' document' + (state.outputs.length === 1 ? '' : 's') + ' rendered. Compare below.', false);
+                } catch (err) {
+                    const code = err && err.officeIssue && err.officeIssue.code;
+                    els.after.innerHTML = '<div style="color:#ef4444;">' + escapeHtml((code ? code + ': ' : '') + (err.message || String(err))) + '</div>';
+                    setStatus((code || 'Error') + ' — ' + (err.message || String(err)), true);
+                }
+            });
+
+            // ---- download + hand-off to visualizer ----
+            els.download.addEventListener('click', () => {
+                const bytes = state.outputs[state.active]; if (!bytes) return;
+                const base = (state.name || 'template').replace(/\.docx$/i, '');
+                const suffix = state.outputs.length > 1 ? '-' + (state.active + 1) : '';
+                const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob); a.download = base + '-filled' + suffix + '.docx';
+                document.body.appendChild(a); a.click();
+                setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            });
+            els.toVisualizer.addEventListener('click', async () => {
+                const bytes = state.outputs[state.active]; if (!bytes) return;
+                const name = (state.name || 'template').replace(/\.docx$/i, '') + '-filled.docx';
+                // Drive the main Visualizer the way its own pipeline does: set window.currentAst from the
+                // rendered document and re-render each format window (processFileBuffer is module-scoped,
+                // but renderFormatWindow and currentAst are exposed on window).
+                try {
+                    const dn = $('display-filename'); if (dn) dn.textContent = name;
+                    const fi = $('file-selected-info'); if (fi) fi.classList.remove('hidden');
+                    const dp = $('drop-zone-prompt'); if (dp) dp.classList.add('hidden');
+                    const sm = $('status-msg'); if (sm) sm.textContent = 'Loaded the rendered document from Template Studio: ' + name;
+                    window.currentAst = await window.officeParser.parseOffice(bytes, { onWarning: () => { } });
+                    if (typeof window.renderFormatWindow === 'function') {
+                        await Promise.all(['html', 'md', 'chunks', 'csv', 'rtf', 'text', 'ast'].map(f => window.renderFormatWindow(f)));
+                    }
+                } catch (e) { /* best effort; still scroll so the user sees the visualizer */ }
+                location.hash = '#visualizer';
+                const v = $('visualizer'); if (v) v.scrollIntoView({ behavior: 'smooth' });
+            });
+
+            // Batch hint reflects the data shape as it's edited.
+            const updateBatchHint = () => {
+                try { const d = JSON.parse(els.data.value); els.batchHint.textContent = Array.isArray(d) ? ('batch: ' + d.length + ' documents') : 'single document'; }
+                catch (e) { els.batchHint.textContent = ''; }
+            };
+            els.data.addEventListener('input', updateBatchHint);
+            updateBatchHint();
+        })();
     </script>
 </body>
 
