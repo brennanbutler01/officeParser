@@ -34,7 +34,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
 - [Library Usage: Parsing](#library-usage-parsing)
   - [Async/Await](#asyncawait)
   - [Callback (Backward Compat)](#callback-backward-compat)
-  - [File Buffers & ArrayBuffers](#file-buffers--arraybuffers)
+  - [File Buffers, ArrayBuffers & Blobs](#file-buffers-arraybuffers--blobs)
   - [`ast.to()`: Generate from AST](#astto-generate-from-ast)
   - [`.to('text')`: Plain Text Extraction](#totext-plain-text-extraction)
 - [OfficeGenerator](#officegenerator)
@@ -124,7 +124,7 @@ npx officeparser my_document --fileType=docx --to=json
 |------|--------|---------|-------------|
 | `--to` | `json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks` | `json` | Output format |
 | `--output` | path | — | Write output to a file |
-| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub\|png\|jpg\|gif\|bmp\|tiff\|webp` | — | Explicitly override input file type detection |
+| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
 | `--ocr` | boolean | `false` | Enable OCR for images |
 | `--extractAttachments` | boolean | `false` | Extract images/charts as Base64 |
 | `--ignoreNotes` | boolean | `false` | Ignore footnotes/endnotes/speaker notes |
@@ -1053,7 +1053,7 @@ PDF-specific options, passed as `pdfParserConfig` on the parser config.
 | `mergeHyphenatedWords` | `boolean` | `true` | Join words split across a line break by a trailing hyphen |
 | `lineToleranceFactor` | `number` | `0.35` | Baseline tolerance (fraction of font size) for grouping fragments onto one line |
 | `spaceToleranceFactor` | `number` | `0.25` | Gap threshold (fraction of font size) for inserting a space between fragments |
-| `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | How heading levels are decided. `'auto'`: from tags when tagged, else a size/weight heuristic. `'font-size'`: always the heuristic, even on a tagged PDF (tables/lists stay tagged; a tagged heading is re-leveled by size). `'off'`: never emit headings |
+| `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | How heading levels are decided. `'auto'`: from tags when tagged, else a size/weight heuristic. `'font-size'`: re-level headings by the heuristic even on a tagged PDF (tables/lists stay tagged; a tagged heading is re-leveled by size and may be demoted). `'off'`: never emit headings |
 | `pageRange` | `string` | `''` (all) | Restrict to given pages, e.g. `'1-3,7'`. Output keeps original page numbers |
 | `normalizeText` | `boolean` | `true` | Unicode-normalize extracted text (expand ligatures, compose combining marks, regularize whitespace). Set `false` to preserve the raw source glyphs verbatim |
 | `extractTextColor` | `boolean` | `false` | Extract each run's fill color into `formatting.color`. Recovered from the operator list (fetched per page), so it roughly doubles parse time; pure black is left unset. Highlight annotations set `formatting.backgroundColor` regardless of this flag |
@@ -1501,7 +1501,7 @@ const ast = await officeParser.parseOffice(pdfArrayBuffer, {
 ```
 
 > [!NOTE]
-> The `pdfjs-dist` worker version must match the version bundled with `officeparser` (currently **6.1.200**).
+> The `pdfjs-dist` worker version must match the version bundled with `officeparser` (currently `pdfjs-dist@6.2.108`).
 
 ---
 
@@ -1510,7 +1510,7 @@ const ast = await officeParser.parseOffice(pdfArrayBuffer, {
 | Symptom | Fix |
 |---------|-----|
 | Node.js process stays alive after finishing | Call `await officeParser.terminateOcr()` at end of script when OCR was used |
-| `"Worker not found"` in browser for PDF | Verify `pdfWorkerSrc` points to `pdf.worker.min.mjs` matching version `6.1.200` |
+| `"Worker not found"` in browser for PDF | Verify `pdfWorkerSrc` points to `pdf.worker.min.mjs` matching `pdfjs-dist@6.2.108` |
 | Low OCR accuracy | Verify `ocrConfig.language` matches the document language; quality depends on image resolution |
 | Out of memory on large Excel files | Call `await ast.to('text')` early and discard the AST object to allow garbage collection |
 | `md`/`html`/`csv` buffer not detected | Add `fileType: 'md'` (or `'html'`, `'csv'`) to config (these formats have no magic bytes) |

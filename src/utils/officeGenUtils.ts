@@ -208,7 +208,10 @@ export function resolveZipInstant(raw: unknown): { iso: string; mtime: Date } {
     if (raw instanceof Date && !isNaN(raw.getTime())) resolved = raw;
     else if (typeof raw === 'string' && raw !== '') { const p = new Date(raw); if (!isNaN(p.getTime())) resolved = p; }
     resolved ??= new Date();
-    const MIN = Date.UTC(1980, 0, 1), MAX = Date.UTC(2099, 11, 31, 23, 59, 59);
+    // fflate reads a zip entry's mtime with LOCAL-time getters and rejects a local year outside
+    // 1980-2099. Build the clamp bounds from local-time fields (not Date.UTC), so a clamped date's
+    // local year is in range on the running machine and zipSync cannot throw west of UTC.
+    const MIN = new Date(1980, 0, 1, 0, 0, 0).getTime(), MAX = new Date(2099, 11, 31, 23, 59, 59).getTime();
     const t = resolved.getTime();
     const clamped = t < MIN ? new Date(MIN) : t > MAX ? new Date(MAX) : resolved;
     return { iso: resolved.toISOString().replace(/\.\d+Z$/, 'Z'), mtime: clamped };

@@ -53,6 +53,30 @@ import { OfficeParser } from './OfficeParser.js';
 import { OfficeGenerator } from './OfficeGenerator.js';
 import { OfficeConverter } from './OfficeConverter.js';
 import { OfficeTemplate, renderTemplate, TemplateInput } from './OfficeTemplate.js';
+// Public types that were reachable in the bundled browser d.ts but not re-exported for Node/TS
+// consumers. Kept in a dedicated group so the Node and browser type surfaces match.
+import {
+    PdfParserConfig,
+    DocxGeneratorConfig,
+    OdtGeneratorConfig,
+    PaperFormat,
+    ImageMode,
+    NodeBounds,
+    OfficeIssue,
+    OcrTimeoutConfig,
+    StructuredStyleMapping,
+    TextAlignment,
+    OfficeAuxiliaryContent,
+    AdmonitionSyntax,
+    CitationSyntax,
+    HighlightSyntax,
+    StrikethroughSyntax,
+    WikilinkSyntax,
+    FootnoteSyntax,
+    DefinitionListSyntax,
+    AttributeListSyntax,
+    EmbedSyntax,
+} from './types.js';
 
 import {
     OfficeParserConfig,
@@ -126,7 +150,6 @@ const parseOffice = OfficeParser.parseOffice;
 const terminateOcr = OfficeParser.terminateOcr;
 const convert = OfficeConverter.convert;
 const generate = OfficeGenerator.generate;
-const render = OfficeTemplate.render;
 
 export {
     OfficeParser,
@@ -167,11 +190,30 @@ export {
     generate,
     OfficeTemplate,
     renderTemplate,
-    render,
     TemplateConfig,
     TemplateData,
     TemplateValue,
     TemplateInput,
+    PdfParserConfig,
+    DocxGeneratorConfig,
+    OdtGeneratorConfig,
+    PaperFormat,
+    ImageMode,
+    NodeBounds,
+    OfficeIssue,
+    OcrTimeoutConfig,
+    StructuredStyleMapping,
+    TextAlignment,
+    OfficeAuxiliaryContent,
+    AdmonitionSyntax,
+    CitationSyntax,
+    HighlightSyntax,
+    StrikethroughSyntax,
+    WikilinkSyntax,
+    FootnoteSyntax,
+    DefinitionListSyntax,
+    AttributeListSyntax,
+    EmbedSyntax,
     OfficeErrorType,
     OfficeWarningType,
     OfficeError,

@@ -1,6 +1,6 @@
 /**
  * OfficeTemplate: fill a document template's `{{placeholder}}` tags with data and get back new
- * document(s) - a lightweight, dependency-free mail-merge / document-generation entry point.
+ * document(s) - a lightweight mail-merge / document-generation entry point (no extra dependencies; built on the bundled fflate).
  *
  * This is deliberately separate from parsing and generation: it does not build an AST or convert
  * anything, it copies the template and substitutes only the placeholders, so every bit of the
@@ -36,23 +36,28 @@ import { openDocx, renderDocxTemplate } from './template/docxTemplate.js';
 import { BlobLike, OfficeErrorType, OfficeParserConfig, TemplateConfig, TemplateData } from './types.js';
 import { assertNode } from './utils/envUtils.js';
 import { getOfficeError } from './utils/errorUtils.js';
-import { resolveZipInstant } from './utils/officeGenUtils.js';
 
 /** Accepted template inputs, matching `parseOffice`'s first argument. */
 export type TemplateInput = string | Buffer | ArrayBuffer | Uint8Array | BlobLike;
 
 /** Reads the template input into a Node Buffer (path via fs in Node; bytes/blob anywhere). */
-async function readInput(input: TemplateInput): Promise<Buffer> {
+async function readInput(input: TemplateInput, errCfg: OfficeParserConfig): Promise<Buffer> {
     if (typeof input === 'string') {
         assertNode('path-parsing');
         const fs = await import('fs');
-        return fs.readFileSync(input);
+        try { return fs.readFileSync(input); }
+        catch { throw getOfficeError(OfficeErrorType.FILE_DOES_NOT_EXIST, errCfg, input); }
     }
     if (input instanceof ArrayBuffer) return Buffer.from(input);
+    // A Node Buffer is a Uint8Array, so this branch handles both.
     if (input instanceof Uint8Array) return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
-    if (Buffer.isBuffer(input)) return input;
     if (input && typeof (input as BlobLike).arrayBuffer === 'function') return Buffer.from(await (input as BlobLike).arrayBuffer());
-    throw getOfficeError(OfficeErrorType.INVALID_INPUT);
+    throw getOfficeError(OfficeErrorType.INVALID_INPUT, errCfg);
+}
+
+/** A single data entry must be a plain object (not null/array/primitive). */
+function isDataObject(d: unknown): d is TemplateData {
+    return typeof d === 'object' && d !== null && !Array.isArray(d);
 }
 
 /**
@@ -66,37 +71,46 @@ export class OfficeTemplate {
     static render(template: TemplateInput, config: TemplateConfig & { data: TemplateData[] }): Promise<Uint8Array[]>;
     static render(template: TemplateInput, config: TemplateConfig): Promise<Uint8Array | Uint8Array[]>;
     static async render(template: TemplateInput, config: TemplateConfig): Promise<Uint8Array | Uint8Array[]> {
-        if (!config || config.data == null) throw getOfficeError(OfficeErrorType.INVALID_INPUT);
+        // A config object (even without onWarning) suppresses errorUtils' console fallback, so a thrown
+        // rejection is not also printed to stderr; a caller-supplied onWarning is still honored.
+        const errCfg: OfficeParserConfig = { onWarning: config?.onWarning };
+        if (!config || config.data == null) throw getOfficeError(OfficeErrorType.IMPROPER_ARGUMENTS, errCfg);
+        // Validate the data up front: one object, or an array of objects. Rejects a null/primitive
+        // batch entry with a typed error instead of a raw TypeError mid-render.
+        const rows = Array.isArray(config.data) ? config.data : [config.data];
+        if (!rows.every(isDataObject)) throw getOfficeError(OfficeErrorType.IMPROPER_ARGUMENTS, errCfg);
 
-        let bytes = await readInput(template);
+        let bytes = await readInput(template, errCfg);
 
         // Decrypt an encrypted template up front (reuses the parser's crypto), so rendering sees plaintext.
         if (isCfb(bytes) && isEncryptedOoxml(bytes)) {
-            if (!config.password) throw getOfficeError(OfficeErrorType.PASSWORD_REQUIRED);
+            if (!config.password) throw getOfficeError(OfficeErrorType.PASSWORD_REQUIRED, errCfg);
             try { bytes = Buffer.from(decryptOoxml(bytes, config.password)); }
             catch (e) {
-                if (e === WRONG_PASSWORD) throw getOfficeError(OfficeErrorType.PASSWORD_INCORRECT);
-                throw getOfficeError(OfficeErrorType.DOCUMENT_DECRYPTION_FAILED, undefined, e instanceof Error ? e.message : String(e));
+                if (e === WRONG_PASSWORD) throw getOfficeError(OfficeErrorType.PASSWORD_INCORRECT, errCfg);
+                throw getOfficeError(OfficeErrorType.DOCUMENT_DECRYPTION_FAILED, errCfg, e instanceof Error ? e.message : String(e));
             }
         }
 
-        const entries = openDocx(bytes);
+        const entries = await openDocx(bytes, config.decompressionLimits, errCfg);
         if (!entries) {
             const hint = config.fileType && config.fileType !== 'docx' ? `'${config.fileType}' is not supported` : 'the input is not a .docx';
-            throw getOfficeError(OfficeErrorType.TEMPLATE_UNSUPPORTED_FORMAT, undefined, hint);
+            throw getOfficeError(OfficeErrorType.TEMPLATE_UNSUPPORTED_FORMAT, errCfg, hint);
         }
 
         const start = config.delimiters?.start || '{{';
         const end = config.delimiters?.end || '}}';
         const onMissing = config.onMissing || 'keep';
-        // Pin the zip mtime so a given (template, data) renders to identical bytes every time.
-        const { mtime } = resolveZipInstant('1980-01-01T00:00:00Z');
-        const onFieldMissing = (key: string): never => { throw getOfficeError(OfficeErrorType.TEMPLATE_FIELD_MISSING, undefined, key); };
+        // A fixed local-time instant: fflate stamps zip entries from local-time fields, so building the
+        // date from local fields makes the DOS timestamp identical in every timezone (deterministic
+        // output cross-machine) and safely inside fflate's 1980-2099 range everywhere.
+        const mtime = new Date(2001, 0, 1, 0, 0, 0);
+        const onFieldMissing = (key: string): never => { throw getOfficeError(OfficeErrorType.TEMPLATE_FIELD_MISSING, errCfg, key); };
 
         const renderOne = (data: TemplateData): Uint8Array =>
             renderDocxTemplate(entries, data, { start, end, onMissing, mtime, onFieldMissing });
 
-        return Array.isArray(config.data) ? config.data.map(renderOne) : renderOne(config.data);
+        return Array.isArray(config.data) ? rows.map(renderOne) : renderOne(config.data);
     }
 }
 

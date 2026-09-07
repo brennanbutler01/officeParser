@@ -1607,7 +1607,9 @@ async function testOfficeGenUtils(): Promise<void> {
     const a = resolveZipInstant(new Date('2024-01-01T00:00:00Z'));
     assert.strictEqual(a.iso, '2024-01-01T00:00:00Z', 'resolveZipInstant: whole-second ISO');
     assert.strictEqual(a.iso, resolveZipInstant('2024-01-01T00:00:00Z').iso, 'resolveZipInstant: Date and string agree');
-    assert.strictEqual(resolveZipInstant(new Date('1900-01-01')).mtime.getUTCFullYear(), 1980, 'resolveZipInstant: clamps below the zip 1980 floor');
+    // The clamp targets fflate's LOCAL-time floor (fflate stamps zip mtimes from local getters and
+    // rejects a local year < 1980), so the clamped instant's local year is 1980 in every timezone.
+    assert.strictEqual(resolveZipInstant(new Date('1900-01-01')).mtime.getFullYear(), 1980, 'resolveZipInstant: clamps below the zip 1980 floor');
 
     // Header-row inference from the signals parsers actually set (not the test-only `isHeader`).
     const cell = (text: string, style?: string, bold?: boolean) => ({ type: 'cell', metadata: style ? { style } : undefined, children: [{ type: 'text', text, formatting: bold ? { bold: true } : undefined }] });
@@ -1698,6 +1700,79 @@ async function testTemplate(): Promise<void> {
 
     // Untouched parts are copied verbatim.
     assert.deepStrictEqual(docxParts(bytes)['[Content_Types].xml'], docxParts(fs.readFileSync(tpl))['[Content_Types].xml'], 'non-text parts are unchanged');
+
+    // --- adversarial cases (each builds a tiny docx around a specific hazard) ---
+    const buildDocx = (bodyXml: string): Uint8Array => {
+        const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+        const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+        const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${bodyXml}</w:body></w:document>`;
+        return zipSync({ '[Content_Types].xml': strToU8(ct), '_rels/.rels': strToU8(rels), 'word/document.xml': strToU8(doc) });
+    };
+    const renderDoc = async (bodyXml: string, cfg: any): Promise<string> => {
+        const outBytes = await OfficeTemplate.render(Buffer.from(buildDocx(bodyXml)), cfg) as Uint8Array;
+        const docXml = strFromU8(unzipSync(outBytes)['word/document.xml']);
+        assert.doesNotThrow(() => parseXmlString(docXml), 'rendered document.xml is well-formed XML');
+        return docXml;
+    };
+
+    // 1. A value's XML metacharacters are escaped (no markup injection, part stays well-formed).
+    {
+        const xml = await renderDoc('<w:p><w:r><w:t>{{v}}</w:t></w:r></w:p>', { data: { v: 'A & B <c> "x" </w:t>' } });
+        assert.ok(xml.includes('A &amp; B &lt;c&gt;'), 'value XML metacharacters are escaped');
+        assert.ok(!/<c>/.test(xml), 'value cannot inject a raw element');
+    }
+    // 2. Custom delimiters made of XML-special chars match the escaped source text.
+    {
+        const xml = await renderDoc('<w:p><w:r><w:t>&lt;&lt;name&gt;&gt;</w:t></w:r></w:p>', { data: { name: 'Acme' }, delimiters: { start: '<<', end: '>>' } });
+        assert.ok(xml.includes('Acme') && !xml.includes('&lt;&lt;name'), 'custom << >> delimiters substitute');
+    }
+    // 3. A self-closing <w:t/> in a placeholder paragraph does not corrupt the output.
+    {
+        const xml = await renderDoc('<w:p><w:r><w:t/></w:r><w:r><w:t>{{v}}</w:t></w:r></w:p>', { data: { v: 'OK' } });
+        assert.ok(xml.includes('OK'), 'self-closing <w:t/> handled, placeholder still substituted');
+    }
+    // 4. XML-illegal control characters in a value are stripped (part stays valid).
+    {
+        const xml = await renderDoc('<w:p><w:r><w:t>{{v}}</w:t></w:r></w:p>', { data: { v: 'a\x01b\x0Cc' } });
+        assert.ok(xml.includes('abc'), 'XML-illegal control chars are stripped from the value');
+        assert.ok(!/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(xml), 'no raw control characters remain in the part');
+    }
+    // 5. Text boxes: nested <w:p> in a run does not swallow later placeholders or join across boundary.
+    {
+        const body = '<w:p><w:r><w:t>Before {{a}} </w:t></w:r>'
+            + '<w:r><mc:AlternateContent xmlns:mc="x"><w:txbxContent><w:p><w:r><w:t>{{b}}</w:t></w:r></w:p></w:txbxContent></mc:AlternateContent></w:r>'
+            + '<w:r><w:t> after {{c}}</w:t></w:r></w:p>';
+        const xml = await renderDoc(body, { data: { a: 'AA', b: 'BB', c: 'CC' } });
+        assert.ok(xml.includes('AA') && xml.includes('BB') && xml.includes('CC'), 'placeholders around and inside a text box all substitute');
+        assert.ok(!xml.includes('{{c}}'), 'placeholder after a text box is not skipped');
+    }
+    // 6. A placeholder split at a text-box boundary is NOT joined across it (no value teleporting).
+    {
+        const body = '<w:p><w:r><w:t>x {{na</w:t></w:r>'
+            + '<w:r><w:txbxContent><w:p><w:r><w:t>inner</w:t></w:r></w:p></w:txbxContent></w:r>'
+            + '<w:r><w:t>me}} y</w:t></w:r></w:p>';
+        const xml = await renderDoc(body, { data: { name: 'ZZ' } });
+        assert.ok(!xml.includes('ZZ'), 'a placeholder is not matched across a paragraph (text-box) boundary');
+        assert.ok(xml.includes('inner'), 'the text box content is preserved');
+    }
+    // 7. The timezone-crash regression: render must succeed west of UTC (fflate stamps mtimes in local
+    //    time and rejects year < 1980). Run in a child process because Node caches TZ at startup.
+    {
+        const { execSync } = await import('child_process');
+        const os = await import('os');
+        const scriptPath = path.join(os.tmpdir(), `optz_${Date.now()}.mjs`);
+        const src = path.join(__dirname, '..', 'src', 'OfficeTemplate.ts').replace(/\\/g, '/');
+        fs.writeFileSync(scriptPath, `import { OfficeTemplate } from ${JSON.stringify(src)};\n`
+            + `const doc = ${JSON.stringify(Buffer.from(buildDocx('<w:p><w:r><w:t>{{v}}</w:t></w:r></w:p>')).toString('base64'))};\n`
+            + `const out = await OfficeTemplate.render(Buffer.from(doc, 'base64'), { data: { v: 'OK' } });\n`
+            + `process.stdout.write(out.length > 0 ? 'RENDER_OK' : 'EMPTY');\n`);
+        try {
+            const out = execSync(`npx tsx ${JSON.stringify(scriptPath)}`, { cwd: path.join(__dirname, '..'), env: { ...process.env, TZ: 'America/Los_Angeles' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+            assert.ok(out.includes('RENDER_OK'), 'render succeeds under TZ=America/Los_Angeles');
+        } finally {
+            try { fs.unlinkSync(scriptPath); } catch { /* best effort */ }
+        }
+    }
 }
 
 async function runTests(): Promise<void> {

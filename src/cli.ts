@@ -22,7 +22,7 @@
  *   --includeRawContent       Include raw content in AST (default: false)
  *   --serializeRawContent     Include stringified XML in metadata (default: true)
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
- *   --includeBreakNodes       Include break nodes (DOCX only, default: false)
+ *   --includeBreakNodes       Include break nodes (DOCX & ODF, default: false)
  *   --ignoreBounds            Omit per-node bounding boxes and page dimensions (default: false)
  *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF)
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
@@ -55,13 +55,20 @@ const knownParserBooleans = new Set([
     'ignoreBounds',
     // Dotted boolean keys are listed so a bare `--group.flag` does not swallow the following file
     // argument as its value (the isKnownBoolean check keys off the full dotted name).
-    'htmlParserConfig.preserveAttributes',
+    'htmlParserConfig.preserveAttributes', 'htmlParserConfig.preserveIframes', 'htmlParserConfig.embedFolkForms',
     'pdfParserConfig.useTags', 'pdfParserConfig.detectColumns',
-    'pdfParserConfig.mergeHyphenatedWords', 'pdfParserConfig.normalizeText',
+    'pdfParserConfig.mergeHyphenatedWords', 'pdfParserConfig.normalizeText', 'pdfParserConfig.extractTextColor',
+    'ocrConfig.preserveLayout',
 ]);
 
 const knownGeneratorBooleans = new Set([
-    'includeFormatting', 'generateIds', 'renderMetadata', 'includeImages', 'includeCharts', 'ignoreInternalLinks'
+    'includeFormatting', 'generateIds', 'renderMetadata', 'includeImages', 'includeCharts', 'ignoreInternalLinks',
+    // Dotted generator booleans, same rationale as the parser set above.
+    'pdfConfig.tagged', 'pdfConfig.outline', 'pdfConfig.landscape', 'pdfConfig.printBackground', 'pdfConfig.displayHeaderFooter',
+    'docxConfig.landscape', 'odtConfig.landscape',
+    'textConfig.preserveLayout', 'textConfig.renderNotes',
+    'htmlConfig.standalone', 'htmlConfig.sourceAttributes', 'htmlConfig.gatedEmbeds',
+    'mdConfig.fallbackToHtml',
 ]);
 
 // Prefixes used to identify configurations targeted for the generator instead of the parser.
@@ -295,15 +302,15 @@ if (fileArg && !showHelp) {
     console.log('  --includeRawContent                         Include raw content in AST (default: false)');
     console.log('  --serializeRawContent                       Serialize raw XML content (default: true)');
     console.log('  --preserveXmlWhitespace                     Keep raw formatting space (default: false)');
-    console.log('  --includeBreakNodes                         Include break nodes (DOCX only, default: false)');
+    console.log('  --includeBreakNodes                         Include break nodes (DOCX & ODF, default: false)');
     console.log('  --ignoreBounds                              Omit per-node bounding boxes and page dimensions (default: false)');
     console.log('  --verbose                                   Show full error stack traces and warning logs');
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');
+    console.log('  --password=secret                           Password for an encrypted document (PDF, OOXML, or ODF)');
     console.log('  --htmlParserConfig.preserveIframes          Keep non-YouTube <iframe> embeds (dropped by default)');
     console.log('');
     console.log('PDF Parser Options (pdfParserConfig.*):');
-    console.log('  --password=secret                           Password for an encrypted document (PDF, OOXML, or ODF)');
     console.log('  --pdfParserConfig.useTags=false             Ignore the tagged-structure tree, use geometry only (default: true)');
     console.log('  --pdfParserConfig.detectColumns=false       Disable multi-column reading-order detection (default: true)');
     console.log('  --pdfParserConfig.pageRange=1-3,7           Parse only the given pages (default: all)');
@@ -316,7 +323,7 @@ if (fileArg && !showHelp) {
     console.log('  --htmlConfig.sourceAttributes               Carry each rich node\'s source in a data-* attribute (default: false)');
     console.log('');
     console.log('Advanced Nested Config Examples:');
-    console.log('  --pdfConfig.format=Letter                   Configure Puppeteer PDF format (A4 | Letter | Legal etc.)');
+    console.log('  --pdfConfig.format=Letter                   PDF paper format (A4 | Letter | Legal | A3 ...), both engines');
     console.log('  --chunksConfig.strategy=fixed-size          Chunking strategy (fixed-size | document-structure | semantic)');
     console.log('  --mdConfig.dialect=github                   Markdown dialect (extended | github | gitlab | obsidian | pandoc | commonmark)');
     console.log('  --mdConfig.fallbackToHtml=false              Disable HTML fallback for unsupported Markdown features (default: true)');

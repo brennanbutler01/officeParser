@@ -56,7 +56,7 @@
     "test:clean": "node -e \"for(const d of ['test/results','test/generator/results','test/generator/output','test/parser/results','test/parser/output','test/cli/results'])require('fs').rmSync(d,{recursive:true,force:true})\"",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && npm run test:clean",
     "sbom": "npx --yes @cyclonedx/cyclonedx-npm --output-format json --output-file dist/sbom.cdx.json --omit dev",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run clean && npm run build",
     "prepare": "husky"
   },
   "repository": {
@@ -123,6 +123,10 @@
     "file-type": "^22.0.2",
     "pdfjs-dist": "6.2.108",
     "tesseract.js": "^7.0.0"
+  },
+  "peerDependencies": {
+    "pdf-lib": "^1.17.1",
+    "puppeteer": ">=22"
   },
   "peerDependenciesMeta": {
     "puppeteer": {

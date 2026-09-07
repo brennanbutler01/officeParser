@@ -367,7 +367,7 @@ export interface CommonOfficeParserConfig {
     pdfWorkerSrc?: string;
     /**
      * Flag to include break nodes in the AST.
-     * This is currently only supported for Word documents. (w:br nodes)
+     * Supported for Word (`w:br`) and ODF (`fo:break-before`/`fo:break-after`, `text:soft-page-break`).
      *
      * Default is false
      */
@@ -485,10 +485,11 @@ export interface PdfParserConfig {
      * - 'auto': trust the source. On the tagged path, a heading's level comes from its tag (`H1`..
      *   `H6`); on the geometric path (untagged, or `useTags: false`), from a font-size and weight
      *   heuristic.
-     * - 'font-size': always use the size/weight heuristic, even on a tagged PDF. Tagged tables and
-     *   lists are still honored, but each tagged heading is re-leveled by its font size (and demoted
-     *   to a paragraph when it is not visually heading-like). Use this when a PDF's heading tags are
-     *   present but wrong or flat.
+     * - 'font-size': re-level headings with the size/weight heuristic even on a tagged PDF. Tagged
+     *   tables and lists are still honored, and a tagged heading (`H`/`H1`..`H6`) is re-leveled by its
+     *   font size (and demoted to a paragraph when it is not visually heading-like); a block the tags
+     *   call a plain paragraph is left as one. Use this when a PDF's heading tags are present but wrong
+     *   or flat.
      * - 'off': never emit headings; every block is a paragraph.
      *
      * Default is 'auto'.
@@ -1895,10 +1896,23 @@ export interface TemplateConfig {
      * A key that is present but `null`/`undefined` always renders as empty (it is not "missing").
      */
     onMissing?: 'keep' | 'empty' | 'error';
-    /** Password, if the template document is itself encrypted; it is decrypted before rendering. */
+    /**
+     * Password, if the template document is itself encrypted; it is decrypted before rendering. Note
+     * the rendered output is the plain (unencrypted) document.
+     */
     password?: string;
     /** Optional hint for the template's format. Only DOCX is supported today; detected from bytes otherwise. */
     fileType?: 'docx';
+    /**
+     * Limits on decompressing the (untrusted) template zip, same shape and defaults as the parser's.
+     * Guards against zip-bomb templates. Defaults to 512 MiB / 10000 entries.
+     */
+    decompressionLimits?: DecompressionLimits;
+    /**
+     * Optional callback for non-fatal issues. Also suppresses the console fallback that would
+     * otherwise print a thrown error, so a caller handling the rejection is not double-notified.
+     */
+    onWarning?: (issue: OfficeIssue) => void;
 }
 
 /**

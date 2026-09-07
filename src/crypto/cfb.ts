@@ -45,6 +45,8 @@ export class CfbContainer {
     private miniFat: number[] = [];
     private dir: DirEntry[] = [];
     private miniStream: Uint8Array = new Uint8Array(0);
+    /** A file of N bytes has at most ceil(N/sectorSize) sectors; every chain/table is bounded by this. */
+    private maxSectors: number;
 
     constructor(buf: Uint8Array) {
         if (!isCfb(buf)) throw new DecryptionError('not a CFB container');
@@ -56,6 +58,8 @@ export class CfbContainer {
         this.miniCutoff = this.view.getUint32(56, true);
         // v3 files use 512-byte sectors and ignore anything past the 512-byte header; v4 use 4096.
         if (majorVersion !== 3 && majorVersion !== 4) throw new DecryptionError(`unsupported CFB major version ${majorVersion}`);
+        if (this.sectorSize < 512 || this.sectorSize > 1 << 20) throw new DecryptionError('unsupported CFB sector size');
+        this.maxSectors = Math.ceil(buf.length / this.sectorSize) + 1;
 
         this.readFat();
         this.readDirectory();
@@ -80,11 +84,16 @@ export class CfbContainer {
             if (s === FREESECT || s === ENDOFCHAIN) break;
             difat.push(s);
         }
-        // Remaining FAT sector locations, if any, are chained through DIFAT sectors.
+        // Remaining FAT sector locations, if any, are chained through DIFAT sectors. A malformed
+        // (self-referential or over-long) DIFAT chain is bounded two ways: a visited-set rejects
+        // cycles, and the count cannot exceed the file's sector count. Both keep a tiny hostile file
+        // from growing `difat`/`fat` without bound.
         let difatSector = this.u32(68);
         const perDifat = this.sectorSize / 4 - 1;
-        let guard = 0;
-        while (difatSector !== ENDOFCHAIN && difatSector !== FREESECT && guard++ < 1_000_000) {
+        const seenDifat = new Set<number>();
+        while (difatSector !== ENDOFCHAIN && difatSector !== FREESECT) {
+            if (seenDifat.has(difatSector) || seenDifat.size > this.maxSectors || difat.length > this.maxSectors) break;
+            seenDifat.add(difatSector);
             const base = this.sectorOffset(difatSector);
             for (let i = 0; i < perDifat; i++) {
                 const s = this.u32(base + i * 4);
@@ -93,17 +102,20 @@ export class CfbContainer {
             difatSector = this.u32(base + perDifat * 4);
         }
         for (const fatSector of difat) {
+            if (this.fat.length > this.maxSectors * (this.sectorSize / 4)) break;
             const base = this.sectorOffset(fatSector);
             for (let i = 0; i < this.sectorSize / 4; i++) this.fat.push(this.u32(base + i * 4));
         }
     }
 
-    /** Walks a FAT sector chain and concatenates the sector bytes. */
+    /** Walks a FAT sector chain and concatenates the sector bytes. Rejects cycles via a visited set. */
     private readChain(start: number): Uint8Array {
         const parts: Uint8Array[] = [];
         let sector = start;
-        let guard = 0;
-        while (sector !== ENDOFCHAIN && sector !== FREESECT && guard++ < 10_000_000) {
+        const seen = new Set<number>();
+        while (sector !== ENDOFCHAIN && sector !== FREESECT) {
+            if (seen.has(sector) || seen.size > this.maxSectors) break;
+            seen.add(sector);
             const off = this.sectorOffset(sector);
             parts.push(this.buf.subarray(off, off + this.sectorSize));
             sector = this.fat[sector];
@@ -116,7 +128,9 @@ export class CfbContainer {
         const dirBytes = this.readChain(this.u32(48)); // first directory sector
         const view = new DataView(dirBytes.buffer, dirBytes.byteOffset, dirBytes.byteLength);
         for (let off = 0; off + 128 <= dirBytes.length; off += 128) {
-            const nameLen = view.getUint16(off + 64, true);
+            // The name field is a fixed 64-byte UTF-16 buffer; clamp the declared length to it so a
+            // bogus value cannot read into the next entry.
+            const nameLen = Math.min(view.getUint16(off + 64, true), 64);
             const type = view.getUint8(off + 66);
             if (type === 0) continue; // empty slot
             let name = '';
@@ -146,8 +160,11 @@ export class CfbContainer {
     private readMiniChain(start: number, size: number): Uint8Array {
         const parts: Uint8Array[] = [];
         let sector = start;
-        let guard = 0;
-        while (sector !== ENDOFCHAIN && sector !== FREESECT && guard++ < 10_000_000) {
+        const seen = new Set<number>();
+        const maxMini = this.miniStream.length / this.miniSectorSize + 1;
+        while (sector !== ENDOFCHAIN && sector !== FREESECT) {
+            if (seen.has(sector) || seen.size > maxMini) break;
+            seen.add(sector);
             const off = sector * this.miniSectorSize;
             parts.push(this.miniStream.subarray(off, off + this.miniSectorSize));
             sector = this.miniFat[sector];

@@ -53,6 +53,7 @@ function syncVersions() {
         'src/types.ts',
         'src/defaults.ts',
         'docs/index.html',
+        'docs/specs/debugging_fragment.html',
         'README.md'
     ];
 

@@ -133,6 +133,19 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     const encKeyBits = parseInt(attr(xml, 'encryptedKey', 'keyBits'), 10) || 256;
     const encHash = hashId(attr(xml, 'encryptedKey', 'hashAlgorithm'));
     const spinCount = parseInt(attr(xml, 'encryptedKey', 'spinCount'), 10) || 100000;
+    // `spinCount`, `keyBits` and `blockSize` come from the attacker-controlled descriptor. Real Office
+    // files use spinCount=100000; reject anything absurd so a hostile file cannot make us grind through
+    // billions of hash rounds (CPU DoS) before we can even check the password. Office/LibreOffice cap
+    // the spin count at ~10 million.
+    if (!Number.isFinite(spinCount) || spinCount < 0 || spinCount > 10_000_000) {
+        throw new DecryptionError(`encrypted OOXML: implausible spinCount ${spinCount}`);
+    }
+    for (const bits of [keyData.keyBits, encKeyBits]) {
+        if (bits !== 128 && bits !== 192 && bits !== 256) throw new DecryptionError(`encrypted OOXML: unsupported keyBits ${bits}`);
+    }
+    for (const bs of [keyData.blockSize, parseInt(attr(xml, 'encryptedKey', 'blockSize'), 10) || 16]) {
+        if (!Number.isFinite(bs) || bs < 1 || bs > 64) throw new DecryptionError(`encrypted OOXML: implausible blockSize ${bs}`);
+    }
     const encVerifierInput = Buffer.from(attr(xml, 'encryptedKey', 'encryptedVerifierHashInput'), 'base64');
     const encVerifierValue = Buffer.from(attr(xml, 'encryptedKey', 'encryptedVerifierHashValue'), 'base64');
     const encKeyValue = Buffer.from(attr(xml, 'encryptedKey', 'encryptedKeyValue'), 'base64');

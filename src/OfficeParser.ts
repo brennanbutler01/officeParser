@@ -98,13 +98,16 @@ const MAX_PASSWORD_ATTEMPTS = 3;
  * as the PDF path does. PDF encryption is not handled here (pdf.js does it inside the PDF parser).
  */
 const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Promise<Buffer> => {
-    let decrypt: ((buf: Uint8Array, password: string) => Uint8Array) | null = null;
+    const limits = config.decompressionLimits;
+    let decrypt: ((buf: Uint8Array, password: string) => Uint8Array | Promise<Uint8Array>) | null = null;
     if (isCfb(buffer)) {
         // A CFB container is either an encrypted OOXML file or a legacy binary (.doc/.xls/.ppt).
         // Only the former carries the encryption streams; the latter falls through as unsupported.
         if (isEncryptedOoxml(buffer)) decrypt = decryptOoxml;
-    } else if (isEncryptedOdf(buffer)) {
-        decrypt = decryptOdf;
+    } else if (await isEncryptedOdf(buffer, limits, config)) {
+        // The ODF detection and decryption reuse the parser's decompression limits, so a zip-bomb
+        // in a would-be encrypted ODF is bounded exactly as an ordinary document is.
+        decrypt = (b, password) => decryptOdf(b, password, limits, config);
     }
     if (!decrypt) return buffer;
 
@@ -121,7 +124,7 @@ const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Prom
             throw getOfficeError(OfficeErrorType.PASSWORD_REQUIRED, config);
         }
         try {
-            return Buffer.from(decrypt(buffer, password));
+            return Buffer.from(await decrypt(buffer, password));
         } catch (e) {
             if (e !== WRONG_PASSWORD) {
                 // A structural/unsupported-scheme failure (not a wrong password): surface it as a

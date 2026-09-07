@@ -7,17 +7,20 @@
  * as `{{`, `nam`, `e}}` in three separate `<w:t>`. We therefore work per paragraph: concatenate its
  * `<w:t>` texts, find placeholders in the joined string, and write the result back so that ordinary
  * text keeps its original run (and formatting) while a placeholder's value adopts the formatting of
- * the run where the placeholder began. Nothing else in the package is touched.
+ * the run where the placeholder began. Paragraphs can nest (a text box's `<w:p>` lives inside a run
+ * of the outer `<w:p>`), so we scope substitution to the text *between* paragraph-boundary tags,
+ * which both handles nesting and never lets a placeholder span a paragraph boundary.
  *
  * @module template/docxTemplate
  */
 
-import { unzipSync, zipSync, Zippable } from 'fflate';
-import { TemplateData, TemplateValue } from '../types.js';
-import { escapeXml } from '../utils/sanitize.js';
+import { zipSync, Zippable } from 'fflate';
+import { DecompressionLimits, OfficeParserConfig, TemplateData, TemplateValue } from '../types.js';
+import { escapeXml, stripInvalidXmlChars } from '../utils/sanitize.js';
+import { extractFiles } from '../utils/zipUtils.js';
 
 /** The `word/*.xml` parts that carry body text a placeholder could live in. */
-const TEXT_PART = /^word\/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/;
+const TEXT_PART = /^word\/(document\d*|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/;
 
 /** Escapes a regex metacharacter run so custom delimiters can be used literally. */
 function escapeRegex(s: string): string {
@@ -28,26 +31,31 @@ function escapeRegex(s: string): string {
 function valueToRunXml(value: TemplateValue): string {
     let text: string;
     if (value == null) text = '';
-    else if (value instanceof Date) text = value.toISOString();
+    else if (value instanceof Date) text = isNaN(value.getTime()) ? '' : value.toISOString();
     else text = String(value);
-    // A newline in a value becomes a real line break: close this <w:t>, emit <w:br/>, reopen a <w:t>.
-    return escapeXml(text).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+    // Strip XML-illegal control chars (DB-sourced data often carries them) BEFORE escaping, exactly
+    // as the DOCX generator does; then a newline becomes a real line break: close this <w:t>, emit
+    // <w:br/>, reopen a <w:t>.
+    return escapeXml(stripInvalidXmlChars(text)).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
 }
 
 /**
- * Replaces placeholders within a single `<w:p>...</w:p>` paragraph. `resolve` returns the run-XML to
- * substitute for a key, or `null` to leave the placeholder text as-is (the `onMissing: 'keep'` case).
+ * Replaces placeholders within one chunk of run-level XML (the content between two paragraph-boundary
+ * tags). `resolve` returns the run-XML to substitute for a key, or `null` to leave the placeholder
+ * text as-is (the `onMissing: 'keep'` case).
  */
-function replaceInParagraph(pXml: string, phRe: RegExp, resolve: (key: string) => string | null): string {
-    const WT = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+function replaceInChunk(chunk: string, phRe: RegExp, resolve: (key: string) => string | null): string {
+    // A `<w:t>` is either self-closing (`<w:t/>`, emitted by the OpenXML SDK / POI / docx4j for an
+    // empty run) or a normal `<w:t ...>text</w:t>`; capture the inner text of the latter.
+    const WT = /<w:t\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:t>)/g;
     const segs: { start: number; end: number; inner: string }[] = [];
     let m: RegExpExecArray | null;
-    while ((m = WT.exec(pXml))) segs.push({ start: m.index, end: m.index + m[0].length, inner: m[1] });
-    if (!segs.length) return pXml;
+    while ((m = WT.exec(chunk))) segs.push({ start: m.index, end: m.index + m[0].length, inner: m[1] ?? '' });
+    if (!segs.length) return chunk;
 
     const joined = segs.map(s => s.inner).join('');
     phRe.lastIndex = 0;
-    if (!phRe.test(joined)) return pXml; // no placeholder in this paragraph: leave it exactly as-is
+    if (!phRe.test(joined)) return chunk; // no placeholder here: leave it exactly as-is
 
     // Map each character position in the joined text back to the <w:t> segment it came from.
     const posSeg = new Int32Array(joined.length);
@@ -75,17 +83,27 @@ function replaceInParagraph(pXml: string, phRe: RegExp, resolve: (key: string) =
     }
 
     // Splice the rebuilt `<w:t>` elements back in, from last to first so earlier offsets stay valid.
-    let out = pXml;
+    let out = chunk;
     for (let si = segs.length - 1; si >= 0; si--) {
         out = out.slice(0, segs[si].start) + `<w:t xml:space="preserve">${newInner[si]}</w:t>` + out.slice(segs[si].end);
     }
     return out;
 }
 
-/** Applies placeholder replacement to every paragraph of one XML part. */
+/**
+ * Applies placeholder replacement to one XML part. The part is split at every paragraph-boundary tag
+ * (`<w:p ...>`, `</w:p>`, `<w:p/>`); each piece between boundaries is one paragraph's own run content
+ * (nested paragraphs, e.g. text boxes, become their own pieces), so joining a piece's `<w:t>` never
+ * crosses a paragraph boundary. This is linear (no `[\s\S]*?`-to-`</w:p>` backtracking).
+ */
 function replaceInPart(xml: string, phRe: RegExp, resolve: (key: string) => string | null): string {
-    // Paragraphs never nest, so a non-greedy match to the first </w:p> is safe.
-    return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, p => replaceInParagraph(p, phRe, resolve));
+    const pieces = xml.split(/(<w:p\b[^>]*\/>|<w:p\b[^>]*>|<\/w:p>)/g);
+    for (let i = 0; i < pieces.length; i++) {
+        // Boundary tags (odd indices) have no `<w:t>`, so processing them is a harmless no-op; process
+        // every piece uniformly rather than tracking parity.
+        pieces[i] = replaceInChunk(pieces[i], phRe, resolve);
+    }
+    return pieces.join('');
 }
 
 /**
@@ -97,7 +115,11 @@ export function renderDocxTemplate(
     data: TemplateData,
     opts: { start: string; end: string; onMissing: 'keep' | 'empty' | 'error'; mtime: Date; onFieldMissing: (key: string) => never },
 ): Uint8Array {
-    const phRe = new RegExp(`${escapeRegex(opts.start)}\\s*([\\w.\\-]+)\\s*${escapeRegex(opts.end)}`, 'g');
+    // Match delimiters against the raw XML inner text, where Word stores e.g. `<<` as `&lt;&lt;`; so
+    // build the pattern from the XML-escaped delimiters. Placeholder names allow Unicode letters/digits.
+    const start = escapeRegex(escapeXml(opts.start));
+    const end = escapeRegex(escapeXml(opts.end));
+    const phRe = new RegExp(`${start}\\s*([\\p{L}\\p{N}_.\\-]+)\\s*${end}`, 'gu');
     const resolve = (key: string): string | null => {
         if (Object.prototype.hasOwnProperty.call(data, key)) return valueToRunXml(data[key]);
         if (opts.onMissing === 'empty') return '';
@@ -117,9 +139,17 @@ export function renderDocxTemplate(
     return zipSync(out);
 }
 
-/** Unzips a docx and confirms it is one (has `word/document.xml`); returns null when it is not a docx. */
-export function openDocx(bytes: Uint8Array): Record<string, Uint8Array> | null {
-    let entries: Record<string, Uint8Array>;
-    try { entries = unzipSync(bytes); } catch { return null; }
-    return entries['word/document.xml'] ? entries : null;
+/**
+ * Unzips a docx under decompression limits and confirms it is one (has `word/document.xml`); returns
+ * null when it is not a docx. Uses the parser's streaming `extractFiles` guard so a zip-bomb template
+ * is bounded exactly as an ordinary parsed document is.
+ */
+export async function openDocx(bytes: Uint8Array, limits?: DecompressionLimits, config?: OfficeParserConfig): Promise<Record<string, Uint8Array> | null> {
+    const src = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let files;
+    try { files = await extractFiles(src, () => true, limits ?? {}, config); }
+    catch { return null; }
+    const map: Record<string, Uint8Array> = {};
+    for (const f of files) map[f.path] = f.content;
+    return map['word/document.xml'] ? map : null;
 }

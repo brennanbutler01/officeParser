@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false   # Let all matrix jobs complete to get a full picture
       matrix:
-        node-version: [18, 20, 22, 24]
+        node-version: [22, 24]
 
     steps:
       # Step 1: Check out the full repository

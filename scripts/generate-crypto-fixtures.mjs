@@ -196,7 +196,11 @@ function minimalDocx(marker) {
 }
 
 function minimalOdt(marker) {
-    const content = `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:text><text:p>${marker}</text:p></office:text></office:body></office:document-content>`;
+    // Pad content.xml with many varied paragraphs so it compresses to well over 1 KiB: that makes the
+    // ODF decryptor's checksum branch (only used above ~1 KiB compressed) run against this fixture.
+    let filler = '';
+    for (let i = 0; i < 400; i++) filler += `<text:p>Line ${i} lorem ipsum dolor sit amet consectetur ${i * 7} adipiscing ${(i * 131) % 1000}</text:p>`;
+    const content = `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:text><text:p>${marker}</text:p>${filler}</office:text></office:body></office:document-content>`;
     const styles = `<?xml version="1.0" encoding="UTF-8"?><office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.2"/>`;
     const manifest = `<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/><manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
     return Buffer.from(zipSync({
