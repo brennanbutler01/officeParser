@@ -213,10 +213,13 @@
                 <td><code>string</code></td>
                 <td><code>''</code></td>
                 <td><strong>Encryption</strong>: Password for a password-protected document. Applies to every encryptable
-                    format: PDF, encrypted OOXML (<code>.docx</code>/<code>.xlsx</code>/<code>.pptx</code>) and encrypted
-                    ODF (<code>.odt</code>/<code>.ods</code>/<code>.odp</code>/<code>.odg</code>). A missing password rejects
-                    with <code>PASSWORD_REQUIRED</code>, a wrong one with <code>PASSWORD_INCORRECT</code>. Ignored for
-                    unencrypted files.</td>
+                    format: PDF, encrypted OOXML (<code>.docx</code>/<code>.xlsx</code>/<code>.pptx</code>, ECMA-376 agile
+                    or standard AES) and encrypted ODF (<code>.odt</code>/<code>.ods</code>/<code>.odp</code>/<code>.odg</code>,
+                    AES-CBC with PBKDF2). A missing password rejects with <code>PASSWORD_REQUIRED</code>, a wrong one with
+                    <code>PASSWORD_INCORRECT</code>. Ignored for unencrypted files. <em>ODF note:</em> LibreOffice 24.8+
+                    defaults to AES-256-GCM with Argon2id ("wholesome encryption"), which is not supported and rejects with
+                    <code>DOCUMENT_DECRYPTION_FAILED</code>; re-save with the classic AES-CBC/PBKDF2 scheme (or an earlier
+                    LibreOffice) to parse it.</td>
             </tr>
             <tr>
                 <td><code>onPassword</code></td>

@@ -382,10 +382,14 @@ const { value: csv } = await OfficeGenerator.generate(ast, 'csv');
 **Supported destinations:** `'text'` · `'md'` · `'html'` · `'csv'` · `'rtf'` · `'pdf'` · `'epub'` · `'chunks'`
 
 > [!NOTE]
-> **PDF generation** requires the optional `puppeteer` peer dependency:
+> **PDF generation** uses a headless browser by default (`pdfConfig.engine: 'html'`), which needs the
+> optional `puppeteer` peer dependency:
 > ```bash
 > npm install puppeteer
 > ```
+> Or choose `pdfConfig.engine: 'native'` to lay the document out directly with `pdf-lib`
+> (`npm install pdf-lib`) — no browser, and the only engine that produces a real PDF in the browser.
+> See [PdfGeneratorConfig](#pdfgeneratorconfig).
 >
 > **EPUB generation with images** requires `extractAttachments: true` on the parse step that
 > produced the AST — see [EPUB Support](#epub-support).

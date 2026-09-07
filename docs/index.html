@@ -3212,6 +3212,19 @@
                     <span class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
                             style="width:3.5rem;height:3.5rem;">
+                            <path d="M4 4V20H20V8L16 4H4Z" fill="#0F9D58" />
+                            <path d="M16 4V8H20" stroke="white" stroke-width="1.5" />
+                            <circle cx="10" cy="12" r="2.2" stroke="white" stroke-width="1.5" />
+                            <path d="M13 16L15.2 12L17 16H13Z" fill="white" />
+                        </svg>
+                    </span>
+                    <h3>ODG</h3>
+                    <p>OpenDocument Graphics</p>
+                </div>
+                <div class="support-card">
+                    <span class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
+                            style="width:3.5rem;height:3.5rem;">
                             <path d="M4 4V20H20V8L16 4H4Z" fill="#475569" />
                             <path d="M16 4V8H20" stroke="white" stroke-width="1.5" />
                             <path d="M7 11H13M7 14H11" stroke="white" stroke-width="1.5" />
@@ -3384,6 +3397,11 @@
                     <p>Core API usage for granular control and native strategies for AI-ready chunking.</p>
                     <div class="spec-link-hint">Read Generator Spec →</div>
                 </div>
+                <div class="spec-card" id="card-template" onclick="location.hash='#spec/template'">
+                    <h3>OfficeTemplate</h3>
+                    <p>Mail-merge / document generation: fill a DOCX template's {{placeholders}} from data, batch-ready.</p>
+                    <div class="spec-link-hint">Read Template Spec →</div>
+                </div>
                 <div class="spec-card" id="card-ast" onclick="location.hash='#spec/ast'">
                     <h3>AST Reference</h3>
                     <p>Understand the structure of the Abstract Syntax Tree and all supported node types.</p>
@@ -3457,7 +3475,7 @@
                         </div>
                     </div>
                     <input type="file" id="file-input" class="hidden-input"
-                        accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.odg,.pdf,.rtf,.csv,.md,.html,.epub">
+                        accept=".docx,.pptx,.xlsx,.odt,.odp,.ods,.odg,.ott,.ots,.otp,.otg,.pdf,.rtf,.csv,.md,.html,.epub">
                 </div>
 
                 <!-- Sample Document Picker -->
@@ -4008,6 +4026,7 @@
                 <h5>Core APIs</h5>
                 <a href="#spec/converter">OfficeConverter</a>
                 <a href="#spec/generator">OfficeGenerator</a>
+                <a href="#spec/template">OfficeTemplate</a>
             </div>
 
             <div class="footer-column">

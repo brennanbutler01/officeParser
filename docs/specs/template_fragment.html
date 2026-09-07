@@ -1,0 +1,144 @@
+<div class="doc-body">
+    <p style="font-size: 0.9em; opacity: 0.85;"><strong>Related:</strong>
+        <a href="#spec/config">OfficeParserConfig</a> &middot;
+        <a href="#spec/generator">OfficeGenerator</a> &middot;
+        <a href="#spec/converter">OfficeConverter</a></p>
+    <h1>OfficeTemplate Specification</h1>
+    <p><code>OfficeTemplate.render()</code> (alias <code>renderTemplate</code>) fills a <strong>DOCX template</strong>'s
+        <code>{{placeholder}}</code> tags from your data and returns a new <code>.docx</code>. It is a lightweight
+        mail-merge / document-generation entry point &mdash; a zero-dependency take on Adobe's Document Generation API,
+        built on the bundled <code>fflate</code>.</p>
+    <p>It is <strong>not</strong> parsing or conversion: the template is copied and only its placeholders are substituted,
+        so <strong>every bit of the original formatting, layout and structure is preserved</strong>. Give it one data
+        object for one document, or an array for a batch (one document per entry, a classic mail-merge).</p>
+
+    <h2>OfficeTemplate.render()</h2>
+    <pre><code>import { OfficeTemplate } from 'officeparser';
+import { writeFileSync } from 'fs';
+
+// One document.
+const bytes = await OfficeTemplate.render('invoice-template.docx', {
+    data: { name: 'Acme Corp', amount: '$1,250.00', due: '2026-10-01' },
+});
+writeFileSync('invoice-acme.docx', bytes);
+
+// A batch: one document per row (a classic mail-merge).
+const docs = await OfficeTemplate.render('invoice-template.docx', {
+    data: [ { name: 'Acme Corp', amount: '$1,250.00' }, { name: 'Globex', amount: '$980.00' } ],
+});
+docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
+    <p>Passing a single <code>data</code> object resolves to a single <code>Uint8Array</code>; passing an array resolves
+        to a <code>Uint8Array[]</code>, one per entry, all from the same parsed template.</p>
+
+    <h3>Arguments</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Argument</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>template</code></td>
+                <td><code>string | Buffer | ArrayBuffer | Uint8Array | Blob</code></td>
+                <td>The template file path (Node) or its bytes. Same input shapes as <code>parseOffice</code>.</td>
+            </tr>
+            <tr>
+                <td><code>config</code></td>
+                <td><code>TemplateConfig</code></td>
+                <td>The data and options below. <code>data</code> is required.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>TemplateConfig</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Property</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>data</code></td>
+                <td><code>TemplateData | TemplateData[]</code></td>
+                <td><em>required</em></td>
+                <td>Field values. One object &rarr; one document; an array &rarr; one document per entry. A value may be a
+                    string, number, boolean, <code>Date</code> (rendered as ISO), or <code>null</code>/<code>undefined</code>
+                    (rendered empty).</td>
+            </tr>
+            <tr>
+                <td><code>delimiters</code></td>
+                <td><code>{ start: string; end: string }</code></td>
+                <td><code>{{ }}</code></td>
+                <td>Placeholder delimiters. Custom delimiters may contain any characters, including quotes (e.g.
+                    <code>{ start: '[[', end: ']]' }</code>).</td>
+            </tr>
+            <tr>
+                <td><code>onMissing</code></td>
+                <td><code>'keep' | 'empty' | 'error'</code></td>
+                <td><code>'keep'</code></td>
+                <td>A placeholder with no matching field: <code>'keep'</code> leaves the tag text in place (formatting of
+                    its runs preserved), <code>'empty'</code> blanks it, <code>'error'</code> rejects with
+                    <code>TEMPLATE_FIELD_MISSING</code>. A field that is present but <code>null</code>/<code>undefined</code>
+                    always renders empty.</td>
+            </tr>
+            <tr>
+                <td><code>password</code></td>
+                <td><code>string</code></td>
+                <td><code>—</code></td>
+                <td>Decrypts the template first if it is itself password-protected (encrypted OOXML). A missing/wrong
+                    password rejects with <code>PASSWORD_REQUIRED</code>/<code>PASSWORD_INCORRECT</code>.</td>
+            </tr>
+            <tr>
+                <td><code>onWarning</code></td>
+                <td><code>function</code></td>
+                <td><code>undefined</code></td>
+                <td>Callback for non-fatal issues (receives an <code>OfficeIssue</code>). Also suppresses the console
+                    fallback, so a thrown rejection is not additionally printed.</td>
+            </tr>
+            <tr>
+                <td><code>decompressionLimits</code></td>
+                <td><code>DecompressionLimits</code></td>
+                <td><code>—</code></td>
+                <td>Bounds unzipping of an untrusted template exactly as parsing does; a zip-bomb template rejects with a
+                    typed <code>ZIP_*</code> error rather than being mistaken for a non-DOCX file.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>How substitution works</h2>
+    <ul>
+        <li><strong>Run-aware.</strong> Word often splits a typed <code>{{name}}</code> across several runs
+            (<code>{{</code>, <code>na</code>, <code>me}}</code>); it is filled anyway, and a value adopts the
+            <strong>formatting of the run its placeholder began in</strong> (a bold <code>{{amount}}</code> renders bold).</li>
+        <li><strong>Everywhere text lives.</strong> Placeholders in the body, headers, footers, footnotes/endnotes and
+            comments are all filled.</li>
+        <li><strong>Placeholder names</strong> are Unicode letters and digits plus <code>_</code>, <code>.</code>,
+            <code>-</code> (e.g. <code>{{invoice.total}}</code>, <code>{{customer-name}}</code>). A name containing a space
+            or other punctuation is not recognized and is left as literal text, so ordinary prose between the delimiters is
+            never mistaken for a field.</li>
+        <li><strong>Values</strong> are XML-escaped; a newline (<code>\n</code>, <code>\r\n</code>, a lone <code>\r</code>,
+            or the Unicode line/paragraph separators) becomes a real line break; XML-illegal control characters are stripped.</li>
+        <li><strong>Deterministic.</strong> The same template + data renders byte-identical output (pinned zip timestamps),
+            in any timezone.</li>
+    </ul>
+
+    <blockquote>
+        [!NOTE]
+        Templating currently supports <strong>DOCX</strong> (<code>.docx</code>). The run-aware substitution generalizes to
+        the other OOXML/ODF text formats and they will follow. A non-DOCX template rejects with
+        <code>TEMPLATE_UNSUPPORTED_FORMAT</code>.
+    </blockquote>
+
+    <blockquote>
+        [!TIP]
+        Reuse one template across a batch by passing an array to <code>data</code>: the template is unzipped and parsed
+        once, then each row is rendered from the shared copy.
+    </blockquote>
+</div>
