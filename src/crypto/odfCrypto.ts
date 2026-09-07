@@ -21,9 +21,22 @@ import { DecompressionLimits, OfficeParserConfig } from '../types.js';
 import { extractFiles } from '../utils/zipUtils.js';
 import { WRONG_PASSWORD, DecryptionError } from './wrongPassword.js';
 
-/** Real ODF files use 1024–100000 PBKDF2 iterations; reject anything that would be a CPU DoS. */
+/** Real ODF files use 1024–100000 PBKDF2 iterations per entry; reject anything that would be a CPU DoS. */
 const MAX_ITERATIONS = 10_000_000;
+/**
+ * Document-wide PBKDF2 budget. An encrypted ODF derives a fresh key for every encrypted entry, so a
+ * hostile file with thousands of entries, each individually plausible at the per-entry cap, could
+ * still grind for hours once the correct password is supplied. Real documents write ~100000
+ * iterations per entry and stay far below this; the cap bounds the pathological case to a few seconds
+ * of native PBKDF2.
+ */
+const MAX_TOTAL_ITERATIONS = 100_000_000;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+
+/** Detection reads only the tiny manifest; never let a sniff inflate more than this. */
+const MAX_SNIFF_BYTES = 4 * 1024 * 1024;
+/** A sniff is an inconclusive guess, not something the caller did wrong, so it never reports. */
+const DETECTION_SILENT: OfficeParserConfig = { onWarning: () => { } };
 
 interface EncryptionData {
     fullPath: string;
@@ -68,9 +81,16 @@ async function readManifest(buf: Uint8Array, limits?: DecompressionLimits, confi
  * True when the buffer is a zip whose `META-INF/manifest.xml` marks at least one entry encrypted.
  * A plain ODF (or any other zip, e.g. a docx) has no `<manifest:encryption-data>` and returns false.
  */
-export async function isEncryptedOdf(buf: Uint8Array, limits?: DecompressionLimits, config?: OfficeParserConfig): Promise<boolean> {
+export async function isEncryptedOdf(buf: Uint8Array, limits?: DecompressionLimits): Promise<boolean> {
     try {
-        const manifest = await readManifest(buf, limits, config);
+        // Sniffing is capped (the manifest is tiny in any real file) and silent (a failed guess is not
+        // the caller's fault), exactly like detectOfficeTypeFromZip. The real decrypt below re-reads the
+        // manifest under the caller's full budget and reports genuine problems.
+        const sniffLimits: DecompressionLimits = {
+            ...limits,
+            maxUncompressedBytes: Math.min(limits?.maxUncompressedBytes ?? MAX_SNIFF_BYTES, MAX_SNIFF_BYTES),
+        };
+        const manifest = await readManifest(buf, sniffLimits, DETECTION_SILENT);
         return !!manifest && manifest.includes('encryption-data');
     } catch {
         return false;
@@ -156,6 +176,25 @@ function inflateRawCapped(data: Uint8Array, maxBytes: number): Uint8Array {
 }
 
 /**
+ * PBKDF2-HMAC-SHA1, preferring the platform's native WebCrypto. Node's `pbkdf2Sync` is native and
+ * fast, but the browser bundle polyfills it in pure JS, where 100000+ iterations per entry freeze the
+ * main thread for tens of seconds on a real document. `crypto.subtle.deriveBits` is native in both
+ * Node (>= 20) and the browser, and this decrypt path is already async, so we use it when present and
+ * fall back to `pbkdf2Sync` only on the rare runtime without WebCrypto.
+ */
+async function pbkdf2Sha1(startKey: Uint8Array, salt: Uint8Array, iterations: number, bits: number): Promise<Buffer> {
+    const subtle = globalThis.crypto?.subtle;
+    if (subtle) {
+        // Copy into fresh, plain ArrayBuffer-backed views: WebCrypto's BufferSource type rejects the
+        // SharedArrayBuffer-capable type of a Node Buffer, and these inputs are tiny (<= 32 bytes).
+        const material = await subtle.importKey('raw', new Uint8Array(startKey), 'PBKDF2', false, ['deriveBits']);
+        const derived = await subtle.deriveBits({ name: 'PBKDF2', salt: new Uint8Array(salt), iterations, hash: 'SHA-1' }, material, bits);
+        return Buffer.from(derived);
+    }
+    return pbkdf2Sync(Buffer.from(startKey), Buffer.from(salt), iterations, bits / 8, 'sha1');
+}
+
+/**
  * Decrypts an encrypted ODF buffer with the given password, returning a plain (re-zipped) ODF.
  * Throws {@link WRONG_PASSWORD} on a bad password, or a {@link DecryptionError} for an unsupported
  * cipher, an implausible key-derivation parameter, a decompression-limit breach, or a broken package.
@@ -169,6 +208,10 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
 
     const out: Zippable = {};
     const pwBytes = Buffer.from(password, 'utf8');
+    // Both decompression and key-derivation caps are enforced across the whole document, not per entry:
+    // a single plausible entry says nothing about a file that repeats it ten thousand times.
+    let totalIterations = 0;
+    let inflatedTotal = 0;
 
     for (const [name, bytes] of Object.entries(all)) {
         const enc = encMap.get(name);
@@ -176,17 +219,26 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
 
         const bits = aesBitsFromAlgo(enc.algoName);
         if (bits < 0) throw new DecryptionError(`encrypted ODF: '${enc.algoName}' (Blowfish) is not supported; only AES-CBC is`);
-        if (!/cbc/i.test(enc.algoName)) throw new DecryptionError(`encrypted ODF: unsupported cipher '${enc.algoName}' (only AES-CBC)`);
-        // iteration-count is attacker-controlled; reject an absurd value rather than grinding PBKDF2.
+        if (!/cbc/i.test(enc.algoName)) throw new DecryptionError(`encrypted ODF: unsupported cipher '${enc.algoName}' (only AES-CBC; LibreOffice 24.8+ AES-256-GCM is not supported)`);
+        // LibreOffice 24.8+ defaults to Argon2id key derivation, which we do not implement. Reject it
+        // loudly instead of silently running PBKDF2 and misreporting the result as a wrong password.
+        if (enc.keyDerivName && !/pbkdf2/i.test(enc.keyDerivName)) {
+            throw new DecryptionError(`encrypted ODF: unsupported key derivation '${enc.keyDerivName}' (only PBKDF2; LibreOffice 24.8+ Argon2 encryption is not supported)`);
+        }
+        // iteration-count is attacker-controlled; bound it per entry and across the whole document.
         if (!Number.isFinite(enc.iterationCount) || enc.iterationCount < 1 || enc.iterationCount > MAX_ITERATIONS) {
             throw new DecryptionError(`encrypted ODF: implausible iteration-count ${enc.iterationCount}`);
+        }
+        totalIterations += enc.iterationCount;
+        if (totalIterations > MAX_TOTAL_ITERATIONS) {
+            throw new DecryptionError('encrypted ODF: total key-derivation work exceeds the allowed budget');
         }
 
         // Start key: hash of the password; then PBKDF2 (HMAC-SHA1) stretches it to the AES key. The
         // key length comes from the cipher (bits/8), which is inherently one of 16/24/32.
         const startAlgo = /sha256/i.test(enc.startKeyName) ? 'sha256' : 'sha1';
         const startKey = createHash(startAlgo).update(pwBytes).digest();
-        const key = pbkdf2Sync(startKey, enc.salt, enc.iterationCount, bits / 8, 'sha1');
+        const key = await pbkdf2Sha1(startKey, enc.salt, enc.iterationCount, bits);
 
         // The encrypted length is a whole number of AES blocks; trim any trailing partial block.
         const aligned = bytes.subarray(0, bytes.length - (bytes.length % 16));
@@ -204,19 +256,21 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
         }
 
         let plain: Uint8Array;
-        try { plain = inflateRawCapped(compressed, maxBytes); }
+        try { plain = inflateRawCapped(compressed, maxBytes - inflatedTotal); }
         catch (e) {
             if (e instanceof DecryptionError) throw e; // a real limit breach, not a wrong password
             throw WRONG_PASSWORD;                      // an undamaged package only fails to inflate on a bad key
         }
+        inflatedTotal += plain.length;
         out[name] = plain;
     }
 
-    // mimetype must be first and stored for the package to be recognized as ODF.
+    // The rebuilt zip is fed straight back into the ODF parser, so there is no point recompressing it;
+    // storing (level 0) skips the CPU. mimetype must still be first and stored for ODF recognition.
     if (out['mimetype']) {
         const mimetype = out['mimetype'];
         delete out['mimetype'];
-        return zipSync({ mimetype: [mimetype as Uint8Array, { level: 0 }], ...out });
+        return zipSync({ mimetype: [mimetype as Uint8Array, { level: 0 }], ...out }, { level: 0 });
     }
-    return zipSync(out);
+    return zipSync(out, { level: 0 });
 }

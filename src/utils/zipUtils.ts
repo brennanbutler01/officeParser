@@ -282,7 +282,12 @@ const PACKAGE_MIMETYPES: Readonly<Record<string, SupportedFileType>> = {
     'application/vnd.oasis.opendocument.spreadsheet': 'ods',
     'application/vnd.oasis.opendocument.presentation': 'odp',
     'application/vnd.oasis.opendocument.graphics': 'odg',
-    'application/vnd.oasis.opendocument.graphics-template': 'odg', // .otg template resolves to odg
+    // ODF template packages are structurally identical to their document counterparts and share the
+    // same parser, so they resolve to the base type (.ott->odt, .ots->ods, .otp->odp, .otg->odg).
+    'application/vnd.oasis.opendocument.text-template': 'odt',
+    'application/vnd.oasis.opendocument.spreadsheet-template': 'ods',
+    'application/vnd.oasis.opendocument.presentation-template': 'odp',
+    'application/vnd.oasis.opendocument.graphics-template': 'odg',
     'application/epub+zip': 'epub',
 };
 

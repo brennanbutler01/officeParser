@@ -1032,9 +1032,13 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     // silent empty output is otherwise indistinguishable from a genuine failure. Only when OCR is off,
     // since with OCR the caller is already handling image-only content.
     if (!config.ocr) {
+        // Scale the "looks empty" threshold to the pages actually processed, not the whole document:
+        // with a pageRange, `allRuns` covers only the selected pages, so comparing against the full
+        // numPages would spuriously warn whenever a small slice of a large PDF is requested.
+        const processedPages = pageNumbers.length;
         const textChars = allRuns.reduce((sum, r) => sum + r.text.replace(/\s/g, '').length, 0);
-        if (numPages > 0 && textChars < Math.max(10, numPages)) {
-            logWarning(OfficeWarningType.PDF_NO_TEXT_EXTRACTED, config, numPages);
+        if (processedPages > 0 && textChars < Math.max(10, processedPages)) {
+            logWarning(OfficeWarningType.PDF_NO_TEXT_EXTRACTED, config, processedPages);
         }
     }
 

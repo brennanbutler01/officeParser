@@ -16,9 +16,9 @@
  * @module generators/pdf/nativePdfEngine
  */
 
-import { FullGeneratorConfig, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
+import { FullGeneratorConfig, ImageMode, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
 import { getAbortError, getOfficeError, getWarningMessage } from '../../utils/errorUtils.js';
-import { paperSizePt } from '../../utils/officeGenUtils.js';
+import { paperSizePt, resolveImageMode } from '../../utils/officeGenUtils.js';
 
 /**
  * Code points WinAnsi (CP1252) encodes beyond Latin-1, which the Standard-14 fonts accept (smart
@@ -84,6 +84,8 @@ class NativeLayout {
     private page: any;
     /** Distance of the cursor from the top of the page, in points (converted to pdf-lib's y-up on draw). */
     private y = 0;
+    /** Resolved image handling, shared with every other generator via {@link resolveImageMode}. */
+    private readonly imageMode: ImageMode;
 
     constructor(
         private readonly pdf: any,
@@ -95,6 +97,7 @@ class NativeLayout {
         private readonly config: FullGeneratorConfig,
         private readonly ast: OfficeParserAST,
     ) {
+        this.imageMode = resolveImageMode(this.config.includeImages);
         this.newPage();
     }
 
@@ -218,10 +221,38 @@ class NativeLayout {
         flush();
     }
 
+    private onNodeWarned = false;
+    /**
+     * Applies the caller's `onNode` hook, matching {@link BaseGenerator.handleOnNode}: `false` skips the
+     * node and its subtree; a returned string replaces the node's output. The native engine paints a
+     * layout rather than emitting markup, so it cannot splice a returned string in structurally - it
+     * draws it as a plain-text paragraph (warning once) so the override is honored rather than lost.
+     * Returns true when the hook handled the node and default rendering should be skipped.
+     */
+    private async applyOnNode(node: OfficeContentNode): Promise<boolean> {
+        if (!this.config.onNode) return false;
+        const override = await this.config.onNode(node);
+        if (override === false) return true;
+        if (typeof override === 'string') {
+            if (!this.onNodeWarned) {
+                this.onNodeWarned = true;
+                const info = { format: 'pdf', feature: 'onNode string override (native engine draws it as plain text)' };
+                this.config.onWarning?.({ type: 'warning', code: OfficeWarningType.CONTENT_NOT_REPRESENTABLE, message: getWarningMessage(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info), details: info });
+            }
+            if (override) this.drawRuns([{ text: override, fmt: {}, link: false }], this.margin.left, this.contentWidth);
+            this.y += 6;
+            return true;
+        }
+        return false;
+    }
+
     private prevPaginated: string | null = null;
     /** Entry point: renders any node, dispatching by type. `topLevel` drives inter-page pagination. */
     async render(node: OfficeContentNode, topLevel = false): Promise<void> {
         if (this.config.abortSignal?.aborted) throw getAbortError();
+        // The caller's onNode hook can skip a node/subtree or replace its output, exactly as the
+        // text-based generators honor it; applied before any default rendering (and before pagination).
+        if (await this.applyOnNode(node)) return;
         // Preserve source pagination: start a fresh page between consecutive page (or slide) nodes.
         if (topLevel && (node.type === 'page' || node.type === 'slide')) {
             if (this.prevPaginated === node.type) this.newPage();
@@ -326,6 +357,14 @@ class NativeLayout {
     }
 
     private async image(node: OfficeContentNode): Promise<void> {
+        // Honor the same includeImages / imageMode contract as every other generator (HTML, DOCX, ODT):
+        // 'none' drops the node entirely; 'ocr-text-only' emits only the recognized text; 'image-only'
+        // and 'image+ocr-text' embed the picture, the latter also drawing its OCR text underneath.
+        const mode = this.imageMode;
+        if (mode === 'none') return;
+        const ocr = (node.text || '').trim();
+        if (mode === 'ocr-text-only') { if (ocr) this.paragraph(node); return; }
+
         const meta = node.metadata as any;
         const name = meta?.attachmentName;
         const attachment = name && this.ast.attachments.find(a => a.name === name);
@@ -344,7 +383,10 @@ class NativeLayout {
             this.y += h + 6;
         } catch {
             if (node.text) this.paragraph(node);
+            return;
         }
+        // 'image+ocr-text': draw the recognized text just below the successfully embedded image.
+        if (mode === 'image+ocr-text' && ocr) this.paragraph(node);
     }
 
     private table(node: OfficeContentNode): void {

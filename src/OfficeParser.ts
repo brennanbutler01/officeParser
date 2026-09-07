@@ -104,7 +104,7 @@ const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Prom
         // A CFB container is either an encrypted OOXML file or a legacy binary (.doc/.xls/.ppt).
         // Only the former carries the encryption streams; the latter falls through as unsupported.
         if (isEncryptedOoxml(buffer)) decrypt = decryptOoxml;
-    } else if (await isEncryptedOdf(buffer, limits, config)) {
+    } else if (await isEncryptedOdf(buffer, limits)) {
         // The ODF detection and decryption reuse the parser's decompression limits, so a zip-bomb
         // in a would-be encrypted ODF is bounded exactly as an ordinary document is.
         decrypt = (b, password) => decryptOdf(b, password, limits, config);
@@ -127,7 +127,11 @@ const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Prom
             return Buffer.from(await decrypt(buffer, password));
         } catch (e) {
             if (e !== WRONG_PASSWORD) {
-                // A structural/unsupported-scheme failure (not a wrong password): surface it as a
+                // A decompression-limit breach thrown by extractFiles during decryption already carries a
+                // typed officeIssue (and was reported once): re-throw it unchanged rather than masking its
+                // code and reporting it a second time.
+                if ((e as { officeIssue?: unknown })?.officeIssue) throw e;
+                // Any other structural/unsupported-scheme failure (not a wrong password): surface it as a
                 // typed decryption error rather than a raw throw.
                 throw getOfficeError(OfficeErrorType.DOCUMENT_DECRYPTION_FAILED, config, e instanceof Error ? e.message : String(e));
             }
@@ -322,8 +326,14 @@ export class OfficeParser {
                 throw getOfficeError(OfficeErrorType.IMPROPER_BUFFERS, internalConfig);
             }
 
+            // ODF template packages (.ott/.ots/.otp/.otg) are the same format as their document
+            // counterparts and share one parser; normalize them so a file routed by its filename
+            // extension dispatches correctly, matching how buffer detection resolves the mimetype.
+            const ODF_TEMPLATE_EXT: Record<string, string> = { ott: 'odt', ots: 'ods', otp: 'odp', otg: 'odg' };
+            const routedExt = ODF_TEMPLATE_EXT[ext.toLowerCase()] || ext.toLowerCase();
+
             let result: OfficeParserAST;
-            switch (ext.toLowerCase()) {
+            switch (routedExt) {
                 case 'docx':
                     result = await parseWord(buffer, internalConfig);
                     break;
@@ -347,7 +357,7 @@ export class OfficeParser {
                     // pin the caller's own object to this file's type and misroute every later
                     // parse that reused it.
                     result = await parseOpenOffice(buffer,
-                        { ...internalConfig, fileType: ext.toLowerCase() as SupportedFileType });
+                        { ...internalConfig, fileType: routedExt as SupportedFileType });
                     break;
                 case 'pdf':
                     result = await parsePdf(buffer, internalConfig);

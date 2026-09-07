@@ -1610,6 +1610,12 @@ async function testOfficeGenUtils(): Promise<void> {
     // The clamp targets fflate's LOCAL-time floor (fflate stamps zip mtimes from local getters and
     // rejects a local year < 1980), so the clamped instant's local year is 1980 in every timezone.
     assert.strictEqual(resolveZipInstant(new Date('1900-01-01')).mtime.getFullYear(), 1980, 'resolveZipInstant: clamps below the zip 1980 floor');
+    // Cross-timezone reproducibility: the mtime's LOCAL fields (what fflate stamps) must equal the
+    // instant's UTC calendar fields, so the same instant produces the same DOS timestamp on every
+    // machine regardless of its timezone. This holds by construction here and is asserted TZ-independently.
+    const rzi = resolveZipInstant(new Date('2024-03-15T09:30:45Z')).mtime;
+    assert.ok(rzi.getFullYear() === 2024 && rzi.getMonth() === 2 && rzi.getDate() === 15 && rzi.getHours() === 9 && rzi.getMinutes() === 30 && rzi.getSeconds() === 45,
+        'resolveZipInstant: mtime local fields mirror the UTC wall clock (timezone-independent zip bytes)');
 
     // Header-row inference from the signals parsers actually set (not the test-only `isHeader`).
     const cell = (text: string, style?: string, bold?: boolean) => ({ type: 'cell', metadata: style ? { style } : undefined, children: [{ type: 'text', text, formatting: bold ? { bold: true } : undefined }] });

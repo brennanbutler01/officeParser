@@ -1,6 +1,7 @@
 import { OfficeIssue, ConversionResult, FullGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, StructuredStyleMapping, UniversalGeneratorFormat } from '../types.js';
 import { resolveGeneratorConfig } from '../utils/configUtils.js';
 import { checkAbortSignal, getWarningMessage } from '../utils/errorUtils.js';
+import { resolveImageMode } from '../utils/officeGenUtils.js';
 import { StyleMapper } from '../utils/styleMapper.js';
 
 /**
@@ -26,13 +27,7 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
      * rather than a truthy check, since a mode string like `'none'` is truthy.
      */
     protected imageMode(): ImageMode {
-        let v = this.config.includeImages as unknown;
-        if (v === 'true') v = true;
-        if (v === 'false') v = false;
-        if (v === false) return 'none';
-        if (v === true || v === undefined) return 'image-only';
-        if (v === 'image-only' || v === 'image+ocr-text' || v === 'ocr-text-only' || v === 'none') return v;
-        return 'image-only';
+        return resolveImageMode(this.config.includeImages);
     }
 
     /**

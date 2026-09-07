@@ -15,7 +15,7 @@
  */
 
 import { zipSync, Zippable } from 'fflate';
-import { DecompressionLimits, OfficeParserConfig, TemplateData, TemplateValue } from '../types.js';
+import { DecompressionLimits, OfficeErrorType, OfficeParserConfig, TemplateData, TemplateValue } from '../types.js';
 import { escapeXml, stripInvalidXmlChars } from '../utils/sanitize.js';
 import { extractFiles } from '../utils/zipUtils.js';
 
@@ -27,6 +27,15 @@ function escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Escapes only the characters Word actually escapes inside a `<w:t>` text node: `&`, `<`, `>`. Unlike
+ * the general {@link escapeXml} (which also encodes `"`/`'` as `&quot;`/`&apos;`), this matches the
+ * literal quotes Word leaves in text, so a custom delimiter such as `«"»` still matches the stored XML.
+ */
+function escapeXmlText(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /** Renders one data value to the inner XML of a `<w:t>`, turning newlines into `<w:br/>`. */
 function valueToRunXml(value: TemplateValue): string {
     let text: string;
@@ -34,9 +43,9 @@ function valueToRunXml(value: TemplateValue): string {
     else if (value instanceof Date) text = isNaN(value.getTime()) ? '' : value.toISOString();
     else text = String(value);
     // Strip XML-illegal control chars (DB-sourced data often carries them) BEFORE escaping, exactly
-    // as the DOCX generator does; then a newline becomes a real line break: close this <w:t>, emit
-    // <w:br/>, reopen a <w:t>.
-    return escapeXml(stripInvalidXmlChars(text)).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+    // as the DOCX generator does; then every line separator (CRLF, lone CR/LF, and the Unicode line/
+    // paragraph separators U+2028/U+2029) becomes a real break: close this <w:t>, emit <w:br/>, reopen.
+    return escapeXml(stripInvalidXmlChars(text)).replace(/\r\n|[\r\n\u2028\u2029]/g, '</w:t><w:br/><w:t xml:space="preserve">');
 }
 
 /**
@@ -66,28 +75,42 @@ function replaceInChunk(chunk: string, phRe: RegExp, resolve: (key: string) => s
     const matches: { start: number; end: number; key: string }[] = [];
     while ((m = phRe.exec(joined))) matches.push({ start: m.index, end: m.index + m[0].length, key: m[1] });
 
-    // Rebuild each segment's inner text. Ordinary characters stay in their own segment; a placeholder's
-    // replacement is attributed wholesale to the segment where its opening delimiter began.
+    // Rebuild each segment's inner text. Ordinary characters stay in their own segment; a resolved
+    // placeholder's value is attributed wholesale to the segment where its opening delimiter began.
     const newInner = segs.map(() => '');
     let mi = 0;
     for (let p = 0; p < joined.length;) {
         if (mi < matches.length && p === matches[mi].start) {
-            const mt = matches[mi++];
+            const mt = matches[mi];
             const val = resolve(mt.key);
-            newInner[posSeg[p]] += val === null ? joined.slice(mt.start, mt.end) : val;
-            p = mt.end;
+            mi++;
+            if (val === null) {
+                // 'keep': leave the placeholder text where it is, one character at a time, so a
+                // placeholder split across runs keeps each run's original formatting instead of
+                // collapsing the whole thing into the run where it started.
+                newInner[posSeg[p]] += joined[p];
+                p++;
+            } else {
+                newInner[posSeg[p]] += val;
+                p = mt.end;
+            }
         } else {
             newInner[posSeg[p]] += joined[p];
             p++;
         }
     }
 
-    // Splice the rebuilt `<w:t>` elements back in, from last to first so earlier offsets stay valid.
-    let out = chunk;
-    for (let si = segs.length - 1; si >= 0; si--) {
-        out = out.slice(0, segs[si].start) + `<w:t xml:space="preserve">${newInner[si]}</w:t>` + out.slice(segs[si].end);
+    // Rebuild the chunk in a single forward pass: copy the text between `<w:t>` segments verbatim and
+    // drop each rewritten segment in place. Splicing last-to-first would recopy the growing tail on
+    // every step (quadratic; ~40s for a paragraph of 100k runs).
+    const rebuilt: string[] = [];
+    let cursor = 0;
+    for (let si = 0; si < segs.length; si++) {
+        rebuilt.push(chunk.slice(cursor, segs[si].start), `<w:t xml:space="preserve">${newInner[si]}</w:t>`);
+        cursor = segs[si].end;
     }
-    return out;
+    rebuilt.push(chunk.slice(cursor));
+    return rebuilt.join('');
 }
 
 /**
@@ -115,10 +138,11 @@ export function renderDocxTemplate(
     data: TemplateData,
     opts: { start: string; end: string; onMissing: 'keep' | 'empty' | 'error'; mtime: Date; onFieldMissing: (key: string) => never },
 ): Uint8Array {
-    // Match delimiters against the raw XML inner text, where Word stores e.g. `<<` as `&lt;&lt;`; so
-    // build the pattern from the XML-escaped delimiters. Placeholder names allow Unicode letters/digits.
-    const start = escapeRegex(escapeXml(opts.start));
-    const end = escapeRegex(escapeXml(opts.end));
+    // Match delimiters against the raw XML inner text, where Word stores e.g. `<<` as `&lt;&lt;` but a
+    // literal `"` as `"`; so build the pattern from the text-node escaping Word uses (& < > only).
+    // Placeholder names allow Unicode letters/digits plus `_ . -`.
+    const start = escapeRegex(escapeXmlText(opts.start));
+    const end = escapeRegex(escapeXmlText(opts.end));
     const phRe = new RegExp(`${start}\\s*([\\p{L}\\p{N}_.\\-]+)\\s*${end}`, 'gu');
     const resolve = (key: string): string | null => {
         if (Object.prototype.hasOwnProperty.call(data, key)) return valueToRunXml(data[key]);
@@ -131,7 +155,13 @@ export function renderDocxTemplate(
     for (const [name, bytes] of Object.entries(entries)) {
         if (TEXT_PART.test(name)) {
             const xml = Buffer.from(bytes).toString('utf8');
-            out[name] = [Buffer.from(replaceInPart(xml, phRe, resolve), 'utf8'), { mtime: opts.mtime }];
+            const rewritten = replaceInPart(xml, phRe, resolve);
+            // Re-encode only when a placeholder actually changed the part. A text part with no
+            // placeholder is copied byte-for-byte, so a part that is not valid UTF-8 is never corrupted
+            // by a decode/encode round-trip it did not need.
+            out[name] = rewritten === xml
+                ? [bytes, { mtime: opts.mtime }]
+                : [Buffer.from(rewritten, 'utf8'), { mtime: opts.mtime }];
         } else {
             out[name] = [bytes, { mtime: opts.mtime }];
         }
@@ -148,7 +178,15 @@ export async function openDocx(bytes: Uint8Array, limits?: DecompressionLimits, 
     const src = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let files;
     try { files = await extractFiles(src, () => true, limits ?? {}, config); }
-    catch { return null; }
+    catch (e) {
+        // A decompression-limit breach or a truncated archive carries a typed officeIssue and was
+        // already reported once; surface it so a zip-bomb or corrupt template is not silently
+        // misreported as "not a .docx" (and not reported a second time). ZIP_NO_ENTRIES_FOUND and any
+        // raw (non-typed) fflate error mean the input simply is not a zip -> not a docx -> null.
+        const code = (e as { officeIssue?: { code?: OfficeErrorType } })?.officeIssue?.code;
+        if (code && code !== OfficeErrorType.ZIP_NO_ENTRIES_FOUND) throw e;
+        return null;
+    }
     const map: Record<string, Uint8Array> = {};
     for (const f of files) map[f.path] = f.content;
     return map['word/document.xml'] ? map : null;

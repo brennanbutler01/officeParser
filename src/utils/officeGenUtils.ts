@@ -9,7 +9,24 @@
  * @module officeGenUtils
  */
 
-import { OfficeContentNode } from '../types.js';
+import { ImageMode, OfficeContentNode } from '../types.js';
+
+/**
+ * Resolves `config.includeImages` - a boolean, a CLI-provided `'true'`/`'false'` string, or an
+ * {@link ImageMode} - to a single mode. Shared by every generator (via `BaseGenerator.imageMode()`
+ * and the standalone native PDF engine) so image handling never drifts between them, and so a truthy
+ * mode string such as `'none'` is never mistaken for "include images". Unknown values default to
+ * `'image-only'`, the historical behaviour of a plain `true`.
+ */
+export function resolveImageMode(includeImages: unknown): ImageMode {
+    let v = includeImages;
+    if (v === 'true') v = true;
+    if (v === 'false') v = false;
+    if (v === false) return 'none';
+    if (v === true || v === undefined) return 'image-only';
+    if (v === 'image-only' || v === 'image+ocr-text' || v === 'ocr-text-only' || v === 'none') return v;
+    return 'image-only';
+}
 
 /**
  * Whether a table row should be treated as a header row, mirroring the HtmlGenerator heuristic so
@@ -78,7 +95,11 @@ const PAPER_SIZES_PT: Record<string, { w: number; h: number }> = {
     letter: { w: 8.5 * PT_PER_IN, h: 11 * PT_PER_IN },
     legal: { w: 8.5 * PT_PER_IN, h: 14 * PT_PER_IN },
     tabloid: { w: 11 * PT_PER_IN, h: 17 * PT_PER_IN },
-    ledger: { w: 17 * PT_PER_IN, h: 11 * PT_PER_IN },
+    // Ledger and Tabloid are the same ANSI B sheet; every entry here is portrait (w <= h) so the
+    // `landscape` flag orients them uniformly across all generators. (Ledger as 17x11 would make the
+    // DOCX/ODT `landscape ? h : w` formula and the native engine's swap disagree, and render an
+    // un-flagged ledger page rotated.) Pass `landscape: true` for a landscape ledger, as for any format.
+    ledger: { w: 11 * PT_PER_IN, h: 17 * PT_PER_IN },
     a0: { w: 841 * PT_PER_MM, h: 1189 * PT_PER_MM },
     a1: { w: 594 * PT_PER_MM, h: 841 * PT_PER_MM },
     a2: { w: 420 * PT_PER_MM, h: 594 * PT_PER_MM },
@@ -208,11 +229,13 @@ export function resolveZipInstant(raw: unknown): { iso: string; mtime: Date } {
     if (raw instanceof Date && !isNaN(raw.getTime())) resolved = raw;
     else if (typeof raw === 'string' && raw !== '') { const p = new Date(raw); if (!isNaN(p.getTime())) resolved = p; }
     resolved ??= new Date();
-    // fflate reads a zip entry's mtime with LOCAL-time getters and rejects a local year outside
-    // 1980-2099. Build the clamp bounds from local-time fields (not Date.UTC), so a clamped date's
-    // local year is in range on the running machine and zipSync cannot throw west of UTC.
-    const MIN = new Date(1980, 0, 1, 0, 0, 0).getTime(), MAX = new Date(2099, 11, 31, 23, 59, 59).getTime();
-    const t = resolved.getTime();
-    const clamped = t < MIN ? new Date(MIN) : t > MAX ? new Date(MAX) : resolved;
-    return { iso: resolved.toISOString().replace(/\.\d+Z$/, 'Z'), mtime: clamped };
+    // fflate stamps a zip entry's DOS timestamp from the mtime's LOCAL-time getters, so the same
+    // instant would otherwise yield different archive bytes in different timezones. Build the mtime from
+    // the instant's UTC calendar fields treated as LOCAL fields: its local getters then read back the
+    // UTC wall clock identically on every machine, so the package is byte-for-byte reproducible
+    // cross-timezone (the reproducibility contract callers rely on). The year is clamped into zip's DOS
+    // range (1980-2099), since fflate throws rather than clamps and an epoch-zero date is a common case.
+    const year = Math.min(2099, Math.max(1980, resolved.getUTCFullYear()));
+    const mtime = new Date(year, resolved.getUTCMonth(), resolved.getUTCDate(), resolved.getUTCHours(), resolved.getUTCMinutes(), resolved.getUTCSeconds());
+    return { iso: resolved.toISOString().replace(/\.\d+Z$/, 'Z'), mtime };
 }

@@ -1995,6 +1995,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
             const footers: OfficeContentNode[] = [];
             if (visible(headerEl)) traverse(headerEl, headers, false, stylesXmlStr);
             if (visible(footerEl)) traverse(footerEl, footers, false, stylesXmlStr);
+            // Resolve any image/chart nodes in the header/footer the same way the body is (OCR text,
+            // chart data, attachment linkage); without this a picture in a master-page header/footer
+            // would carry no data and render blank in every destination.
+            if (headers.length) assignAttachmentData(headers);
+            if (footers.length) assignAttachmentData(footers);
             if (headers.length || footers.length) {
                 auxiliary = {
                     ...(headers.length ? { headers } : {}),

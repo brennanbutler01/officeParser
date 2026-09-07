@@ -97,7 +97,9 @@ function utf16le(s: string): Buffer {
 }
 
 function aesDecryptNoPad(data: Uint8Array, key: Buffer, iv: Buffer | null, keyBits: number, mode: 'cbc' | 'ecb'): Buffer {
-    const decipher = createDecipheriv(`aes-${keyBits}-${mode}`, key, iv);
+    // ECB takes no IV. Node tolerates `null`, but the browser bundle's crypto polyfill dereferences it
+    // and throws; an empty buffer is accepted by both. CBC always receives a real IV from the caller.
+    const decipher = createDecipheriv(`aes-${keyBits}-${mode}`, key, mode === 'ecb' ? Buffer.alloc(0) : iv);
     decipher.setAutoPadding(false);
     return Buffer.concat([decipher.update(data), decipher.final()]);
 }
@@ -121,6 +123,10 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     const xml = Buffer.from(info.subarray(8)).toString('utf8'); // skip 4-byte version + 4-byte reserved
     const cipher = attr(xml, 'keyData', 'cipherAlgorithm');
     if (cipher && cipher.toUpperCase() !== 'AES') throw new DecryptionError(`encrypted OOXML: unsupported cipher '${cipher}' (only AES)`);
+    // We decrypt every segment as CBC; a file declaring another chaining mode (e.g. ChainingModeCFB)
+    // would silently produce garbage and be misreported as a wrong password. Reject it as unsupported.
+    const chaining = attr(xml, 'keyData', 'cipherChaining');
+    if (chaining && chaining.toUpperCase() !== 'CHAININGMODECBC') throw new DecryptionError(`encrypted OOXML: unsupported cipher chaining '${chaining}' (only ChainingModeCBC)`);
 
     const keyData: AgileKeyBlock = {
         saltValue: Buffer.from(attr(xml, 'keyData', 'saltValue'), 'base64'),
@@ -160,9 +166,11 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     const actualHash = hash(encHash, verifierInput);
     if (!actualHash.subarray(0, actualHash.length).equals(expectedHash.subarray(0, actualHash.length))) throw WRONG_PASSWORD;
 
-    // Recover the package key, then decrypt the package in fixed 4096-byte segments.
+    // Recover the package key, then decrypt the package in fixed 4096-byte segments. The decrypted
+    // key value is zero-padded to the block size, so trim it to the package cipher's key length
+    // (24 bytes for AES-192, which otherwise arrives as 32 and makes createDecipheriv throw).
     const keyValueKey = deriveBlockKey(pwHash, BLOCK_KEY_VALUE, encKeyBits, encHash);
-    const secretKey = aesDecryptNoPad(encKeyValue, keyValueKey, encSalt.subarray(0, keyData.blockSize), encKeyBits, 'cbc');
+    const secretKey = aesDecryptNoPad(encKeyValue, keyValueKey, encSalt.subarray(0, keyData.blockSize), encKeyBits, 'cbc').subarray(0, keyData.keyBits / 8);
 
     const pkgView = new DataView(pkg.buffer, pkg.byteOffset, pkg.byteLength);
     const totalSize = Number(pkgView.getBigUint64(0, true));
