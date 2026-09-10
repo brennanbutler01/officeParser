@@ -704,7 +704,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
     }
 
     private mediaRef(attachmentName: string): { href: string; intrinsic: { w: number; h: number } | null } | null {
-        const att = (this.ast.attachments || []).find(a => a.name === attachmentName);
+        const att = this.getAttachment(attachmentName);
         if (!att || !att.data) { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: 'missing attachment' }); return null; }
         const ext = MIME_EXT[(att.mimeType || '').toLowerCase()];
         if (!ext) { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: 'unsupported mime' }); return null; }
@@ -789,7 +789,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
     private async chart(node: OfficeContentNode): Promise<string> {
         if (this.config.includeCharts === false) return '';
         const meta = node.metadata as any;
-        const att = (this.ast.attachments || []).find(a => a.name === meta?.attachmentName);
+        const att = this.getAttachment(meta?.attachmentName);
         const data = att?.chartData;
         if (!data) return `<text:p>${encodeOdfText(`[Chart: ${meta?.attachmentName || ''}]`)}</text:p>`;
         const caption = data.title ? `<text:p><text:span text:style-name="${this.boldStyle()}">${encodeOdfText(data.title)}</text:span></text:p>` : '';

@@ -24,7 +24,7 @@ const { annotateDynamicImports } = require('./scripts/dynamicImports.js');
 // Config Generator
 // ---------------------------------------------------------------------------
 
-function getBrowserConfig(isSlim) {
+function getBrowserConfig(isSlim, externalPdfLib = false) {
     const config = {
         entryPoints: ['src/index.ts'],
         bundle: true,
@@ -94,6 +94,15 @@ if (typeof setImmediate === 'undefined') {
 
     if (isSlim) {
         config.alias['tesseract.js'] = path.resolve(__dirname, 'scripts/browser-stubs/tesseract.js');
+    }
+
+    // Dedicated native-PDF entry: leave pdf-lib EXTERNAL instead of aliasing it to the throwing stub,
+    // so a self-bundling consumer that installs pdf-lib gets the real native PDF engine in the browser
+    // (the dynamic `import('pdf-lib')` survives for their bundler to resolve). The default bundles keep
+    // the stub so they stay self-contained and never force pdf-lib on a consumer that does not want it.
+    if (externalPdfLib) {
+        delete config.alias['pdf-lib'];
+        config.external = ['pdf-lib'];
     }
 
     return config;
@@ -174,12 +183,27 @@ async function buildIife(isSlim = false) {
 // Entry point
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Build 3: ESM bundle with pdf-lib left external (client-side native PDF export)
+// ---------------------------------------------------------------------------
+
+async function buildNativePdf() {
+    console.log('Building ESM browser bundle (pdf-lib external) → dist/officeparser.browser.native-pdf.mjs');
+    await esbuild.build({
+        ...getBrowserConfig(false, true),
+        outfile: 'dist/officeparser.browser.native-pdf.mjs',
+        format: 'esm',
+    });
+    console.log('  ✓ dist/officeparser.browser.native-pdf.mjs');
+}
+
 async function main() {
     try {
         await buildEsm(false);
         await buildIife(false);
         await buildEsm(true);
         await buildIife(true);
+        await buildNativePdf();
         console.log('\nBrowser bundles built successfully.');
     } catch (err) {
         console.error('Build failed:', err);

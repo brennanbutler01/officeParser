@@ -244,7 +244,7 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                     if (mode === 'ocr-text-only') return ocrRtf;
 
                     let pict = '';
-                    const attachment = this.ast.attachments.find(a => a.name === meta?.attachmentName);
+                    const attachment = this.getAttachment(meta?.attachmentName);
                     if (attachment && attachment.data) {
                         const type = attachment.extension === 'png' ? 'pngblip' : 'jpegblip';
                         // Convert base64 to hex

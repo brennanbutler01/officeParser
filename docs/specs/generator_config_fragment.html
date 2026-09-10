@@ -203,6 +203,15 @@
                     scheme-checked on emit. Off by default the output (a live <code>&lt;iframe&gt;</code>) is unchanged; YouTube
                     embeds are unaffected.</td>
             </tr>
+            <tr>
+                <td><code>omitDefaultTextColor</code></td>
+                <td><code>boolean</code></td>
+                <td><code>false</code></td>
+                <td>Omit an inline run <code>color</code> equal to the document default (near-black or near-white), so imported
+                    text adapts to the reader's light/dark theme instead of being pinned to black or white. Only
+                    near-black/near-white run colours are dropped; a deliberately-coloured run is emitted unchanged (Word's
+                    <code>w:val="auto"</code> already carries no colour). Off by default; the output is unchanged.</td>
+            </tr>
         </tbody>
     </table>
 
@@ -415,6 +424,8 @@ await ast.to('md', {
         with <code>pdf-lib</code> (an optional peer dependency) — no browser required, so it runs unchanged in Node and the
         browser and is the only way to produce a real PDF client-side. It honors the shared <code>includeImages</code>/​<code>onNode</code>
         options and the page options below, but draws with the Standard-14 fonts and a clean reflow rather than a pixel match.
+        In the prebuilt browser bundle <code>pdf-lib</code> is stubbed so the bundle stays self-contained; for client-side native
+        PDF, import from the dedicated entry <code>officeparser/browser-native-pdf</code> and install <code>pdf-lib</code>.
     </blockquote>
     <table>
         <thead>

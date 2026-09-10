@@ -1,4 +1,4 @@
-import { OfficeIssue, ConversionResult, FullGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, StructuredStyleMapping, UniversalGeneratorFormat } from '../types.js';
+import { OfficeAttachment, OfficeIssue, ConversionResult, FullGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, StructuredStyleMapping, UniversalGeneratorFormat } from '../types.js';
 import { resolveGeneratorConfig } from '../utils/configUtils.js';
 import { checkAbortSignal, getWarningMessage } from '../utils/errorUtils.js';
 import { resolveImageMode } from '../utils/officeGenUtils.js';
@@ -14,11 +14,31 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
     protected messages: OfficeIssue[] = [];
     protected styleMapper: StyleMapper;
     protected collectedNotes: OfficeContentNode[] = [];
+    /** Lazily-built `name -> attachment` index for {@link getAttachment}. */
+    private attachmentIndex?: Map<string, OfficeAttachment>;
 
     constructor(protected destination: D, ast: OfficeParserAST, config?: GeneratorConfig<D> | FullGeneratorConfig) {
         this.config = resolveGeneratorConfig(destination, ast.config, config);
         this.ast = ast;
         this.styleMapper = new StyleMapper(this.config.styleMap, this.config.ignoreDefaultStyleMap);
+    }
+
+    /**
+     * Resolves an attachment by name via a lazily-built index, replacing a linear
+     * `ast.attachments.find(...)` per image/chart node. First-match-wins keeps the exact semantics of
+     * `find`. Every generator resolves image/chart bytes this way, so a media-heavy document (for
+     * example a fully inlined self-contained export) stays O(nodes + attachments) rather than
+     * O(nodes x attachments).
+     */
+    protected getAttachment(name: string | undefined): OfficeAttachment | undefined {
+        if (!name) return undefined;
+        if (!this.attachmentIndex) {
+            this.attachmentIndex = new Map();
+            for (const a of this.ast.attachments || []) {
+                if (a.name && !this.attachmentIndex.has(a.name)) this.attachmentIndex.set(a.name, a);
+            }
+        }
+        return this.attachmentIndex.get(name);
     }
 
     /**

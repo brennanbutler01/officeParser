@@ -89,6 +89,20 @@ function resolveStandalone(standalone: boolean | StandaloneConfig | undefined): 
 }
 
 /**
+ * Whether a colour is effectively the document default: near-black or near-white. Consulted only when
+ * `htmlConfig.omitDefaultTextColor` is on, to drop a run colour that would otherwise pin imported text
+ * to black or white regardless of the reader's theme. Parses `#rgb`/`#rrggbb`; anything else (named
+ * colours, `rgb(...)`) is treated as a deliberate colour and kept.
+ */
+function isNearDefaultColor(color: string): boolean {
+    let h = color.trim().replace(/^#/, '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return false;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return (r <= 24 && g <= 24 && b <= 24) || (r >= 231 && g >= 231 && b >= 231);
+}
+
+/**
  * Generates semantic, high-fidelity HTML from an AST.
  */
 export class HtmlGenerator extends BaseGenerator<'html'> {
@@ -799,7 +813,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
                 let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
-                    const attachment = this.ast.attachments.find(a => a.name === attachmentName);
+                    const attachment = this.getAttachment(attachmentName);
                     if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
                         src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                     }
@@ -850,7 +864,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 this.chartCounter++;
                 const chartId = `chart-${this.chartCounter}`;
                 const chartAttName = meta?.attachmentName;
-                const chartAttachment = this.ast?.attachments.find(a => a.name === chartAttName);
+                const chartAttachment = this.getAttachment(chartAttName);
 
                 if (chartAttachment && (chartAttachment as any).chartData) {
                     const chartData = (chartAttachment as any).chartData;
@@ -1507,7 +1521,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
         if (node.formatting) {
             const f = node.formatting;
-            if (f.color) pushSafe('color', f.color);
+            // Skip a run colour equal to the document default (near-black/near-white) when the caller
+            // opts in, so imported text adapts to the reader's theme instead of being pinned.
+            if (f.color && !(this.config.htmlConfig.omitDefaultTextColor && isNearDefaultColor(f.color))) pushSafe('color', f.color);
             // Highlights are emitted as <mark> by formatText (see there); when that path owns the
             // background it passes skipBackgroundColor so the colour is not also duplicated here.
             if (f.backgroundColor && !options.skipBackgroundColor) pushSafe('background-color', f.backgroundColor);

@@ -1147,6 +1147,15 @@ export interface HtmlGeneratorConfig {
      * are unaffected (they already render from a validated id).
      */
     gatedEmbeds?: boolean;
+    /**
+     * Omit an inline run `color` that is effectively the document default (near-black or near-white),
+     * so imported text inherits the reader's theme instead of being pinned to black (unreadable on a
+     * dark background) or white (unreadable on a light one). Only near-black/near-white run colours are
+     * dropped; every deliberately-coloured run is emitted unchanged. Word's own "automatic" colour
+     * (`w:val="auto"`) already carries no colour, so this targets documents that hard-code an explicit
+     * default-ish colour. Off by default; the default output is unchanged.
+     */
+    omitDefaultTextColor?: boolean;
 }
 
 /**

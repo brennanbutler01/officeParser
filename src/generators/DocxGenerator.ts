@@ -107,7 +107,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
 
     /** Packages an image attachment once, returning the relationship id or null (skipped). */
     private mediaRel(attachmentName: string): { rid: string; cx: number; cy: number; intrinsic: { w: number; h: number } | null } | null {
-        const att = (this.ast.attachments || []).find(a => a.name === attachmentName);
+        const att = this.getAttachment(attachmentName);
         if (!att || !att.data) return null;
         const ext = MIME_EXT[(att.mimeType || '').toLowerCase()];
         if (!ext) { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: 'unsupported mime' }); return null; }
@@ -768,7 +768,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private async chart(node: OfficeContentNode): Promise<string> {
         if (this.config.includeCharts === false) return '';
         const meta = node.metadata as any;
-        const att = (this.ast.attachments || []).find(a => a.name === meta?.attachmentName);
+        const att = this.getAttachment(meta?.attachmentName);
         const data = att?.chartData;
         if (!data) return `<w:p><w:r><w:t xml:space="preserve">[Chart: ${xmlText(meta?.attachmentName || '')}]</w:t></w:r></w:p>`;
         const caption = data.title ? `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${xmlText(data.title)}</w:t></w:r></w:p>` : '';

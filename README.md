@@ -388,7 +388,8 @@ const { value: csv } = await OfficeGenerator.generate(ast, 'csv');
 > npm install puppeteer
 > ```
 > Or choose `pdfConfig.engine: 'native'` to lay the document out directly with `pdf-lib`
-> (`npm install pdf-lib`) — no browser, and the only engine that produces a real PDF in the browser.
+> (`npm install pdf-lib`) — no browser, and the only engine that produces a real PDF in the browser
+> (import from `officeparser/browser-native-pdf` for the client-side path).
 > See [PdfGeneratorConfig](#pdfgeneratorconfig).
 >
 > **EPUB generation with images** requires `extractAttachments: true` on the parse step that
@@ -1169,6 +1170,7 @@ Pass as `htmlConfig` inside `GeneratorConfig`.
 | `injections.bodyStart` | `string` | `''` | Raw HTML injected after `<body>` |
 | `injections.bodyEnd` | `string` | `''` | Raw HTML injected before `</body>` |
 | `sourceAttributes` | `boolean` | `false` | Carry each rich node's raw source in a `data-*` attribute (undelimited text), so attribute-driven consumers can rehydrate it: `data-wikilink`/`data-target`/`data-alias` on wikilinks, a `<span class="citation" data-key>` for citations, the LaTeX in `data-math`, and a `<div class="mermaid" data-mermaid>` for mermaid. Off = byte-identical to before; the parser reads every shape it emits. Forced off for PDF/EPUB |
+| `omitDefaultTextColor` | `boolean` | `false` | Omit an inline run `color` equal to the document default (near-black or near-white), so imported text adapts to the reader's light/dark theme instead of being pinned to black or white. Only near-black/near-white run colours are dropped; deliberately-coloured runs are emitted unchanged (Word's `w:val="auto"` already carries no colour). Off = byte-identical to before |
 
 #### `standalone`: granular envelope control
 
@@ -1224,7 +1226,7 @@ Pass as `mdConfig` inside `GeneratorConfig`.
 
 ### PdfGeneratorConfig
 
-Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requires the optional `puppeteer` peer dependency; the `'native'` engine requires the optional `pdf-lib` peer dependency instead.
+Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requires the optional `puppeteer` peer dependency; the `'native'` engine requires the optional `pdf-lib` peer dependency instead. In the **prebuilt browser bundle** `pdf-lib` is stubbed so the bundle stays self-contained, so client-side native PDF export means importing from the dedicated entry **`officeparser/browser-native-pdf`** and installing `pdf-lib` (a consumer that bundles officeParser from source resolves `pdf-lib` normally).
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|

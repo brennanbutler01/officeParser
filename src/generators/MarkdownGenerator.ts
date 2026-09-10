@@ -517,7 +517,7 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     // downstream Markdown parsers).
                     let src = meta?.url || meta?.attachmentName || '';
                     if (!meta?.url && meta?.attachmentName && this.ast) {
-                        const attachment = this.ast.attachments.find(a => a.name === meta.attachmentName);
+                        const attachment = this.getAttachment(meta.attachmentName);
                         if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
                             src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                         }

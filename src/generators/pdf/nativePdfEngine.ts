@@ -86,6 +86,8 @@ class NativeLayout {
     private y = 0;
     /** Resolved image handling, shared with every other generator via {@link resolveImageMode}. */
     private readonly imageMode: ImageMode;
+    /** `name -> attachment` index, so image lookups are O(1) rather than a scan per image node. */
+    private readonly attachmentsByName = new Map<string, OfficeParserAST['attachments'][number]>();
 
     constructor(
         private readonly pdf: any,
@@ -98,6 +100,9 @@ class NativeLayout {
         private readonly ast: OfficeParserAST,
     ) {
         this.imageMode = resolveImageMode(this.config.includeImages);
+        for (const a of this.ast.attachments || []) {
+            if (a.name && !this.attachmentsByName.has(a.name)) this.attachmentsByName.set(a.name, a);
+        }
         this.newPage();
     }
 
@@ -367,7 +372,7 @@ class NativeLayout {
 
         const meta = node.metadata as any;
         const name = meta?.attachmentName;
-        const attachment = name && this.ast.attachments.find(a => a.name === name);
+        const attachment = name ? this.attachmentsByName.get(name) : undefined;
         if (!attachment?.data) { if (node.text) this.paragraph(node); return; }
         try {
             const bytes = base64ToBytes(attachment.data);
