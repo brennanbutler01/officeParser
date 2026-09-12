@@ -27,7 +27,19 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
 
 ---
 
+## What's New in v8
+
+- **Rebuilt PDF text extraction.** PDF is no longer treated as a page of flat lines. Tagged PDFs now yield real `heading` (with correct levels), `table`/`row`/`cell`, `list` and footnote/endnote `note` nodes, and one `paragraph` per paragraph. Untagged PDFs recover the same structure geometrically. Multi-column and float-beside-text pages are read in the correct order (recursive XY-cut), broken and glued words are fixed from inter-fragment spacing, super/subscripts and hyphenated line-breaks are rejoined, rotated text is recovered, and internal links resolve to the target section. `.to('text')` is **layout-faithful by default**, rendering each page as a spatial grid so columns and tables line up like the source. Optional per-run color/highlight extraction and merged-cell (`colSpan`/`rowSpan`) recovery round it out, and every node carries page geometry (`bounds`).
+- **Password-protected documents.** Encrypted PDF, OOXML (`docx`/`xlsx`/`pptx`) and ODF (`odt`/`ods`/`odp`/`odg`) open through one unified `password` / `onPassword` option, across parsing, conversion and templating.
+- **Native DOCX & ODT generation**, plus a **native PDF engine** (`pdfConfig.engine: 'native'`, built on `pdf-lib`) that produces real PDF bytes with no headless browser, in Node and the browser alike.
+- **Templates / mail-merge** via `OfficeTemplate.render` (fill a DOCX template's `{{placeholders}}`, single or batch), and **ODG parsing** (LibreOffice Draw).
+
+See the [full changelog](CHANGELOG.md) for the complete list, including breaking changes.
+
+---
+
 ## Table of Contents
+- [What's New in v8](#whats-new-in-v8)
 - [Install](#install-via-npm)
 - [Command Line Usage](#command-line-usage)
 - [Quick Decision Guide](#quick-decision-guide)
