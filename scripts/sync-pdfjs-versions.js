@@ -99,7 +99,12 @@ function syncVersions() {
     // 2. Scan for unhandled occurrences
     console.log('\nScanning for unhandled PDF.js version occurrences...');
     const rootDir = path.join(__dirname, '..');
-    const ignoreDirs = ['node_modules', 'dist', '.git', 'test/results'];
+    const ignoreDirs = ['node_modules', 'dist', '.git', 'test/results', 'release_assets', 'scratch'];
+    // Files that legitimately carry a pdfjs version string but must NOT be synced. CHANGELOG.md
+    // records the version shipped with each release as a historical fact, so rewriting it on a future
+    // bump would falsify past entries. (release_assets/ and scratch/ are excluded wholesale above:
+    // the former are frozen release artifacts pinned to a past release's pdfjs, the latter is scratch.)
+    const ignoreFiles = new Set(['CHANGELOG.md'].map(f => path.normalize(f)));
     const unhandledFiles = [];
 
     function scanDir(currentDir) {
@@ -121,6 +126,8 @@ function syncVersions() {
             // Skip the package files and the script itself
             if (relPath === 'package.json' || relPath === 'package-lock.json') continue;
             if (relPath === 'scripts/sync-pdfjs-versions.js') continue;
+            // Skip files that intentionally record a historical/pinned pdfjs version.
+            if (ignoreFiles.has(path.normalize(relPath))) continue;
 
             try {
                 const content = fs.readFileSync(fullPath, 'utf8');
