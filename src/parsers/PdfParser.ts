@@ -782,7 +782,17 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
                             if (fnArray[k] === pdfjs.OPS.transform) { ctm = argsArray[k]; break; }
                         }
                         const bounds = ctm ? imageBounds(viewport, ctm) : { x: 0, y: 0, width: 0, height: 0 };
-                        images.push({ name: imgName, bounds, data: imgObj.data, pixelWidth: imgObj.width, pixelHeight: imgObj.height, kind: imgObj.kind });
+                        // Encode to PNG now, while this page's raw pixel buffer is in hand, so the large
+                        // uncompressed RGBA data is freed as the page goes out of scope instead of being
+                        // retained for every page until the emit pass. Encode failures are logged (as the
+                        // emit pass used to) rather than silently swallowed by the outer per-image catch.
+                        try {
+                            const rgba = convertToRgbaBuffer(imgObj.data, imgObj.width, imgObj.height, imgObj.kind);
+                            const png = encodePng(imgObj.width, imgObj.height, new Uint8Array(rgba));
+                            images.push({ name: imgName, bounds, png, pixelWidth: imgObj.width, pixelHeight: imgObj.height });
+                        } catch (e) {
+                            logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, `on page ${pageNumber}`, e);
+                        }
                     }
                 } catch {
                     // Image access failed, continue.
@@ -1227,8 +1237,8 @@ async function emitImage(
     if (!config.extractAttachments) return null;
     const attachmentName = `pdf_image_p${pageNumber}_${index}.png`;
     try {
-        const rgba = convertToRgbaBuffer(img.data, img.pixelWidth, img.pixelHeight, img.kind);
-        const png = encodePng(img.pixelWidth, img.pixelHeight, new Uint8Array(rgba));
+        // Pixels were PNG-encoded at collection time; here we only name, attach and optionally OCR them.
+        const png = img.png;
         const attachment = createAttachment(attachmentName, png);
         attachment.mimeType = 'image/png';
         if (config.ocr && img.pixelWidth >= 10 && img.pixelHeight >= 10) {

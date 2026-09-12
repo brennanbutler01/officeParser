@@ -513,7 +513,10 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     col++;
                 }
                 let cellHtml = await this.processNodeRecursive(cell, this.nodeProcessor.bind(this));
-                if (headerFirst && r === 0) cellHtml = cellHtml.replace(/^<td/, '<th').replace(/<\/td>$/, '</th>');
+                // Promote the cell's own tag to <th> for the header row. Match the first <td> (not the
+                // string start) so a leading extraAnchors prefix does not defeat the promotion, and the
+                // last </td> (anchored at end) so a nested table's inner cells are left as <td>.
+                if (headerFirst && r === 0) cellHtml = cellHtml.replace(/<td/, '<th').replace(/<\/td>$/, '</th>');
                 tr += cellHtml;
                 const cSpan = (meta?.colSpan && meta.colSpan > 1) ? meta.colSpan : 1;
                 const rSpan = (meta?.rowSpan && meta.rowSpan > 1) ? meta.rowSpan : 1;
@@ -1117,7 +1120,10 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const meta = node.metadata as CellMetadata;
                 const rowSpan = (meta?.rowSpan && meta.rowSpan > 1) ? ` rowspan="${meta.rowSpan}"` : '';
                 const colSpan = (meta?.colSpan && meta.colSpan > 1) ? ` colspan="${meta.colSpan}"` : '';
-                return `<td${rowSpan}${colSpan}${idAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</td>`;
+                // Emit extraAnchors (the 2nd+ anchor ids of a cell with several bookmarks) like every
+                // other node, so they are not silently dropped. They precede the <td>, so the header
+                // promotion below matches the first <td> rather than the string start.
+                return `${extraAnchors}<td${rowSpan}${colSpan}${idAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</td>`;
             }
 
             case 'sheet': {

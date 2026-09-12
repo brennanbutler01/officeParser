@@ -24,7 +24,7 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
         if (this.config.pdfConfig.engine === 'native') {
             if (this.config.abortSignal?.aborted) throw getAbortError();
             try {
-                const value = await renderNativePdf(this.ast, this.config, this.effectiveMetadata);
+                const value = await renderNativePdf(this.ast, this.config, this.effectiveMetadata, (t, i) => this.warn(t, i));
                 return { value, messages: this.messages };
             } catch (err: any) {
                 if (this.config.abortSignal?.aborted) throw getAbortError();
@@ -164,6 +164,12 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
             // Set content and wait for network/assets to load
             await page.setContent(html, { waitUntil: 'networkidle0' });
 
+            // Margin sides default to the '' unset sentinel; the HTML/Puppeteer default is zero margins
+            // (the standalone body carries its own padding), so map unset -> 0 and pass any explicit
+            // value through untouched.
+            const m = pdfConfig.margin;
+            const marginPx = (v: string | number) => (v === '' ? 0 : v);
+
             const pdfBuffer = await page.pdf({
                 format: pdfConfig.format,
                 width: pdfConfig.width,
@@ -171,7 +177,7 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
                 landscape: pdfConfig.landscape,
                 printBackground: pdfConfig.printBackground,
                 scale: pdfConfig.scale,
-                margin: pdfConfig.margin,
+                margin: { top: marginPx(m.top), right: marginPx(m.right), bottom: marginPx(m.bottom), left: marginPx(m.left) },
                 displayHeaderFooter: pdfConfig.displayHeaderFooter,
                 headerTemplate: pdfConfig.headerTemplate,
                 footerTemplate: pdfConfig.footerTemplate,

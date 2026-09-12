@@ -103,6 +103,14 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
                     password rejects with <code>PASSWORD_REQUIRED</code>/<code>PASSWORD_INCORRECT</code>.</td>
             </tr>
             <tr>
+                <td><code>onPassword</code></td>
+                <td><code>(reason) =&gt; string | undefined</code></td>
+                <td><code>—</code></td>
+                <td>Called (with <code>'required'</code> or <code>'incorrect'</code>) when <code>password</code> did not
+                    decrypt the template, to supply one lazily; return a password to retry, or <code>undefined</code> to give
+                    up. Same capped-retry behaviour as the parser's <code>onPassword</code>.</td>
+            </tr>
+            <tr>
                 <td><code>onWarning</code></td>
                 <td><code>function</code></td>
                 <td><code>undefined</code></td>

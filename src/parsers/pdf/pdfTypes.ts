@@ -87,10 +87,14 @@ export interface PdfLine {
 export interface PdfImage {
     name: string;
     bounds: NodeBounds;
-    data: Uint8Array | Uint8ClampedArray;
+    /**
+     * PNG-encoded pixels. Encoded at collection time (not at emit) so the raw uncompressed RGBA
+     * buffer, which is many times larger, is released as soon as its page is done rather than being
+     * held for every page at once until the emit pass.
+     */
+    png: Buffer;
     pixelWidth: number;
     pixelHeight: number;
-    kind?: number;
 }
 
 /** Everything collected from one page in the single collection pass. */

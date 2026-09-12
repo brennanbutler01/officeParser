@@ -163,7 +163,10 @@ export function renderDocxTemplate(
                 ? [bytes, { mtime: opts.mtime }]
                 : [Buffer.from(rewritten, 'utf8'), { mtime: opts.mtime }];
         } else {
-            out[name] = [bytes, { mtime: opts.mtime }];
+            // Non-text parts are overwhelmingly already-compressed media (PNG/JPEG images, embedded
+            // fonts) where deflate yields next to nothing. Store them (`level: 0`) instead of paying to
+            // re-deflate the same bytes on every document in a batch: much less CPU, negligible size.
+            out[name] = [bytes, { mtime: opts.mtime, level: 0 }];
         }
     }
     return zipSync(out);

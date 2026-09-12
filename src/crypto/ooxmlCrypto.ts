@@ -179,7 +179,13 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     const SEGMENT = 4096;
     const out: Buffer[] = [];
     for (let i = 0, off = 0; off < body.length; i++, off += SEGMENT) {
-        const block = body.subarray(off, off + SEGMENT);
+        const raw = body.subarray(off, off + SEGMENT);
+        // Each CBC segment must be a whole number of cipher blocks. SEGMENT is block-aligned, but the
+        // final segment may carry a few trailing bytes past its last full block; trim to a block
+        // boundary (as the standard path does) so aesDecryptNoPad does not throw on it. Any dropped
+        // bytes are past the plaintext, which is truncated to totalSize below.
+        const block = raw.subarray(0, raw.length - (raw.length % keyData.blockSize));
+        if (!block.length) break;
         const iv = hash(keyData.hashAlgorithm, keyData.saltValue, le32(i)).subarray(0, keyData.blockSize);
         out.push(aesDecryptNoPad(block, secretKey, iv, keyData.keyBits, 'cbc'));
     }

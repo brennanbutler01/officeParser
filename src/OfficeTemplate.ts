@@ -31,7 +31,7 @@
  * @module OfficeTemplate
  */
 
-import { isCfb, isEncryptedOoxml, decryptOoxml, WRONG_PASSWORD } from './crypto/index.js';
+import { decryptIfNeeded } from './crypto/decryptContainer.js';
 import { openDocx, renderDocxTemplate } from './template/docxTemplate.js';
 import { BlobLike, OfficeErrorType, OfficeParserConfig, TemplateConfig, TemplateData } from './types.js';
 import { assertNode } from './utils/envUtils.js';
@@ -82,15 +82,14 @@ export class OfficeTemplate {
 
         let bytes = await readInput(template, errCfg);
 
-        // Decrypt an encrypted template up front (reuses the parser's crypto), so rendering sees plaintext.
-        if (isCfb(bytes) && isEncryptedOoxml(bytes)) {
-            if (!config.password) throw getOfficeError(OfficeErrorType.PASSWORD_REQUIRED, errCfg);
-            try { bytes = Buffer.from(decryptOoxml(bytes, config.password)); }
-            catch (e) {
-                if (e === WRONG_PASSWORD) throw getOfficeError(OfficeErrorType.PASSWORD_INCORRECT, errCfg);
-                throw getOfficeError(OfficeErrorType.DOCUMENT_DECRYPTION_FAILED, errCfg, e instanceof Error ? e.message : String(e));
-            }
-        }
+        // Decrypt an encrypted template up front (shared with the parser), so rendering sees plaintext.
+        // Threads through `password` and `onPassword` with the same capped-retry semantics as parsing.
+        bytes = await decryptIfNeeded(bytes, {
+            onWarning: config.onWarning,
+            password: config.password,
+            onPassword: config.onPassword,
+            decompressionLimits: config.decompressionLimits,
+        });
 
         const entries = await openDocx(bytes, config.decompressionLimits, errCfg);
         if (!entries) {

@@ -121,7 +121,9 @@ export enum OfficeWarningType {
     /** A PDF page yielded mostly unmappable glyphs (broken/missing ToUnicode); extracted text is likely garbage */
     PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT',
     /** A PDF yielded essentially no text; it is very likely a scanned/image-only document needing OCR */
-    PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED'
+    PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED',
+    /** A config option was passed that this version does not recognize (e.g. a key renamed in a major release); it had no effect */
+    UNRECOGNIZED_CONFIG_OPTION = 'UNRECOGNIZED_CONFIG_OPTION'
 }
 
 /**
@@ -1912,6 +1914,14 @@ export interface TemplateConfig {
      * the rendered output is the plain (unencrypted) document.
      */
     password?: string;
+    /**
+     * Callback invoked when the template is encrypted and `password` did not decrypt it, mirroring the
+     * parser's `onPassword`. Called with `'required'` when the template is encrypted and no password
+     * was given, or `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to
+     * retry, or `undefined` to give up (rejecting with `PASSWORD_REQUIRED`/`PASSWORD_INCORRECT`).
+     * Retries are capped so a callback that keeps returning a wrong password cannot loop forever.
+     */
+    onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
     /** Optional hint for the template's format. Only DOCX is supported today; detected from bytes otherwise. */
     fileType?: 'docx';
     /**

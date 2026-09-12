@@ -21,16 +21,22 @@ import { DecompressionLimits, OfficeParserConfig } from '../types.js';
 import { extractFiles } from '../utils/zipUtils.js';
 import { WRONG_PASSWORD, DecryptionError } from './wrongPassword.js';
 
-/** Real ODF files use 1024–100000 PBKDF2 iterations per entry; reject anything that would be a CPU DoS. */
-const MAX_ITERATIONS = 10_000_000;
+/**
+ * Real ODF files use 1024-100000 PBKDF2 iterations per entry; reject anything above 1,000,000 (10x
+ * headroom) as a CPU DoS. Key derivation runs through native WebCrypto (`crypto.subtle`) on the
+ * primary path, with `pbkdf2Sync` only as a fallback, so this bounds even the slow fallback to well
+ * under a second per entry.
+ */
+const MAX_ITERATIONS = 1_000_000;
 /**
  * Document-wide PBKDF2 budget. An encrypted ODF derives a fresh key for every encrypted entry, so a
  * hostile file with thousands of entries, each individually plausible at the per-entry cap, could
- * still grind for hours once the correct password is supplied. Real documents write ~100000
- * iterations per entry and stay far below this; the cap bounds the pathological case to a few seconds
- * of native PBKDF2.
+ * still grind for a long time once the correct password is supplied. Real documents write ~100000
+ * iterations per entry; even a media-heavy presentation (a few hundred encrypted image entries) stays
+ * under this, while it caps the pathological case to a few seconds on the native path (and bounds the
+ * `pbkdf2Sync` fallback to the low tens of seconds at worst).
  */
-const MAX_TOTAL_ITERATIONS = 100_000_000;
+const MAX_TOTAL_ITERATIONS = 50_000_000;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 
 /** Detection reads only the tiny manifest; never let a sniff inflate more than this. */

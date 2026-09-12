@@ -499,11 +499,14 @@ function buildNote(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     const meta: NoteMetadata = { noteType: 'footnote' };
     // Strip the leading marker glyph the PDF renders inside the note body ("1 In paged media…") so it
     // is not duplicated next to the generated citation ("[^1]: 1 In paged…"); keep it as the note id.
-    const markerRe = /^\s*([0-9]+|[ivxlcdm]+|[a-z]|[*†‡§])[.)]?\s+/i;
+    // A number or symbol marker may drop its trailing punctuation ("1 In paged...", a dagger),
+    // but a roman-numeral or single-letter marker MUST carry `.`/`)` - otherwise a note body that
+    // simply begins with a word like "Did", "I", "A" or "Civil" would have its first word eaten.
+    const markerRe = /^\s*(?:([0-9]+|[*†‡§])[.)]?|([ivxlcdm]+|[a-z])[.)])\s+/i;
     const firstText = children.map(n => n.text || '').join(' ').trim();
     const mk = firstText.match(markerRe);
     if (mk) {
-        meta.noteId = mk[1];
+        meta.noteId = mk[1] || mk[2];
         const strip = (n: OfficeContentNode): boolean => {
             if (n.type === 'text' && n.text) { const m = n.text.match(markerRe); if (m) { n.text = n.text.slice(m[0].length); return true; } return false; }
             if (n.text) { const m = n.text.match(markerRe); if (m) n.text = n.text.slice(m[0].length); }

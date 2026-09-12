@@ -95,11 +95,12 @@ const PAPER_SIZES_PT: Record<string, { w: number; h: number }> = {
     letter: { w: 8.5 * PT_PER_IN, h: 11 * PT_PER_IN },
     legal: { w: 8.5 * PT_PER_IN, h: 14 * PT_PER_IN },
     tabloid: { w: 11 * PT_PER_IN, h: 17 * PT_PER_IN },
-    // Ledger and Tabloid are the same ANSI B sheet; every entry here is portrait (w <= h) so the
-    // `landscape` flag orients them uniformly across all generators. (Ledger as 17x11 would make the
-    // DOCX/ODT `landscape ? h : w` formula and the native engine's swap disagree, and render an
-    // un-flagged ledger page rotated.) Pass `landscape: true` for a landscape ledger, as for any format.
-    ledger: { w: 11 * PT_PER_IN, h: 17 * PT_PER_IN },
+    // Ledger and Tabloid are the same ANSI B sheet in the two orientations: Tabloid is portrait
+    // (11x17), Ledger is landscape (17x11). Keeping Ledger at 17x11 matches Chromium/Puppeteer, which
+    // is the default HTML PDF engine and defines `ledger` as 17x11, so every engine agrees on the size.
+    // (This is the one non-portrait entry; the generators that assume portrait swap via `landscape` -
+    // see the native engine and the DOCX/ODT `landscape ? h : w` orientation, which both key off it.)
+    ledger: { w: 17 * PT_PER_IN, h: 11 * PT_PER_IN },
     a0: { w: 841 * PT_PER_MM, h: 1189 * PT_PER_MM },
     a1: { w: 594 * PT_PER_MM, h: 841 * PT_PER_MM },
     a2: { w: 420 * PT_PER_MM, h: 594 * PT_PER_MM },

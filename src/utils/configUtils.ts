@@ -16,6 +16,21 @@ import { logWarning } from './errorUtils.js';
 const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
+ * Every recognized top-level parser-config key. `DEFAULT_OFFICE_PARSER_CONFIG` is `DeepRequired`, so
+ * its own keys are exactly the full option surface; a caller key absent from this set is genuinely
+ * unrecognized (a typo, or a key that no longer exists), never a valid-but-omitted option.
+ */
+const RECOGNIZED_PARSER_KEYS = new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG));
+
+/**
+ * Options renamed in a major release, mapped old -> new, so the "unrecognized option" warning can
+ * point an upgrading caller straight at the replacement instead of only saying the key did nothing.
+ */
+const RENAMED_PARSER_KEYS: Record<string, string> = {
+    ignoreBounds: 'ignorePageGeometry',
+};
+
+/**
  * Returns a copy of `source` with prototype-reaching keys removed.
  *
  * Needed before `Object.assign`, which does **not** pollute `Object.prototype` (it writes via
@@ -131,6 +146,15 @@ export function resolveParserConfig(
     // avoid shallow-overwriting the whole nested objects
     const { ocrConfig, decompressionLimits, htmlParserConfig, pdfParserConfig, ...rest } = userConfig;
     Object.assign(config, withoutPrototypeKeys(rest));
+
+    // Flag any option the caller passed that this version does not recognize: a typo, or a key renamed
+    // in a major release. Copying it onto `config` above is harmless, but leaving it silently unused
+    // means the caller's intent never takes effect with no signal at all. One warning per resolve names
+    // exactly which keys did nothing (and, for a known rename, the replacement to use instead).
+    const unknownKeys = Object.keys(rest).filter(k => !RECOGNIZED_PARSER_KEYS.has(k) && !PROTOTYPE_POLLUTION_KEYS.has(k));
+    if (unknownKeys.length) {
+        logWarning(OfficeWarningType.UNRECOGNIZED_CONFIG_OPTION, config, { keys: unknownKeys, renames: RENAMED_PARSER_KEYS });
+    }
 
     if (decompressionLimits) {
         config.decompressionLimits = {

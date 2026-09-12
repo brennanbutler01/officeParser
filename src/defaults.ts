@@ -130,11 +130,15 @@ const DEFAULT_PDF_GENERATOR_CONFIG: DeepRequired<PdfGeneratorConfig> = {
     landscape: false,
     printBackground: true,
     scale: 1,
+    // '' is the "unset" sentinel (as with width/height above). It lets each engine pick its own
+    // sensible default while still honouring an explicit 0: the HTML/Puppeteer path reads unset as 0
+    // (the body carries its own padding), the native engine reads unset as a small default margin so
+    // text is not glued to the sheet edge. An explicit `margin.top: 0` now reaches both as 0.
     margin: {
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 0
+        top: '',
+        right: '',
+        bottom: '',
+        left: ''
     },
     displayHeaderFooter: false,
     headerTemplate: '',

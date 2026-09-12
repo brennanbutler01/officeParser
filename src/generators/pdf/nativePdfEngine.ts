@@ -17,8 +17,8 @@
  */
 
 import { FullGeneratorConfig, ImageMode, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
-import { getAbortError, getOfficeError, getWarningMessage } from '../../utils/errorUtils.js';
-import { paperSizePt, resolveImageMode } from '../../utils/officeGenUtils.js';
+import { getAbortError, getOfficeError } from '../../utils/errorUtils.js';
+import { isHeaderRow, paperSizePt, resolveImageMode } from '../../utils/officeGenUtils.js';
 
 /**
  * Code points WinAnsi (CP1252) encodes beyond Latin-1, which the Standard-14 fonts accept (smart
@@ -100,6 +100,9 @@ class NativeLayout {
         private readonly margin: { top: number; right: number; bottom: number; left: number },
         private readonly config: FullGeneratorConfig,
         private readonly ast: OfficeParserAST,
+        // Reports a warning through the generator's own channel, so it lands in `result.messages`
+        // (and reaches onWarning) rather than only firing onWarning directly.
+        private readonly reportWarning: (type: OfficeWarningType, info?: any) => void,
     ) {
         this.imageMode = resolveImageMode(this.config.includeImages);
         for (const a of this.ast.attachments || []) {
@@ -149,7 +152,7 @@ class NativeLayout {
         if (r.changed && !this.winAnsiWarned) {
             this.winAnsiWarned = true;
             const info = { format: 'pdf', feature: 'non-WinAnsi characters (native engine)' };
-            this.config.onWarning?.({ type: 'warning', code: OfficeWarningType.CONTENT_NOT_REPRESENTABLE, message: getWarningMessage(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info), details: info });
+            this.reportWarning(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info);
         }
         return r.text;
     }
@@ -244,7 +247,7 @@ class NativeLayout {
             if (!this.onNodeWarned) {
                 this.onNodeWarned = true;
                 const info = { format: 'pdf', feature: 'onNode string override (native engine draws it as plain text)' };
-                this.config.onWarning?.({ type: 'warning', code: OfficeWarningType.CONTENT_NOT_REPRESENTABLE, message: getWarningMessage(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info), details: info });
+                this.reportWarning(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, info);
             }
             if (override) this.drawRuns([{ text: override, fmt: {}, link: false }], this.margin.left, this.contentWidth);
             this.y += 6;
@@ -459,6 +462,10 @@ class NativeLayout {
         const carry = new Map<number, number>();
         for (const row of rows) {
             const cells = (row.children || []).filter(c => c.type === 'cell');
+            // Header detection via the shared heuristic every other generator uses (row/cell `style`,
+            // `isHeader`, or an all-bold first row), so a bold first row from DOCX/Markdown bolds here
+            // too - not only PDF's per-cell `style: 'header'`.
+            const rowIsHeader = isHeaderRow(row, row === rows[0]);
             // Place each cell into a grid column: honour explicit `col`, otherwise the next free one.
             let cursor = 0;
             const placed: { col: number; span: number; lines: string[]; header: boolean }[] = [];
@@ -468,7 +475,7 @@ class NativeLayout {
                 let col = typeof meta?.col === 'number' ? meta.col : -1;
                 if (col < 0) { while ((carry.get(cursor) || 0) > 0) cursor++; col = cursor; }
                 const cw = colW * span - 2 * pad;
-                placed.push({ col, span, lines: wrapPlain(this.enc(cell.text || ''), this.fonts.regular, size, Math.max(10, cw)), header: meta?.style === 'header' });
+                placed.push({ col, span, lines: wrapPlain(this.enc(cell.text || ''), this.fonts.regular, size, Math.max(10, cw)), header: rowIsHeader || meta?.style === 'header' });
                 cursor = col + span;
             }
             const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * size * 1.35)) + 2 * pad;
@@ -577,7 +584,7 @@ function applyMetadata(pdf: any, m: OfficeMetadata): void {
  *
  * @returns the PDF as bytes.
  */
-export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig, metadata: OfficeMetadata): Promise<Uint8Array> {
+export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig, metadata: OfficeMetadata, reportWarning: (type: OfficeWarningType, info?: any) => void): Promise<Uint8Array> {
     const lib = await loadPdfLib(ast.config);
     const pdf = await lib.PDFDocument.create();
     applyMetadata(pdf, metadata);
@@ -592,18 +599,24 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
 
     const pc = config.pdfConfig;
     const paper = paperSizePt(pc.format);
-    let w = paper.w, h = paper.h;
+    // Orient the FORMAT by swapping its dimensions when landscape (the same `landscape ? h : w` the
+    // DOCX/ODT generators and Puppeteer use), so a paper that is already landscape - `ledger` (17x11) -
+    // rotates to portrait under `landscape: true` instead of the old conditional swap that never
+    // rotated a landscape sheet. Explicit width/height then override, and (like Puppeteer) are taken as
+    // given rather than re-swapped by the flag.
+    let w = pc.landscape ? paper.h : paper.w;
+    let h = pc.landscape ? paper.w : paper.h;
     if (pc.width) w = toPoints(pc.width, w);
     if (pc.height) h = toPoints(pc.height, h);
-    if (pc.landscape && w < h) [w, h] = [h, w];
 
-    // The resolved config default margin is 0 (correct for the HTML path, whose body carries its own
-    // padding); for the native engine 0 would glue text to the page edge, so treat 0 as "use default".
+    // Margin sides default to the '' unset sentinel; toPoints maps that (and any unparseable value) to
+    // mdef so text is not glued to the sheet edge, while an explicit 0 parses to 0 and is honoured for
+    // callers who genuinely want an edge-to-edge native PDF.
     const mdef = 48; // ~0.67in
-    const mv = (v: string | number | undefined) => { const p = toPoints(v, mdef); return p > 0 ? p : mdef; };
+    const mv = (v: string | number | undefined) => toPoints(v, mdef);
     const margin = { top: mv(pc.margin?.top), right: mv(pc.margin?.right), bottom: mv(pc.margin?.bottom), left: mv(pc.margin?.left) };
 
-    const layout = new NativeLayout(pdf, lib, fonts, w, h, margin, config, ast);
+    const layout = new NativeLayout(pdf, lib, fonts, w, h, margin, config, ast, reportWarning);
     // The native engine reflows a single stream and has no running page furniture, so master-page
     // headers/footers (ast.auxiliary, present only when parsing kept them) are drawn once - headers
     // before the body, footers after - rather than dropped. Footnote/endnote bodies gathered during the

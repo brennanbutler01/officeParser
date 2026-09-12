@@ -851,6 +851,10 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
     }
 
     private buildStylesXml(headerXml: string, footerXml: string): string {
+        // The Preformatted Text named style always references Courier New, so styles.xml must always
+        // declare that font-face. Register it in the font set (deduplicated) rather than prepending a
+        // literal decl: a header/footer that also used inline code would otherwise declare it twice.
+        this.stylesFileStyles.useFont('Courier New');
         const cfg = this.config.odtConfig;
         const size = paperSizePt(cfg.format);
         const pw = (cfg.landscape ? size.h : size.w) / 72; // inches
@@ -865,7 +869,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
         const masterPage = `<style:master-page style:name="Standard" style:page-layout-name="pm1">${hf}</style:master-page>`;
         return `<?xml version="1.0" encoding="UTF-8"?>\n`
             + `<office:document-styles ${ODF_NS} office:version="1.2">`
-            + `<office:font-face-decls><style:font-face style:name="Courier New" svg:font-family="'Courier New'"/>${this.stylesFileStyles.fontFaceDeclsXml()}</office:font-face-decls>`
+            + `<office:font-face-decls>${this.stylesFileStyles.fontFaceDeclsXml()}</office:font-face-decls>`
             + `<office:styles>${NAMED_STYLES}</office:styles>`
             + `<office:automatic-styles>${pageLayout}${this.stylesFileStyles.automaticStylesXml()}</office:automatic-styles>`
             + `<office:master-styles>${masterPage}</office:master-styles>`

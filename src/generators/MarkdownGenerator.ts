@@ -509,8 +509,24 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     const anchorPrefix = anchors ? `${anchors}\n` : '';
                     const ocr = (node.text || '').trim();
 
+                    // OCR text from a scanned page carries meaning in its whitespace and line breaks
+                    // (columns, indentation, aligned rows). Regular Markdown collapses runs of spaces and
+                    // joins single line breaks, which destroys that layout, so render multi-line OCR
+                    // verbatim inside a fenced block (one backtick longer than any embedded run so an
+                    // inner ``` can't close it early) and keep single-line OCR as ordinary prose.
+                    let ocrMd = '';
+                    if (ocr) {
+                        if (/[\r\n]/.test(ocr)) {
+                            const longestRun = Math.max(0, ...(ocr.match(/`+/g) || []).map(s => s.length));
+                            const fence = '`'.repeat(Math.max(3, longestRun + 1));
+                            ocrMd = `${fence}\n${ocr}\n${fence}`;
+                        } else {
+                            ocrMd = markdownEscapeText(ocr);
+                        }
+                    }
+
                     // ocr-text-only: emit just the recognized text, no image markup.
-                    if (mode === 'ocr-text-only') return ocr ? `${anchorPrefix}${markdownEscapeText(ocr)}` : '';
+                    if (mode === 'ocr-text-only') return ocr ? `${anchorPrefix}${ocrMd}` : '';
 
                     // Build the image markup: inline as a data URI when small, otherwise reference by
                     // name (never inline a multi-MB image, which would emit a single line that overflows
@@ -536,7 +552,7 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     const imageMd = `${anchorPrefix}![${safeAlt}](${safeSrc}${imgTitle})${this.renderAttributeList(meta)}`;
 
                     // image+ocr-text: the image, then its recognized text.
-                    if (mode === 'image+ocr-text' && ocr) return `${imageMd}\n\n${markdownEscapeText(ocr)}`;
+                    if (mode === 'image+ocr-text' && ocr) return `${imageMd}\n\n${ocrMd}`;
                     return imageMd;
                 }
 
