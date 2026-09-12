@@ -4,7 +4,7 @@ All notable changes to `officeParser` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [8.0.0] - 2026-08-31
+## [8.0.0] - 2026-09-13
 
 This release is a ground-up rewrite of PDF text extraction, adds native DOCX and ODT generators plus ODG parsing, and drops one deprecated API.
 
@@ -30,6 +30,7 @@ This release is a ground-up rewrite of PDF text extraction, adds native DOCX and
 - **Reading-order recovery** for multi-column and float-beside-text pages, via a recursive XY-cut, so columns and floating tables no longer interleave.
 - **`pdfParserConfig`** (mirrors `htmlParserConfig`): `useTags`, `detectColumns`, `mergeHyphenatedWords`, `lineToleranceFactor`, `spaceToleranceFactor`, `headingDetection` (`auto`/`font-size`/`off`), `pageRange` (e.g. `'1-3,7'`), and `normalizeText`. (`password`/`onPassword` are top-level, shared across formats: see the password entry above.)
 - **`maxInlineImageBytes`** generator config (default 1500000): caps the decoded size, in bytes, of an image inlined as a `data:` URI in HTML/Markdown (the base64 URI itself is ~1/3 larger). Oversized images render a name reference instead.
+- **`IMAGE_NOT_INLINED`** warning code: raised (naming the image, its byte size and the cap) when an image over `maxInlineImageBytes` is emitted as a name reference (HTML) or its recognized/OCR text (Markdown/text) instead of an inline `data:` URI, so the downgrade is surfaced rather than silent. Standalone HTML, which must be self-contained with no external files, still inlines regardless of the cap and does not raise it.
 - **`includeImages` widened from `boolean` to an image mode** (`ImageMode`): `'image-only'` (the `true` default), `'image+ocr-text'` (image then its OCR/recognized text), `'ocr-text-only'`, or `'none'` (the `false` case). This makes OCR text in the output explicit and consistent across HTML/Markdown/text/RTF instead of the previous ad hoc behavior (OCR text leaking into Markdown fallbacks and the HTML `alt`). `boolean` values keep working.
 - **`ignorePageGeometry`** flat config flag to omit page geometry from the AST.
 - **`textConfig.pageSeparator`** to control the string between rendered PDF pages (default `'\n'`; set `'\f'` for pdftotext-style form feeds).
