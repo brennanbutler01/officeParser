@@ -29,13 +29,13 @@ const { value, messages } = await OfficeConverter.convert('report.docx', 'pdf', 
         <tbody>
             <tr>
                 <td><code>source</code></td>
-                <td><code>string | Buffer | ArrayBuffer | Uint8Array</code></td>
-                <td>The source file path or binary data.</td>
+                <td><code>string | Buffer | ArrayBuffer | Uint8Array | BlobLike</code></td>
+                <td>The source file path or binary data (<code>BlobLike</code> covers <code>Blob</code>/<code>File</code>).</td>
             </tr>
             <tr>
                 <td><code>destination</code></td>
                 <td><code>UniversalGeneratorFormat</code></td>
-                <td>Target format: 'html', 'md', 'pdf', 'csv', 'text', 'rtf', 'epub', 'chunks'.</td>
+                <td>Target format: 'html', 'md', 'pdf', 'docx', 'odt', 'csv', 'text', 'rtf', 'epub', 'chunks'.</td>
             </tr>
             <tr>
                 <td><code>config</code></td>
@@ -77,6 +77,12 @@ const { value, messages } = await OfficeConverter.convert('report.docx', 'pdf', 
             </tr>
         </tbody>
     </table>
+
+    <blockquote>
+        [!NOTE]
+        <code>convert()</code> forces OCR <strong>off</strong>. If you need OCR, parse with <code>OfficeParser</code>
+        (setting <code>ocr: true</code>) and then render with <code>OfficeGenerator</code>.
+    </blockquote>
 
     <blockquote>
         [!TIP]

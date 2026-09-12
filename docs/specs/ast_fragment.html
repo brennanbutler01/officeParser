@@ -44,7 +44,8 @@
                 <td><code>auxiliary</code></td>
                 <td><code>OfficeAuxiliaryContent</code> | <code>undefined</code></td>
                 <td>Out-of-band layout / template elements that are <em>not</em> part of the main content flow.
-                    Contains <code>headers</code>, <code>footers</code> (from DOCX), and <code>slideMasters</code> (from PPTX).
+                    Contains <code>headers</code>, <code>footers</code> (from DOCX), <code>slideMasters</code> (from PPTX),
+                    and <code>outline</code> (a PDF bookmark/TOC tree).
                     Only populated when the respective <code>ignoreHeadersAndFooters</code> / <code>ignoreSlideMasters</code> flags are <code>false</code>.
                 </td>
             </tr>
@@ -56,7 +57,7 @@
             <tr>
                 <td><code>to(destination, config?)</code></td>
                 <td><code>Promise&lt;ConversionResult&gt;</code></td>
-                <td><strong>Recommended</strong>: Universal entry point for generation. Converts the AST to <code>text</code>, <code>md</code>, <code>html</code>, <code>csv</code>, <code>rtf</code>, <code>pdf</code>, <code>epub</code>, or <code>chunks</code>. Returns a <code>ConversionResult</code> with <code>{ value, messages }</code>.</td>
+                <td><strong>Recommended</strong>: Universal entry point for generation. Converts the AST to <code>text</code>, <code>md</code>, <code>html</code>, <code>csv</code>, <code>rtf</code>, <code>pdf</code>, <code>docx</code>, <code>odt</code>, <code>epub</code>, or <code>chunks</code>. Returns a <code>ConversionResult</code> with <code>{ value, messages }</code>.</td>
             </tr>
         </tbody>
     </table>
@@ -124,6 +125,11 @@
                 <td>Styling applied to the node (bold, italic, size, color, etc.).</td>
             </tr>
             <tr>
+                <td><code>bounds</code></td>
+                <td><code>NodeBounds</code></td>
+                <td>Geometric page coordinates for this node in PDF page space. Present unless <code>ignoreBounds</code> is set.</td>
+            </tr>
+            <tr>
                 <td><code>rawContent</code></td>
                 <td><code>string</code> | <code>undefined</code></td>
                 <td>The raw XML or RTF source markup for this specific node. <em>(Only if enabled in config)</em>.</td>
@@ -186,6 +192,8 @@
             <code>ast.auxiliary.footers[]</code>.</li>
         <li><strong><code>slideMaster</code></strong>: A PPTX slide master. Carries <code>SlideMetadata</code>. Found
             in <code>ast.auxiliary.slideMasters[]</code>.</li>
+        <li><strong><code>outline</code></strong>: A PDF bookmark / table-of-contents tree. Found in
+            <code>ast.auxiliary.outline</code>.</li>
     </ul>
 
     <h3>4b. Annotation Nodes</h3>
@@ -231,6 +239,8 @@
             <code>data-width</code>/<code>data-align</code> or an inline <code>style="width:..."</code>.</li>
         <li><strong><code>chart</code></strong>: References a chart attachment. Contains structured
             <code>chartData</code> in metadata if requested.</li>
+        <li><strong><code>drawing</code></strong>: A vector drawing or shape. A member of the node-type union;
+            it carries no type-specific <code>metadata</code> (undefined/none).</li>
     </ul>
 
     <h3>5. Breaks (The <code>break</code> Node)</h3>
@@ -243,6 +253,7 @@
                 <li><code>'page'</code>: Hard page break, forcing subsequent content to a new page.</li>
                 <li><code>'column'</code>: Column break, moving text to the top of the next column in multi-column layouts.</li>
                 <li><code>'lastRenderedPage'</code>: A "soft" page break marker indicating where a page naturally ended during the last render.</li>
+                <li><code>'thematic'</code>: A thematic break / horizontal rule (Markdown <code>---</code>/<code>***</code>/<code>___</code>, HTML <code>&lt;hr&gt;</code>).</li>
             </ul>
         </li>
         <li><strong><code>clear</code></strong>: (Only for <code>textWrapping</code>) Specifies where the next available line should start when wrapping around floating objects (<code>all</code>, <code>left</code>, <code>right</code>, <code>none</code>).</li>
@@ -308,6 +319,7 @@
     <p>Two new fields added to the root <code>ast.metadata</code> object:</p>
     <ul>
         <li><strong><code>keywords</code></strong> (<code>string</code>): Keywords associated with the document, extracted from document properties.</li>
+        <li><strong><code>language</code></strong> (<code>string</code>): The document's primary language as a BCP-47 tag (e.g. <code>en-US</code>).</li>
         <li><strong><code>nativeProperties</code></strong> (<code>Record&lt;string, any&gt;</code>): All format-specific
             metadata extracted verbatim. Examples:
             <ul>

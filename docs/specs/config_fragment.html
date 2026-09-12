@@ -60,15 +60,15 @@
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
                 <td><strong>Comment Filtering</strong>: When <code>true</code>, inline comments and annotations are
-                    excluded from parsing. Affects DOCX, XLSX, and PPTX. By default comments are attached to their
+                    excluded from parsing. Affects DOCX, XLSX, PPTX and ODF (ODT/ODS/ODP). By default comments are attached to their
                     target node via <code>node.comments[]</code>.</td>
             </tr>
             <tr>
                 <td><code>ignoreHeadersAndFooters</code></td>
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
-                <td><strong>Layout Element Filtering</strong>: When <code>true</code>, DOCX headers and footers are
-                    not parsed. When <code>false</code> (default), they are extracted into
+                <td><strong>Layout Element Filtering</strong>: When <code>true</code>, headers and footers are
+                    not parsed. Applies to DOCX, PDF and ODF (ODT/ODS/ODP). When <code>false</code> (default), they are extracted into
                     <code>ast.auxiliary.headers</code> and <code>ast.auxiliary.footers</code>.</td>
             </tr>
             <tr>
@@ -148,7 +148,7 @@
                 <td><code>ocrConfig.timeout</code></td>
                 <td><code>object</code></td>
                 <td><code>{}</code></td>
-                <td><strong>OCR Timeouts</strong>: Consolidated timeout configurations. If both this and flat fields are provided, properties in this object take priority.</td>
+                <td><strong>OCR Timeouts</strong>: Consolidated timeout configurations. The consolidated <code>timeout</code> object is the only form.</td>
             </tr>
             <tr>
                 <td><code>ocrConfig.timeout.autoTerminate</code></td>
@@ -177,7 +177,7 @@
             <tr>
                 <td><code>ocrConfig.workerPath</code> / <code>corePath</code> / <code>langPath</code></td>
                 <td><code>string</code></td>
-                <td><code>undefined</code></td>
+                <td><code>''</code></td>
                 <td><strong>Offline Environments</strong>: Paths to Tesseract scripts and data files for air-gapped or
                     customized installations.</td>
             </tr>
@@ -206,7 +206,8 @@
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
                 <td><strong>Page Geometry</strong>: When true, the geometric layout data (per-node <code>bounds</code> boxes and
-                    page dimensions) is omitted. Currently produced by the PDF parser; on by default.</td>
+                    page dimensions) is omitted. Currently produced by the PDF parser; bounds are emitted by default
+                    (<code>ignoreBounds</code> defaults to false).</td>
             </tr>
             <tr>
                 <td><code>password</code></td>
@@ -242,7 +243,7 @@
             </tr>
             <tr>
                 <td><code>fileType</code></td>
-                <td><code>SupportedFileType</code></td>
+                <td><code>SupportedFileType | null</code></td>
                 <td><code>null</code></td>
                 <td><strong>Authoritative Hint</strong>: Manually specify the source format. Essential when parsing
                     <code>md</code>, <code>html</code>, or <code>csv</code> from a Buffer / ArrayBuffer / Uint8Array, as these lack magic byte
@@ -265,7 +266,7 @@
                 <td><code>decompressionLimits.maxUncompressedBytes</code></td>
                 <td><code>number</code></td>
                 <td><code>536870912</code> (512MB)</td>
-                <td><strong>Decompression Limit</strong>: Maximum allowable uncompressed size in bytes for the ZIP archive contents. Set to <code>0</code> or higher to override.</td>
+                <td><strong>Decompression Limit</strong>: Maximum allowable uncompressed size in bytes for the ZIP archive contents. Any value <code>&gt;= 0</code> is taken literally, so <code>0</code> rejects all content; there is no unlimited/disable sentinel. Only a negative or non-finite value falls back to the 512MB default.</td>
             </tr>
             <tr>
                 <td><code>decompressionLimits.maxZipEntries</code></td>

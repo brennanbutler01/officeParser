@@ -367,7 +367,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         let s = '';
         if (styleId) s += `<w:rStyle w:val="${styleId}"/>`;
         if (fmt && this.config.includeFormatting !== false) {
-            if (fmt.font) s += `<w:rFonts w:ascii="${escapeXml(fmt.font)}" w:hAnsi="${escapeXml(fmt.font)}"/>`;
+            if (fmt.font) { const f = escapeXml(stripInvalidXmlChars(fmt.font)); s += `<w:rFonts w:ascii="${f}" w:hAnsi="${f}"/>`; }
             if (fmt.bold) s += '<w:b/>';
             if (fmt.italic) s += '<w:i/>';
             if (fmt.strikethrough) s += '<w:strike/>';

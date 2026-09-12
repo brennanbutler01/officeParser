@@ -33,7 +33,9 @@ const { value: csv } = await OfficeGenerator.generate(ast, 'csv');</code></pre>
 
     <blockquote>
         [!IMPORTANT]
-        <strong>PDF generation</strong> requires the optional <code>puppeteer</code> peer dependency: <code>npm install puppeteer</code>
+        <strong>PDF generation</strong> with the default <code>'html'</code> engine requires the optional
+        <code>puppeteer</code> peer dependency: <code>npm install puppeteer</code>. The <code>pdfConfig.engine: 'native'</code>
+        engine instead uses <code>pdf-lib</code> and needs no browser.
     </blockquote>
 
     <blockquote>
@@ -137,6 +139,16 @@ const { value: chunks } = await ast.to('chunks', {
                 <td>The chunk text content.</td>
             </tr>
             <tr>
+                <td><code>startIndex</code></td>
+                <td><code>number?</code></td>
+                <td>Character offset of the chunk start in the full document text (only when <code>addStartIndex: true</code>).</td>
+            </tr>
+            <tr>
+                <td><code>endIndex</code></td>
+                <td><code>number?</code></td>
+                <td>Character offset of the chunk end in the full document text (only when <code>addStartIndex: true</code>).</td>
+            </tr>
+            <tr>
                 <td><code>metadata.sourceType</code></td>
                 <td><code>string</code></td>
                 <td>The source file type (e.g., <code>'docx'</code>, <code>'pdf'</code>).</td>
@@ -162,14 +174,9 @@ const { value: chunks } = await ast.to('chunks', {
                 <td>The nearest heading above this chunk. Invaluable for citations.</td>
             </tr>
             <tr>
-                <td><code>metadata.chunkIndex</code></td>
-                <td><code>number</code></td>
-                <td>Sequential index of this chunk within the document.</td>
-            </tr>
-            <tr>
-                <td><code>metadata.startIndex</code></td>
-                <td><code>number?</code></td>
-                <td>Character offset of the chunk start in the full document text (only when <code>addStartIndex: true</code>).</td>
+                <td><code>metadata.isTableChunk</code></td>
+                <td><code>boolean?</code></td>
+                <td>True when the chunk was produced from a table (e.g. a table split into per-row chunks).</td>
             </tr>
         </tbody>
     </table>

@@ -77,6 +77,9 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
 npm i officeparser
 ```
 
+> [!NOTE]
+> Requires Node.js >= 22.13.
+
 ---
 
 ## Command Line Usage
@@ -308,7 +311,7 @@ The preferred way to convert a parsed AST to another format. Returns a `Conversi
 
 const { value: markdown, messages } = await ast.to('md');
 const { value: html }               = await ast.to('html', { includeFormatting: false });
-const { value: chunks }             = await ast.to('chunks', { strategy: 'fixed-size', chunkSize: 800 });
+const { value: chunks }             = await ast.to('chunks', { chunksConfig: { strategy: 'fixed-size', chunkSize: 800 } });
 const { value: pdfBytes }           = await ast.to('pdf'); // Uint8Array
 ```
 
@@ -379,7 +382,7 @@ const { value: html } = await OfficeGenerator.generate(ast, 'html', {
 const { value: csv } = await OfficeGenerator.generate(ast, 'csv');
 ```
 
-**Supported destinations:** `'text'` · `'md'` · `'html'` · `'csv'` · `'rtf'` · `'pdf'` · `'epub'` · `'chunks'`
+**Supported destinations:** `'text'` · `'md'` · `'html'` · `'csv'` · `'rtf'` · `'pdf'` · `'docx'` · `'odt'` · `'epub'` · `'chunks'`
 
 > [!NOTE]
 > **PDF generation** uses a headless browser by default (`pdfConfig.engine: 'html'`), which needs the
@@ -563,7 +566,7 @@ interface OfficeChunk {
 
 ```text
 OfficeParserAST
-├── type: 'docx' | 'pdf' | 'xlsx' | 'csv' | 'md' | 'epub' | ...  (12 formats)
+├── type: 'docx' | 'pdf' | 'xlsx' | 'csv' | 'md' | 'epub' | ...  (13 formats)
 ├── metadata: { author, title, created, modified, keywords, customProperties, nativeProperties, styleMap, ... }
 ├── content: [ OfficeContentNode ]
 │   ├── type: 'paragraph' | 'heading' | 'table' | 'list' | 'image' | 'chart' | 'comment' | 'admonition' | 'embed' | 'definitionList' | ...
@@ -585,7 +588,7 @@ OfficeParserAST
 │   ├── ocrText?: string  (if ocr: true)
 │   └── chartData?: { title, dataSets, labels }
 ├── warnings: OfficeIssue[]  (non-fatal issues from the parsing phase)
-└── to(format, config?)  (format: 'html'|'md'|'text'|'csv'|'rtf'|'pdf'|'chunks', returns { value, messages })
+└── to(format, config?)  (format: 'html'|'md'|'text'|'csv'|'rtf'|'pdf'|'docx'|'odt'|'epub'|'chunks', returns { value, messages })
 ```
 
 ### `OfficeIssue`: Warning / Error Object
@@ -1231,6 +1234,8 @@ Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requir
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `engine` | `'html' \| 'native'` | `'html'` | `'html'`: render through a headless browser (Puppeteer in Node; native print in the browser) for maximum fidelity. `'native'`: lay the AST out directly with `pdf-lib` - no browser, runs in Node and the browser (real PDF bytes client-side), much lighter, but uses Standard-14 fonts and reflows rather than pixel-matching |
+| `tagged` | `boolean` | `true` | Emit a tagged, PDF/UA-accessible PDF (structure tree). HTML engine only; the native engine ignores it |
+| `outline` | `boolean` | `false` | Emit a heading-based bookmark outline. HTML engine only; the native engine ignores it |
 | `format` | `string` | `'A4'` | Paper format (`'A4'`, `'Letter'`, `'Legal'`, etc.) |
 | `width` | `string \| number` | `''` | Paper width (e.g., `'5in'`, `'3cm'`) or pixels |
 | `height` | `string \| number` | `''` | Paper height (e.g., `'5in'`, `'3cm'`) or pixels |
@@ -1450,7 +1455,7 @@ await officeParser.terminateOcr(); // immediate exit
 
 ## Browser Usage
 
-Four bundles are available in the `dist/` directory:
+Five bundles are available in the `dist/` directory:
 
 | Bundle | Type | Description |
 |--------|------|-------------|
@@ -1458,6 +1463,7 @@ Four bundles are available in the `dist/` directory:
 | `officeparser.browser.iife.js` | IIFE | Standard UMD bundle for direct `<script>` inclusion (exposes global `officeParser`). |
 | `officeparser.browser.slim.mjs` | ESM | Slim ESM bundle with Tesseract.js (OCR) stubbed out and remote CDN URLs removed. |
 | `officeparser.browser.slim.iife.js` | IIFE | Slim UMD bundle with Tesseract.js (OCR) stubbed out and remote CDN URLs removed. |
+| `officeparser.browser.native-pdf.mjs` | ESM | ESM bundle (the `officeparser/browser-native-pdf` subpath export) that leaves `pdf-lib` external, for client-side native PDF generation. |
 
 ### Manifest V3 & Extension Compliance (Slim Bundles)
 For strict browser environments like **Chrome/Edge Manifest V3 extensions**, remotely hosted code is forbidden. Use the **slim** bundles (`officeparser.browser.slim.mjs` or `officeparser.browser.slim.iife.js`) as they do not include default remote CDN urls or the Tesseract OCR engine.

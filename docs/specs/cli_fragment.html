@@ -41,10 +41,22 @@
                 <td>Explicitly override input file type detection (useful when input file lacks extension).</td>
             </tr>
             <tr>
+                <td><code>--password</code></td>
+                <td>string</td>
+                <td>—</td>
+                <td>Password for an encrypted document (PDF, OOXML, or ODF).</td>
+            </tr>
+            <tr>
                 <td><code>--ocr</code></td>
                 <td>boolean</td>
                 <td><code>false</code></td>
                 <td>Enable Optical Character Recognition (OCR) for embedded images.</td>
+            </tr>
+            <tr>
+                <td><code>--ocrConfig.language</code></td>
+                <td>string</td>
+                <td><code>eng</code></td>
+                <td>Tesseract OCR language(s) (e.g. <code>eng</code>, <code>eng+fra</code>).</td>
             </tr>
             <tr>
                 <td><code>--extractAttachments</code></td>
@@ -81,6 +93,36 @@
                 <td>boolean</td>
                 <td><code>false</code></td>
                 <td>Skip internal anchors and bookmark links.</td>
+            </tr>
+            <tr>
+                <td><code>--ignoreBounds</code></td>
+                <td>boolean</td>
+                <td><code>false</code></td>
+                <td>Omit per-node geometry (<code>bounds</code>) and page dimensions.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.useTags</code></td>
+                <td>boolean</td>
+                <td><code>true</code></td>
+                <td>Use the PDF's tagged-structure tree when present; set <code>false</code> to force geometry-only extraction.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.detectColumns</code></td>
+                <td>boolean</td>
+                <td><code>true</code></td>
+                <td>Recover reading order for multi-column and float-beside-text pages.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.pageRange</code></td>
+                <td>string</td>
+                <td><code>''</code> (all)</td>
+                <td>Restrict parsing to given pages, e.g. <code>1-3,7</code>.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.headingDetection</code></td>
+                <td><code>auto | font-size | off</code></td>
+                <td><code>auto</code></td>
+                <td>How heading levels are decided for PDF content.</td>
             </tr>
             <tr>
                 <td><code>--newlineDelimiter</code></td>

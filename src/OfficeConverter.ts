@@ -1,6 +1,7 @@
 import { OfficeGenerator } from './OfficeGenerator.js';
 import { OfficeParser } from './OfficeParser.js';
 import { BlobLike, ConversionResult, GeneratorConfig, OfficeConverterConfig, OfficeParserConfig, SupportedDestination, SupportedFileType } from './types.js';
+import { resolveImageMode } from './utils/officeGenUtils.js';
 
 /**
  * Utility type to infer the file type from a file path string literal.
@@ -79,7 +80,9 @@ export class OfficeConverter {
         // Extract attachments when the generator will render an image or its OCR text (any
         // includeImages mode except false/'none'), or when charts are included.
         const im = config?.generatorConfig?.includeImages;
-        const wantsImageOrText = im !== false && im !== 'none';
+        // Resolve through the shared mapper so a CLI-style `'false'` string (and `'none'`) is honored,
+        // not just the boolean/'none' literals - otherwise `--includeImages=false` still extracts.
+        const wantsImageOrText = resolveImageMode(im) !== 'none';
         parserConfig.extractAttachments = wantsImageOrText || (config?.generatorConfig?.includeCharts !== false);
 
         // 2. Parse the source document into the universal AST

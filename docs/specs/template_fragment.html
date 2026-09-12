@@ -73,6 +73,13 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
                     (rendered empty).</td>
             </tr>
             <tr>
+                <td><code>fileType</code></td>
+                <td><code>'docx'</code></td>
+                <td><code>—</code></td>
+                <td>Optional format hint. Only <code>'docx'</code> is currently supported; it is surfaced in the
+                    unsupported-format error message when a non-DOCX template is passed.</td>
+            </tr>
+            <tr>
                 <td><code>delimiters</code></td>
                 <td><code>{ start: string; end: string }</code></td>
                 <td><code>{{ }}</code></td>

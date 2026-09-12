@@ -37,6 +37,11 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
         // We reuse the current configuration but ensure standalone mode is on for HTML
         const htmlGenerator = new HtmlGenerator(this.ast, {
             ...this.config,
+            // The HTML is rendered in a real browser (Puppeteer in Node, the print engine in-page), which
+            // resolves a data: URI of any size. The maxInlineImageBytes cap exists only to keep a huge
+            // base64 line out of Markdown/HTML text consumers; applied here it would degrade a large image
+            // to a bare `<img src="name">` with no resolvable URL (a broken image in the PDF). Inline fully.
+            maxInlineImageBytes: Infinity,
             // Force sourceAttributes off: those data-* attributes are wire-format plumbing for
             // structured consumers and change the mermaid shape's rendered appearance, neither of
             // which belongs in a printed PDF.
@@ -81,9 +86,16 @@ export class PdfGenerator extends BaseGenerator<'pdf'> {
         }
 
         try {
-            // Dynamic import for peer dependency
-            // @ts-ignore
-            const puppeteerModule = await import('puppeteer');
+            // Dynamic import for the optional peer dependency. Give a clear, actionable error when it
+            // is missing, so the message does not have to be hardcoded into the generic PDF error.
+            let puppeteerModule: any;
+            try {
+                // @ts-ignore
+                puppeteerModule = await import('puppeteer');
+            } catch {
+                throw getOfficeError(OfficeErrorType.PDF_GENERATION_FAILED, this.ast.config,
+                    "the default PDF engine requires the optional peer dependency 'puppeteer' (install it with `npm install puppeteer`), or use pdfConfig.engine: 'native' (which uses pdf-lib and needs no browser)");
+            }
             const puppeteer = puppeteerModule.default || puppeteerModule;
 
             const launchOptions = { ...this.config.pdfConfig.launchOptions };

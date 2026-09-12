@@ -446,11 +446,23 @@ await ast.to('md', {
                     in Node and the browser, using the Standard-14 font families.</td>
             </tr>
             <tr>
+                <td><code>tagged</code></td>
+                <td><code>boolean</code></td>
+                <td><code>true</code></td>
+                <td>Emit a tagged, PDF/UA-accessible PDF (structure tree). HTML engine only; the native engine ignores it.</td>
+            </tr>
+            <tr>
+                <td><code>outline</code></td>
+                <td><code>boolean</code></td>
+                <td><code>false</code></td>
+                <td>Emit a heading-based bookmark outline. HTML engine only; the native engine ignores it.</td>
+            </tr>
+            <tr>
                 <td><code>format</code></td>
-                <td><code>string</code></td>
+                <td><code>PaperFormat</code></td>
                 <td><code>'A4'</code></td>
                 <td>Paper format (<code>'A4'</code>, <code>'Letter'</code>, <code>'Legal'</code>, <code>'A3'</code>,
-                    etc.).</td>
+                    <code>'Ledger'</code>, etc.).</td>
             </tr>
             <tr>
                 <td><code>width</code></td>
@@ -538,7 +550,7 @@ await ast.to('md', {
                 <td><code>'A4'</code></td>
                 <td>Page size for the document section (<code>w:pgSz</code>). The same names <code>pdfConfig.format</code>
                     accepts (<code>A4</code>, <code>Letter</code>, <code>Legal</code>, <code>A3</code>, <code>Tabloid</code>,
-                    …; case-insensitive).</td>
+                    <code>Ledger</code>, …; case-insensitive).</td>
             </tr>
             <tr>
                 <td><code>landscape</code></td>
@@ -579,7 +591,7 @@ await ast.to('md', {
                 <td><code>'A4'</code></td>
                 <td>Page size for the page layout (<code>style:page-layout</code>). The same names
                     <code>pdfConfig.format</code> accepts (<code>A4</code>, <code>Letter</code>, <code>Legal</code>,
-                    <code>A3</code>, <code>Tabloid</code>, …; case-insensitive).</td>
+                    <code>A3</code>, <code>Tabloid</code>, <code>Ledger</code>, …; case-insensitive).</td>
             </tr>
             <tr>
                 <td><code>landscape</code></td>
@@ -744,7 +756,7 @@ await ast.to('md', {
         Without it, consecutive paragraphs mapped to <code>blockquote</code> would be combined into a single element.
     </p>
 
-    <h2 id="chunkingconfig">ChunkingConfig Reference</h2>
+    <h2 id="chunkingconfig">ChunkingConfig (<code>chunksConfig</code>) Reference</h2>
     <p><code>ChunkingConfig</code> is a <strong>discriminated union</strong>; available options depend on the
         <code>strategy</code> field. Default strategy is <code>'document-structure'</code>.
     </p>

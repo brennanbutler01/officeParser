@@ -4,8 +4,8 @@
         <a href="#spec/ast">AST structure</a> &middot;
         <a href="#spec/generator_config">GeneratorConfig</a></p>
     <h1>Troubleshooting & Debugging</h1>
-    <p>Solutions for common integration challenges and performance optimizations in <code>officeParser</code> v7.0.0+.
-    </p>
+    <p>Solutions for common integration challenges and performance optimizations in <code>officeParser</code> v8.
+        Node.js &gt;= 22.13 is required.</p>
 
     <div class="callout callout-tip">
         <div class="callout-header">
@@ -126,9 +126,11 @@ await officeParser.parseOffice(csvBuffer,      { fileType: 'csv' });</code></pre
     </p>
 
     <h2>8. PDF Generation Fails (Node.js)</h2>
-    <p>PDF output (<code>format: 'pdf'</code>) uses <strong>Puppeteer</strong>, which is an optional peer dependency not
-        included by default. If generation throws a dependency error, install it:</p>
+    <p>PDF output (<code>format: 'pdf'</code>) with the default <code>'html'</code> engine uses <strong>Puppeteer</strong>,
+        which is an optional peer dependency not included by default. If generation throws a dependency error, install it:</p>
     <pre><code>npm install puppeteer</code></pre>
+    <p>Alternatively, set <code>pdfConfig.engine: 'native'</code> to lay the document out directly with <code>pdf-lib</code>
+        (its own optional peer dependency), which needs no browser and no Puppeteer.</p>
     <p>In CI/CD environments where Puppeteer cannot download Chromium automatically, pass a custom executable path via
         <code>pdfConfig.launchOptions</code>:
     </p>
@@ -194,7 +196,7 @@ await officeParser.parseOffice(csvBuffer,      { fileType: 'csv' });</code></pre
             </tr>
             <tr>
                 <td>PDF generation fails</td>
-                <td>Install optional peer dep: <code>npm install puppeteer</code></td>
+                <td>Install optional peer dep <code>npm install puppeteer</code>, or use <code>pdfConfig.engine: 'native'</code> (<code>pdf-lib</code>), which needs no browser</td>
             </tr>
             <tr>
                 <td>ZIP extraction failed or limit exceeded</td>

@@ -156,6 +156,11 @@ export class EpubGenerator extends BaseGenerator<'epub'> {
     async generate(): Promise<ConversionResult<'epub'>> {
         const htmlGenerator = new HtmlGenerator(this.ast, {
             ...this.config,
+            // EPUB packages every image into a separate file, rewriting its data: URI to a relative src
+            // (readers don't render data: URIs). That rewrite only fires on a data: URI, so the
+            // maxInlineImageBytes cap must not apply here: a large image would otherwise degrade to a bare
+            // `<img src="name">` the packager can't rewrite, giving a broken image + no manifest entry.
+            maxInlineImageBytes: Infinity,
             // Force sourceAttributes off: those data-* attributes are wire-format plumbing for
             // structured consumers and change the mermaid shape's rendered appearance, neither of
             // which belongs in a packaged EPUB.

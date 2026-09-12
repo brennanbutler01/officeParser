@@ -223,6 +223,12 @@ export function toW3CDTF(v: unknown): string | null {
  * exists (the sole non-reproducible path, hence last). `iso` is `YYYY-MM-DDThh:mm:ssZ` (UTC, whole
  * seconds). `mtime` is additionally clamped to zip's DOS-timestamp range (1980-2099): fflate throws
  * rather than clamping, and an unset/epoch-zero date is the common out-of-range case.
+ *
+ * Known limitation: the one UTC wall-clock hour per year that falls in the running machine's DST
+ * spring-forward gap has no local representation, so on a DST-observing machine the mtime for a
+ * `modified` value in that hour shifts by 1h and its DOS timestamp differs from a non-DST machine's.
+ * This cannot be corrected without reimplementing DOS-timestamp encoding (fflate reads local getters);
+ * it affects only that hour and only the zip mtime, never `iso` or the visible metadata date.
  */
 export function resolveZipInstant(raw: unknown): { iso: string; mtime: Date } {
     let resolved: Date | null = null;

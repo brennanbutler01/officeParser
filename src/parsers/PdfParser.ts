@@ -718,7 +718,10 @@ async function collectPage(
         }
     }
 
-    const images = (config.extractAttachments || config.ocr)
+    // OCR of page images is emitted through the attachment path (`emitImage` requires
+    // extractAttachments), so collecting images for `ocr` alone would decode and then drop them.
+    // Gate on extractAttachments only; the PDF_NO_TEXT_EXTRACTED warning tells OCR users to set it.
+    const images = config.extractAttachments
         ? await collectImages(pdfjs, page, layoutViewport, config, pageNumber, ops)
         : [];
 
@@ -1140,7 +1143,7 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     resolveSectionLinks(content, extracts, sectionLinks, [content, auxHeaders, auxFooters, outline ?? []]);
 
     const auxiliary = (auxHeaders.length || auxFooters.length || outline)
-        ? { headers: auxHeaders, footers: auxFooters, ...(outline ? { outline } : {}) }
+        ? { ...(auxHeaders.length ? { headers: auxHeaders } : {}), ...(auxFooters.length ? { footers: auxFooters } : {}), ...(outline ? { outline } : {}) }
         : undefined;
 
     return createAST('pdf', metadata, content, attachments, config, auxiliary);

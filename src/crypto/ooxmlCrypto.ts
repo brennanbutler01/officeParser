@@ -139,11 +139,12 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     const encKeyBits = parseInt(attr(xml, 'encryptedKey', 'keyBits'), 10) || 256;
     const encHash = hashId(attr(xml, 'encryptedKey', 'hashAlgorithm'));
     const spinCount = parseInt(attr(xml, 'encryptedKey', 'spinCount'), 10) || 100000;
-    // `spinCount`, `keyBits` and `blockSize` come from the attacker-controlled descriptor. Real Office
-    // files use spinCount=100000; reject anything absurd so a hostile file cannot make us grind through
-    // billions of hash rounds (CPU DoS) before we can even check the password. Office/LibreOffice cap
-    // the spin count at ~10 million.
-    if (!Number.isFinite(spinCount) || spinCount < 0 || spinCount > 10_000_000) {
+    // `spinCount`, `keyBits` and `blockSize` come from the attacker-controlled descriptor. The key
+    // stretch here is a synchronous hash loop, so a hostile file with a huge spinCount blocks the event
+    // loop for that whole time before we can even check the password (a server-side CPU DoS). Real
+    // Office/LibreOffice files use spinCount=100000; cap at 1,000,000 (10x headroom, ~1-2s worst case)
+    // and reject anything larger rather than grind for tens of seconds.
+    if (!Number.isFinite(spinCount) || spinCount < 0 || spinCount > 1_000_000) {
         throw new DecryptionError(`encrypted OOXML: implausible spinCount ${spinCount}`);
     }
     for (const bits of [keyData.keyBits, encKeyBits]) {

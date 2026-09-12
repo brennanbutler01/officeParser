@@ -247,10 +247,12 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
         const compressed = Buffer.concat([decipher.update(aligned), decipher.final()]);
 
         // The ODF checksum (SHA of the first 1 KiB of the compressed data) is authoritative, but only
-        // when we can reproduce those 1 KiB exactly: the tail is zero-padded to the block size, so a
-        // short entry's checksum would cover padding the encoder never hashed. Use it above ~1 KiB and,
-        // always, fall back to raw inflate, which effectively never succeeds on a wrong AES key.
-        if (enc.checksum.length && compressed.length > 1024 + 16) {
+        // for the "1K" checksum types (`...#sha256-1k`, `SHA1/1K`) that hash exactly the first 1 KiB,
+        // and only when we can reproduce those 1 KiB exactly: the tail is zero-padded to the block size,
+        // so a short entry's checksum would cover padding the encoder never hashed. A whole-entry
+        // checksum type would never match a 1 KiB hash, so skip verification for those and rely on the
+        // raw inflate below (which effectively never succeeds on a wrong AES key).
+        if (enc.checksum.length && /1k/i.test(enc.checksumType) && compressed.length > 1024 + 16) {
             const actual = checksumHash(enc.checksumType, compressed);
             if (!actual.subarray(0, enc.checksum.length).equals(enc.checksum)) throw WRONG_PASSWORD;
         }

@@ -88,6 +88,8 @@ class NativeLayout {
     private readonly imageMode: ImageMode;
     /** `name -> attachment` index, so image lookups are O(1) rather than a scan per image node. */
     private readonly attachmentsByName = new Map<string, OfficeParserAST['attachments'][number]>();
+    /** Footnote/endnote bodies gathered from `node.notes` during the walk, drawn at document end. */
+    private readonly collectedNotes: OfficeContentNode[] = [];
 
     constructor(
         private readonly pdf: any,
@@ -258,6 +260,9 @@ class NativeLayout {
         // The caller's onNode hook can skip a node/subtree or replace its output, exactly as the
         // text-based generators honor it; applied before any default rendering (and before pagination).
         if (await this.applyOnNode(node)) return;
+        // Footnotes/endnotes hang off `node.notes` (not children), so the sibling generators all emit
+        // them; gather them here and draw the bodies at document end rather than losing them.
+        if (node.notes?.length) this.collectedNotes.push(...node.notes);
         // Preserve source pagination: start a fresh page between consecutive page (or slide) nodes.
         if (topLevel && (node.type === 'page' || node.type === 'slide')) {
             if (this.prevPaginated === node.type) this.newPage();
@@ -378,8 +383,25 @@ class NativeLayout {
             const bytes = base64ToBytes(attachment.data);
             const isJpg = /jpe?g/i.test(attachment.extension || '') || attachment.mimeType === 'image/jpeg';
             const img = isJpg ? await this.pdf.embedJpg(bytes) : await this.pdf.embedPng(bytes);
-            let w = node.bounds?.width ? node.bounds.width : img.width;
-            let h = node.bounds?.height ? node.bounds.height : img.height;
+            // Resolve the draw size in points, by priority: an explicit ImageMetadata.width/height
+            // (a length like '200px'/'3cm', a number in px, or a '%' of the content width), then PDF
+            // page bounds (already points), then the intrinsic pixel size converted px->pt. Aspect ratio
+            // is preserved from the intrinsic image when only a width is given.
+            const ratio = img.width ? img.height / img.width : 1;
+            const meta2 = node.metadata as any;
+            const pctOf = (v: any): number | null => (typeof v === 'string' && /^\s*[\d.]+\s*%\s*$/.test(v)) ? parseFloat(v) / 100 : null;
+            let w: number, h: number;
+            if (meta2?.width != null) {
+                const p = pctOf(meta2.width);
+                w = p != null ? this.contentWidth * p : toPoints(meta2.width, img.width * 0.75);
+                h = (meta2.height != null && pctOf(meta2.height) == null) ? toPoints(meta2.height, w * ratio) : w * ratio;
+            } else if (node.bounds?.width) {
+                w = node.bounds.width;
+                h = node.bounds.height || w * ratio;
+            } else {
+                w = img.width * 0.75; // intrinsic pixels -> points (96dpi), not points 1:1
+                h = img.height * 0.75;
+            }
             const scale = Math.min(1, this.contentWidth / w);
             w *= scale; h *= scale;
             if (h > this.bottom - this.margin.top) { const s = (this.bottom - this.margin.top) / h; w *= s; h *= s; }
@@ -392,6 +414,17 @@ class NativeLayout {
         }
         // 'image+ocr-text': draw the recognized text just below the successfully embedded image.
         if (mode === 'image+ocr-text' && ocr) this.paragraph(node);
+    }
+
+    /** Draws the footnote/endnote bodies gathered during the walk, under a short separating rule. */
+    flushNotes(): void {
+        if (!this.collectedNotes.length) return;
+        this.y += 8;
+        this.ensureSpace(14);
+        const yy = this.pageH - this.y;
+        this.page.drawLine({ start: { x: this.margin.left, y: yy }, end: { x: this.margin.left + Math.min(180, this.contentWidth), y: yy }, thickness: 0.5, color: this.lib.rgb(0.7, 0.7, 0.7) });
+        this.y += 8;
+        for (const n of this.collectedNotes) this.note(n);
     }
 
     private table(node: OfficeContentNode): void {
@@ -563,7 +596,14 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
     const margin = { top: mv(pc.margin?.top), right: mv(pc.margin?.right), bottom: mv(pc.margin?.bottom), left: mv(pc.margin?.left) };
 
     const layout = new NativeLayout(pdf, lib, fonts, w, h, margin, config, ast);
+    // The native engine reflows a single stream and has no running page furniture, so master-page
+    // headers/footers (ast.auxiliary, present only when parsing kept them) are drawn once - headers
+    // before the body, footers after - rather than dropped. Footnote/endnote bodies gathered during the
+    // walk are drawn last.
+    for (const n of ast.auxiliary?.headers || []) await layout.render(n);
     for (const node of ast.content) await layout.render(node, true);
+    for (const n of ast.auxiliary?.footers || []) await layout.render(n);
+    layout.flushNotes();
 
     return await pdf.save();
 }
