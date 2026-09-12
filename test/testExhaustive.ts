@@ -1225,6 +1225,31 @@ async function testGeneratedOutput(): Promise<void> {
     assert.strictEqual(embedMeta(await parseHtml(ytLabelHtml))?.label, 'Carl Sagan', '10.B: the youtube label round-trips through editor-HTML');
     assert.ok(!/data-embed-label/.test(String((await OfficeGenerator.generate(await parseHtml('<div data-youtube-video="abc"></div>'), 'html', { htmlConfig: { standalone: false } })).value)), '10.B: an unlabeled youtube embed emits no label attribute (byte-identical)');
 
+    // Fable review: the native PDF engine (engine:'native') must draw footnote/endnote bodies, which
+    // parsers attach to the TEXT RUN (not the paragraph) - a run never passes through render(), so a
+    // render()-level sweep dropped them. Build a doc whose note hangs off a text child, render a native
+    // PDF, re-parse it, and assert the note body is present.
+    const noteAst: any = {
+        type: 'docx', metadata: {}, config: {}, attachments: [],
+        content: [{ type: 'paragraph', children: [
+            { type: 'text', text: 'Body text with a marker', notes: [{ type: 'note', children: [{ type: 'text', text: 'UNIQUE_FOOTNOTE_BODY_42' }] }] },
+        ] }],
+    };
+    const nativePdf = (await OfficeGenerator.generate(noteAst, 'pdf', { pdfConfig: { engine: 'native' } })).value as Uint8Array;
+    const nativePdfText = (await (await OfficeParser.parseOffice(Buffer.from(nativePdf))).to('text')).value as string;
+    assert.ok(nativePdfText.includes('UNIQUE_FOOTNOTE_BODY_42'), 'native PDF draws footnote bodies attached to text runs');
+
+    // Fable review: a self-contained (standalone) HTML document must inline every image regardless of
+    // maxInlineImageBytes (a name reference there is a broken image); a fragment keeps the cap but must
+    // warn (IMAGE_NOT_INLINED) rather than silently emit a bare src.
+    const bigImg = () => ({ type: 'docx', metadata: {}, config: {}, content: [{ type: 'image', metadata: { attachmentName: 'big.png' } }], attachments: [{ name: 'big.png', type: 'image', data: 'A'.repeat(2_200_000), mimeType: 'image/png', extension: 'png' }] } as any);
+    const bigStandalone = String((await OfficeGenerator.generate(bigImg(), 'html', { htmlConfig: { standalone: true } })).value);
+    assert.ok(/data:image\/png;base64,AAAA/.test(bigStandalone), 'standalone HTML inlines an image larger than maxInlineImageBytes');
+    let imgWarned = false;
+    const bigFragment = String((await OfficeGenerator.generate(bigImg(), 'html', { htmlConfig: { standalone: false }, onWarning: (w: any) => { if (w.code === 'IMAGE_NOT_INLINED') imgWarned = true; } })).value);
+    assert.ok(/src="big\.png"/.test(bigFragment) && !/data:image/.test(bigFragment), 'fragment HTML references an over-cap image by name');
+    assert.ok(imgWarned, 'over-cap image in a fragment emits an IMAGE_NOT_INLINED warning');
+
     console.log('  Generated output: All assertions passed ✓');
 }
 

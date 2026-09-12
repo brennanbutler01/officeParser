@@ -88,6 +88,8 @@ export enum OfficeWarningType {
     ANNOTATION_EXTRACTION_FAILED = 'ANNOTATION_EXTRACTION_FAILED',
     /** Failed to process an extracted image bitmap */
     IMAGE_PROCESSING_FAILED = 'IMAGE_PROCESSING_FAILED',
+    /** An image exceeded `maxInlineImageBytes` and was emitted as a name reference instead of inlined */
+    IMAGE_NOT_INLINED = 'IMAGE_NOT_INLINED',
     /** Warning about limitations of browser-based generation */
     BROWSER_GENERATION_LIMITATION = 'BROWSER_GENERATION_LIMITATION',
     /** Specified sheet range in Excel/ODS export was not found */

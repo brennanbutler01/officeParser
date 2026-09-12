@@ -260,9 +260,6 @@ class NativeLayout {
         // The caller's onNode hook can skip a node/subtree or replace its output, exactly as the
         // text-based generators honor it; applied before any default rendering (and before pagination).
         if (await this.applyOnNode(node)) return;
-        // Footnotes/endnotes hang off `node.notes` (not children), so the sibling generators all emit
-        // them; gather them here and draw the bodies at document end rather than losing them.
-        if (node.notes?.length) this.collectedNotes.push(...node.notes);
         // Preserve source pagination: start a fresh page between consecutive page (or slide) nodes.
         if (topLevel && (node.type === 'page' || node.type === 'slide')) {
             if (this.prevPaginated === node.type) this.newPage();
@@ -414,6 +411,17 @@ class NativeLayout {
         }
         // 'image+ocr-text': draw the recognized text just below the successfully embedded image.
         if (mode === 'image+ocr-text' && ocr) this.paragraph(node);
+    }
+
+    /**
+     * Deep-collects footnote/endnote bodies in document order. Parsers attach `.notes` to the TEXT
+     * RUN a marker sits in (e.g. WordParser), and a run is never passed to `render()` (its paragraph
+     * renders it via `collectRuns`), so a render()-level sweep misses them. Walk the whole subtree.
+     */
+    collectNotes(node: OfficeContentNode): void {
+        if (!node) return;
+        if (node.notes?.length) this.collectedNotes.push(...node.notes);
+        for (const c of node.children || []) this.collectNotes(c);
     }
 
     /** Draws the footnote/endnote bodies gathered during the walk, under a short separating rule. */
@@ -601,6 +609,9 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
     // before the body, footers after - rather than dropped. Footnote/endnote bodies gathered during the
     // walk are drawn last.
     for (const n of ast.auxiliary?.headers || []) await layout.render(n);
+    // Gather footnote/endnote bodies from the whole content tree first (they attach to text runs, deep
+    // in the tree, so a render()-level sweep would miss them), then render the body, then draw them.
+    for (const node of ast.content) layout.collectNotes(node);
     for (const node of ast.content) await layout.render(node, true);
     for (const n of ast.auxiliary?.footers || []) await layout.render(n);
     layout.flushNotes();

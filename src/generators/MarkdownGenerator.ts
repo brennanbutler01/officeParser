@@ -1,4 +1,4 @@
-import { AdmonitionMetadata, AdmonitionSyntax, AttributeListSyntax, BreakMetadata, CitationSyntax, CodeMetadata, ConversionResult, DefinitionListSyntax, DeprecatedAdmonitionFlavor, EmbedMetadata, EmbedSyntax, FallbackToHtmlConfig, FootnoteSyntax, GeneratorConfig, HeadingMetadata, HighlightSyntax, ImageMetadata, ListMetadata, MarkdownDialectConfig, MarkdownDialectPreset, NoteMetadata, OfficeContentNode, OfficeParserAST, StrikethroughSyntax, TableMetadata, TextMetadata, WikilinkSyntax } from '../types.js';
+import { AdmonitionMetadata, AdmonitionSyntax, AttributeListSyntax, BreakMetadata, CitationSyntax, CodeMetadata, ConversionResult, DefinitionListSyntax, DeprecatedAdmonitionFlavor, EmbedMetadata, EmbedSyntax, FallbackToHtmlConfig, FootnoteSyntax, GeneratorConfig, HeadingMetadata, HighlightSyntax, ImageMetadata, ListMetadata, MarkdownDialectConfig, MarkdownDialectPreset, NoteMetadata, OfficeContentNode, OfficeParserAST, OfficeWarningType, StrikethroughSyntax, TableMetadata, TextMetadata, WikilinkSyntax } from '../types.js';
 import { escapeHtml, markdownEscapeText, sanitizeCssValue, sanitizeMarkdownUrl, sanitizeUrl } from '../utils/sanitize.js';
 import { base64ByteLength } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
@@ -518,8 +518,15 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                     let src = meta?.url || meta?.attachmentName || '';
                     if (!meta?.url && meta?.attachmentName && this.ast) {
                         const attachment = this.getAttachment(meta.attachmentName);
-                        if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
-                            src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                        if (attachment) {
+                            const bytes = base64ByteLength(attachment.data);
+                            if (bytes <= this.config.maxInlineImageBytes) {
+                                src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                            } else {
+                                // Referenced by name (inlining a multi-MB image would overflow downstream
+                                // Markdown parsers); surface it so the degrade is not silent.
+                                this.warn(OfficeWarningType.IMAGE_NOT_INLINED, { name: meta.attachmentName, bytes, limit: this.config.maxInlineImageBytes });
+                            }
                         }
                     }
                     // Strip `[]` from alt (would close the `![...]`) and neutralize the URL scheme.

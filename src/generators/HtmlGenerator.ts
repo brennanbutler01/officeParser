@@ -116,6 +116,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     private inHeading = false;
     /** As `inHeading`, but for the inherited font size - see `hasUniformFormatting`. */
     private headingUniformSize = false;
+    /** Memoized: does this run emit a full standalone HTML document (vs a fragment)? */
+    private _standaloneDoc?: boolean;
+    private get emitsStandaloneDocument(): boolean {
+        if (this._standaloneDoc === undefined) this._standaloneDoc = resolveStandalone(this.config.htmlConfig.standalone).document;
+        return this._standaloneDoc;
+    }
 
     constructor(ast: OfficeParserAST, config?: GeneratorConfig<'html'>) {
         super('html', ast, config);
@@ -814,11 +820,21 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
                     const attachment = this.getAttachment(attachmentName);
-                    if (attachment && base64ByteLength(attachment.data) <= this.config.maxInlineImageBytes) {
-                        src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                    if (attachment) {
+                        const bytes = base64ByteLength(attachment.data);
+                        // A self-contained (standalone) HTML document must embed its images: a name
+                        // reference there is a broken image with no packager to resolve it. So the size
+                        // cap (which exists to keep a huge base64 line out of Markdown, or out of a
+                        // fragment a consumer post-processes) is lifted for a standalone document.
+                        const cap = this.emitsStandaloneDocument ? Infinity : this.config.maxInlineImageBytes;
+                        if (bytes <= cap) {
+                            src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
+                        } else {
+                            // Fragment over the cap: keep the name reference the consumer resolves, but
+                            // surface it so a large image degrading to a bare src is never silent.
+                            this.warn(OfficeWarningType.IMAGE_NOT_INLINED, { name: attachmentName, bytes, limit: this.config.maxInlineImageBytes });
+                        }
                     }
-                    // Oversized attachments (e.g. a scanned PDF page) are not inlined as a
-                    // multi-megabyte data URI; src stays the attachment name reference.
                 }
                 // Match CustomImage's exact data-width/data-align + style contract so a loaded
                 // image re-hydrates the editor node without losing size/alignment.
