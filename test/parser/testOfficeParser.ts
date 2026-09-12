@@ -132,7 +132,7 @@ const FULL_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxTableCells: 1000000
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
-    ignoreBounds: false,
+    ignorePageGeometry: false,
     password: '',
     onPassword: () => undefined,
     pdfParserConfig: {
@@ -3316,16 +3316,16 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('layout text', false, 'rendered', e?.message || String(e));
     }
 
-    // --- ignoreBounds strips geometry ---
+    // --- ignorePageGeometry strips geometry ---
     try {
-        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignoreBounds: true });
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignorePageGeometry: true });
         let anyBounds = false;
         ast.content.forEach((p: any) => walk(p, n => { if (n.bounds) anyBounds = true; }));
         const page1 = ast.content[0] as any;
-        add('ignoreBounds strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
-        add('ignoreBounds strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
+        add('ignorePageGeometry strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
+        add('ignorePageGeometry strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
     } catch (e: any) {
-        add('ignoreBounds parse', false, 'parsed', e?.message || String(e));
+        add('ignorePageGeometry parse', false, 'parsed', e?.message || String(e));
     }
 
     // --- ignoreInternalLinks removes internal link runs ---

@@ -23,7 +23,7 @@
  *   --serializeRawContent     Include stringified XML in metadata (default: true)
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX & ODF, default: false)
- *   --ignoreBounds            Omit per-node bounding boxes and page dimensions (default: false)
+ *   --ignorePageGeometry            Omit per-node bounding boxes and page dimensions (default: false)
  *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF)
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
  *   --verbose                 Show full error stack traces and warning logs
@@ -52,7 +52,7 @@ const knownParserBooleans = new Set([
     'ocr', 'extractAttachments', 'ignoreNotes', 'ignoreComments',
     'ignoreHeadersAndFooters', 'ignoreSlideMasters', 'ignoreInternalLinks',
     'includeRawContent', 'serializeRawContent', 'preserveXmlWhitespace', 'includeBreakNodes',
-    'ignoreBounds',
+    'ignorePageGeometry',
     // Dotted boolean keys are listed so a bare `--group.flag` does not swallow the following file
     // argument as its value (the isKnownBoolean check keys off the full dotted name).
     'htmlParserConfig.preserveAttributes', 'htmlParserConfig.preserveIframes', 'htmlParserConfig.embedFolkForms',
@@ -303,7 +303,7 @@ if (fileArg && !showHelp) {
     console.log('  --serializeRawContent                       Serialize raw XML content (default: true)');
     console.log('  --preserveXmlWhitespace                     Keep raw formatting space (default: false)');
     console.log('  --includeBreakNodes                         Include break nodes (DOCX & ODF, default: false)');
-    console.log('  --ignoreBounds                              Omit per-node bounding boxes and page dimensions (default: false)');
+    console.log('  --ignorePageGeometry                              Omit per-node bounding boxes and page dimensions (default: false)');
     console.log('  --verbose                                   Show full error stack traces and warning logs');
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');

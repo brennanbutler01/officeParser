@@ -11,7 +11,7 @@
  * - Semantic structure from tagged PDFs (headings, tables, lists, footnotes) via the structure tree,
  *   with a geometric fallback for untagged files. (Tagged path: {@link module:parsers/pdf/structTree}.)
  * - Per-node page geometry (`bounds`) and page dimensions, on by default, opt out with
- *   `ignoreBounds`.
+ *   `ignorePageGeometry`.
  * - Password-protected documents via the top-level `password`, or the `onPassword` callback to
  *   supply one lazily/interactively (the same config every encryptable format uses).
  * - Comprehensive metadata (including the document outline/bookmarks, page labels, and permissions),
@@ -204,7 +204,7 @@ function resolvePdfLayoutConfig(config: FullOfficeParserConfig): PdfLayoutConfig
         headingDetection: p.headingDetection ?? 'auto',
         normalizeText: p.normalizeText !== false,
         extractTextColor: !!p.extractTextColor,
-        includeBounds: !config.ignoreBounds,
+        includeBounds: !config.ignorePageGeometry,
     };
 }
 
@@ -581,7 +581,7 @@ function resolveSectionLinks(
         const pnum = t.pageIndex + 1;
         const info = pageInfo.get(pnum);
         const hs = headingsByPage.get(pnum);
-        // Match to the nearest heading only when geometry is present. Under `ignoreBounds` every
+        // Match to the nearest heading only when geometry is present. Under `ignorePageGeometry` every
         // heading y is undefined, so fall back to the page anchor rather than binding every link to
         // the first heading (which a y=0 tie would otherwise do).
         if (t.pdfY != null && info && info.rotation === 0 && hs) {

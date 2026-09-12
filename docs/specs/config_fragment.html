@@ -202,12 +202,13 @@
                     jumps are stripped from the AST. Only external URLs will be preserved. Honored for PDF as of v8.</td>
             </tr>
             <tr>
-                <td><code>ignoreBounds</code></td>
+                <td><code>ignorePageGeometry</code></td>
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
-                <td><strong>Page Geometry</strong>: When true, the geometric layout data (per-node <code>bounds</code> boxes and
-                    page dimensions) is omitted. Currently produced by the PDF parser; bounds are emitted by default
-                    (<code>ignoreBounds</code> defaults to false).</td>
+                <td><strong>Page Geometry</strong>: When true, the geometric layout data (each node's <code>bounds</code> box,
+                    its <code>{ x, y, width, height }</code> on the page, plus page dimensions) is omitted.
+                    Currently produced by the PDF parser; page geometry is emitted by default
+                    (<code>ignorePageGeometry</code> defaults to false).</td>
             </tr>
             <tr>
                 <td><code>password</code></td>

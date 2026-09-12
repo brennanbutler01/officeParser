@@ -340,7 +340,7 @@ const { value } = await ast.to('text', {
 | Footnotes/endnotes | emitted | emitted | `textConfig.renderNotes` (default `true`) |
 | Image placeholders | emitted | emitted | `includeImages` (default `true`) |
 
-For PDFs with page geometry (the default, unless `ignoreBounds` is set), `preserveLayout` renders
+For PDFs with page geometry (the default, unless `ignorePageGeometry` is set), `preserveLayout` renders
 each page as a spatial monospace grid so multi-column text and tables line up much like the original
 page, similar to `pdftotext -layout`. Use `textConfig.pageSeparator` (default `'\n'`, or `'\f'` for a
 form feed) to control what goes between pages.
@@ -1039,7 +1039,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `preserveXmlWhitespace` | `boolean` | `false` | Preserve original XML whitespace during serialization |
 | `includeBreakNodes` | `boolean` | `false` | Include typed break nodes: DOCX `w:br`/`w:cr`, ODF `fo:break-before`/`fo:break-after` and `text:soft-page-break` |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal cross-references from AST (now honored for PDF too) |
-| `ignoreBounds` | `boolean` | `false` | Omit the geometric layout data: per-node bounding boxes (`node.bounds`) and page dimensions. Currently produced by the PDF parser |
+| `ignorePageGeometry` | `boolean` | `false` | Omit the geometric layout data: per-node bounding boxes (`node.bounds`) and page dimensions. Currently produced by the PDF parser |
 | `fileType` | `SupportedFileType \| null` | `null` | **Required for text-based binary data** (`'md'`, `'html'`, `'csv'`) as these lack magic bytes. |
 | `csvDelimiter` | `string` | `','` | Input delimiter when parsing CSV files |
 | `decompressionLimits` | `DecompressionLimits` | `{ maxUncompressedBytes: 512MB, maxZipEntries: 10000, maxTableCells: 1000000 }` | **New**: Limits applied during ZIP extraction (and ODF cell expansion) to protect against excessive memory and resource usage |

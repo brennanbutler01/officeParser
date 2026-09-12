@@ -2842,7 +2842,7 @@
                 { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false },
                 { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true },
                 { id: 'cfg_ignoreInternalLinks_parser', label: 'Ignore Internal Links', type: 'switch', default: false },
-                { id: 'cfg_ignoreBounds', label: 'Ignore Bounds (PDF geometry)', type: 'switch', default: false },
+                { id: 'cfg_ignorePageGeometry', label: 'Ignore Page Geometry', type: 'switch', default: false },
                 { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true },
                 { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true },
                 { id: 'cfg_password', label: 'Password (PDF/OOXML/ODF)', type: 'text', default: '', width: '160px' },
@@ -4916,7 +4916,7 @@
                     extractAttachments: document.getElementById('cfg_extractAttachments').checked,
                     ocr: document.getElementById('cfg_ocr').checked,
                     ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
-                    ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
+                    ignorePageGeometry: document.getElementById('cfg_ignorePageGeometry').checked,
                     password: document.getElementById('cfg_password').value,
                     pdfParserConfig: {
                         useTags: document.getElementById('cfg_pdfUseTags').checked,
@@ -5237,7 +5237,7 @@
                         extractAttachments: document.getElementById('cfg_extractAttachments').checked,
                         ocr: document.getElementById('cfg_ocr').checked,
                         ignoreInternalLinks: document.getElementById('cfg_ignoreInternalLinks_parser').checked,
-                        ignoreBounds: document.getElementById('cfg_ignoreBounds').checked,
+                        ignorePageGeometry: document.getElementById('cfg_ignorePageGeometry').checked,
                         password: document.getElementById('cfg_password').value,
                         pdfParserConfig: {
                             useTags: document.getElementById('cfg_pdfUseTags').checked,

@@ -418,14 +418,14 @@ export interface CommonOfficeParserConfig {
      *
      * Default is false (bounds are emitted).
      */
-    ignoreBounds?: boolean;
+    ignorePageGeometry?: boolean;
 }
 
 /**
  * Format-specific options for PDF parsing.
  *
  * Mirrors {@link HtmlParserConfig}: everything intrinsically PDF-only lives here, while
- * cross-format flags (e.g. `ignoreBounds`, `ignoreInternalLinks`, `ignoreHeadersAndFooters`)
+ * cross-format flags (e.g. `ignorePageGeometry`, `ignoreInternalLinks`, `ignoreHeadersAndFooters`)
  * stay flat on {@link CommonOfficeParserConfig}.
  */
 export interface PdfParserConfig {
@@ -2350,13 +2350,13 @@ export interface PageMetadata {
     pageNumber: number;
     /**
      * Page width in PDF points (1/72 inch), after applying the page's own rotation. Matches the
-     * coordinate space of child {@link NodeBounds}. Absent when `ignoreBounds` is set.
+     * coordinate space of child {@link NodeBounds}. Absent when `ignorePageGeometry` is set.
      * @example 612 for US Letter portrait
      */
     pageWidth?: number;
     /**
      * Page height in PDF points (1/72 inch), after applying the page's own rotation.
-     * Absent when `ignoreBounds` is set.
+     * Absent when `ignorePageGeometry` is set.
      * @example 792 for US Letter portrait
      */
     pageHeight?: number;
@@ -2559,7 +2559,7 @@ export type ContentMetadata = SlideMetadata | SheetMetadata | HeadingMetadata | 
  * page's top-left corner and y growing downward, i.e. exactly what pdf.js renders at scale 1. This
  * matches the `pageWidth`/`pageHeight` on {@link PageMetadata}. Values are rounded to 2 decimals.
  *
- * Populated by the PDF parser unless `ignoreBounds` is set. Container nodes (paragraph, table,
+ * Populated by the PDF parser unless `ignorePageGeometry` is set. Container nodes (paragraph, table,
  * row, cell) carry the union of their children's boxes.
  */
 export interface NodeBounds {
@@ -2580,7 +2580,7 @@ export interface BaseContentNode {
     /**
      * Where this node sits on its page, as an axis-aligned box in page coordinates.
      * See {@link NodeBounds} for the coordinate convention. Present only when the parser knows
-     * the geometry (currently PDF) and `ignoreBounds` is not set.
+     * the geometry (currently PDF) and `ignorePageGeometry` is not set.
      */
     bounds?: NodeBounds;
 

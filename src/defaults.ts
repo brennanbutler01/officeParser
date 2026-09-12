@@ -48,7 +48,7 @@ const DEFAULT_HTML_PARSER_CONFIG: DeepRequired<HtmlParserConfig> = {
 /**
  * Default configuration for PDF parsing. Chosen so the out-of-the-box output is the highest-fidelity
  * one: tagged structure when present, column detection and hyphenation repair on, positions emitted
- * (governed by the flat `ignoreBounds`).
+ * (governed by the flat `ignorePageGeometry`).
  */
 const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
     useTags: true,
@@ -86,7 +86,7 @@ export const DEFAULT_OFFICE_PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
     pdfWorkerSrc: DEFAULT_PDF_WORKER_SRC,
     includeBreakNodes: false,
     ignoreInternalLinks: false,
-    ignoreBounds: false,
+    ignorePageGeometry: false,
     fileType: null,
     csvDelimiter: ',',
     decompressionLimits: {

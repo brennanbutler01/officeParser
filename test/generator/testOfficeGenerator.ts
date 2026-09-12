@@ -91,7 +91,7 @@ const PARSER_CONFIG: DeepRequired<OfficeParserConfig> = {
         maxTableCells: 1000000
     },
     htmlParserConfig: { preserveAttributes: false, preserveIframes: false, embedFolkForms: false },
-    ignoreBounds: false,
+    ignorePageGeometry: false,
     password: '',
     onPassword: () => undefined,
     pdfParserConfig: {
