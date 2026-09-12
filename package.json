@@ -126,7 +126,7 @@
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",
     "fflate": "^0.8.3",
-    "file-type": "^22.0.2",
+    "file-type": "^22.1.0",
     "pdfjs-dist": "6.2.108",
     "tesseract.js": "^7.0.0"
   },
@@ -144,8 +144,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
-    "@typescript-eslint/eslint-plugin": "^8.68.0",
-    "@typescript-eslint/parser": "^8.68.0",
+    "@typescript-eslint/eslint-plugin": "^8.70.0",
+    "@typescript-eslint/parser": "^8.70.0",
     "buffer": "^6.0.3",
     "dts-bundle-generator": "^9.5.1",
     "esbuild": "^0.28.2",
