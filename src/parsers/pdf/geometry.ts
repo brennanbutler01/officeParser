@@ -1,12 +1,36 @@
 /**
- * Pure geometry helpers for the PDF pipeline: bounding-box arithmetic and run normalization.
- * No pdf.js objects appear here; callers pass in the already-composed transform matrix.
+ * Pure geometry helpers for the PDF pipeline: affine-matrix and bounding-box arithmetic plus run
+ * normalization. No pdf.js objects appear here; callers pass in plain arrays of numbers.
  *
  * @module parsers/pdf/geometry
  */
 
 import { NodeBounds } from '../../types.js';
 import { RunAngle } from './pdfTypes.js';
+
+/** The identity affine matrix, as a fresh array the caller may mutate. */
+export function identityMatrix(): number[] {
+    return [1, 0, 0, 1, 0, 0];
+}
+
+/** Composes two affine matrices, `pdfjs.Util.transform(a, b)`, inlined to keep pdf.js types out. */
+export function mulMatrix(a: number[], b: number[]): number[] {
+    return [
+        a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+        a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
+        a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+    ];
+}
+
+/**
+ * Coerces a pdf.js matrix operand to a plain `number[6]`, or null if it is not a 6-element
+ * array-like. pdf.js passes some matrices (`setTextMatrix`, `paintFormXObjectBegin`) as a single
+ * argument that is a `Float32Array`, so `Array.isArray` is false and its six values sit at `[0]`.
+ */
+export function toMatrix6(m: any): number[] | null {
+    if (!m || typeof m.length !== 'number' || m.length < 6) return null;
+    return [+m[0], +m[1], +m[2], +m[3], +m[4], +m[5]];
+}
 
 /** Rounds to 2 decimals, collapsing -0 to 0. */
 export function round2(n: number): number {

@@ -46,8 +46,13 @@ interface ManagedWorker {
  * derived from their x position (using the page's median glyph width), the block is left-normalized
  * so there is no large leading indent, lines keep their top-to-bottom order, and a wide vertical gap
  * becomes a blank line. Falls back to the flat `page.text` when no word geometry is available.
+ *
+ * Exported for unit tests (it is not re-exported from the package entry point).
  */
-function layoutOcrText(page: any): string {
+/** Widest character column the layout reconstruction will pad to (a very wide page is ~200). */
+const MAX_OCR_COLUMNS = 1000;
+
+export function layoutOcrText(page: any): string {
     const blocks = page?.blocks;
     const flat: string = typeof page?.text === 'string' ? page.text : '';
     if (!Array.isArray(blocks) || !blocks.length) return flat;
@@ -92,7 +97,10 @@ function layoutOcrText(page: any): string {
         let s = '';
         let col = 0;
         for (const w of l.words) {
-            const target = Math.max(col, Math.round((w.x0 - minX) / charWidth));
+            // The column comes from Tesseract's own box coordinates, so it is clamped: a bogus x0
+            // (or a degenerate glyph width) must not turn into a line of hundreds of thousands of
+            // spaces, which would be a memory spike driven straight by the input image.
+            const target = Math.min(MAX_OCR_COLUMNS, Math.max(col, Math.round((w.x0 - minX) / charWidth)));
             if (target > col) { s += ' '.repeat(target - col); col = target; }
             else if (s.length && !s.endsWith(' ')) { s += ' '; col += 1; } // always keep words apart
             s += w.text;
@@ -505,6 +513,28 @@ class OcrSchedulerManager {
 }
 
 /**
+ * Reads an image buffer's media type from its magic bytes. The browser path wraps the bytes in a
+ * Blob, and that Blob's type is what the decoder trusts, so it has to match the actual bytes: PDF
+ * page images arrive as PNG, embedded pictures can be anything the document carried.
+ *
+ * Exported for unit tests (it is not re-exported from the package entry point).
+ *
+ * @param buf - The image bytes
+ * @returns The detected media type, defaulting to `image/png`
+ */
+export function sniffImageMime(buf: Buffer): string {
+    if (buf.length >= 4) {
+        if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+        if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+        if (buf[0] === 0x42 && buf[1] === 0x4d) return 'image/bmp';
+        if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+        if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+        if ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00)) return 'image/tiff';
+    }
+    return 'image/png';
+}
+
+/**
  * Performs Optical Character Recognition (OCR) on an image to extract text.
  * 
  * Uses Tesseract.js to recognize text in the provided image buffer.
@@ -515,6 +545,7 @@ class OcrSchedulerManager {
  * 
  * @param image - The image data as a Buffer, file path, or Blob
  * @param config - Optional configuration for language and custom worker paths
+ * @param mimeType - Media type of `image` when it is a Buffer; sniffed from its signature otherwise
  * @returns A promise that resolves to the recognized text as a string
  * @throws {Error} If the image cannot be processed or Tesseract initialization fails
  * 
@@ -526,14 +557,14 @@ class OcrSchedulerManager {
  * 
  * @see https://github.com/naptha/tesseract.js for supported languages and options
  */
-export const performOcr = async (image: Buffer | string, config?: OcrConfig): Promise<string> => {
+export const performOcr = async (image: Buffer | string, config?: OcrConfig, mimeType?: string): Promise<string> => {
     // Prepare image data
     let inputImage: any = image;
 
     // In browser environment, convert Buffer to Blob for better compatibility
     // @ts-ignore
     if (isBrowser && typeof Blob !== 'undefined' && Buffer.isBuffer(image)) {
-        inputImage = new Blob([image as any], { type: 'image/bmp' });
+        inputImage = new Blob([image as any], { type: mimeType || sniffImageMime(image) });
     }
 
     return await OcrSchedulerManager.getInstance().recognize(inputImage, config);

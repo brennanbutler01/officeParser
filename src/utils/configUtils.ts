@@ -23,12 +23,57 @@ const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype
 const RECOGNIZED_PARSER_KEYS = new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG));
 
 /**
- * Options renamed in a major release, mapped old -> new, so the "unrecognized option" warning can
- * point an upgrading caller straight at the replacement instead of only saying the key did nothing.
+ * Options renamed or removed in a major release, mapped old key -> what to use instead, so the
+ * "unrecognized option" warning can point an upgrading caller straight at the replacement instead
+ * of only saying the key did nothing.
+ *
+ * A value that starts with `(` is prose rather than a config path: the key has no one-to-one
+ * replacement, so the warning renders the sentence as-is (see `UNRECOGNIZED_CONFIG_OPTION`).
+ * Nested keys are spelled with their full dotted path, matching how the check below reports them.
  */
 const RENAMED_PARSER_KEYS: Record<string, string> = {
     ignoreBounds: 'ignorePageGeometry',
+    ocrLanguage: 'ocrConfig.language',
+    outputErrorToConsole: 'onWarning',
+    putNotesAtLast: '(removed; notes are attached to the node they belong to, as node.notes)',
+    'ocrConfig.autoTerminateTimeout': 'ocrConfig.timeout.autoTerminate',
 };
+
+/**
+ * Every recognized key of each nested parser-config container, keyed by the container's dotted path
+ * and derived from the defaults exactly as `RECOGNIZED_PARSER_KEYS` is.
+ *
+ * Nested keys need a check of their own because the merge below only ever spreads a caller's
+ * sub-object over the matching defaults. A key that no longer exists there (a v7
+ * `ocrConfig.autoTerminateTimeout`, say) is copied in and then simply never read, so the caller's
+ * setting is silently replaced by the default it meant to override.
+ */
+const RECOGNIZED_NESTED_PARSER_KEYS: Record<string, Set<string>> = {
+    ocrConfig: new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG.ocrConfig)),
+    'ocrConfig.timeout': new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG.ocrConfig.timeout)),
+    pdfParserConfig: new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG.pdfParserConfig)),
+    htmlParserConfig: new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG.htmlParserConfig)),
+    decompressionLimits: new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG.decompressionLimits)),
+};
+
+/**
+ * Appends every key of `container` that the container at `path` does not recognize to `out`, as a
+ * dotted path. Recurses into a sub-container that has recognized keys of its own (`ocrConfig.timeout`).
+ */
+function collectUnknownNestedKeys(container: unknown, path: string, out: string[]): void {
+    if (!container || typeof container !== 'object') return;
+    const recognized = RECOGNIZED_NESTED_PARSER_KEYS[path];
+    if (!recognized) return;
+    for (const key of Object.keys(container)) {
+        if (PROTOTYPE_POLLUTION_KEYS.has(key)) continue;
+        const fullPath = `${path}.${key}`;
+        if (RECOGNIZED_NESTED_PARSER_KEYS[fullPath]) {
+            collectUnknownNestedKeys((container as any)[key], fullPath, out);
+            continue;
+        }
+        if (!recognized.has(key)) out.push(fullPath);
+    }
+}
 
 /**
  * Returns a copy of `source` with prototype-reaching keys removed.
@@ -151,7 +196,14 @@ export function resolveParserConfig(
     // in a major release. Copying it onto `config` above is harmless, but leaving it silently unused
     // means the caller's intent never takes effect with no signal at all. One warning per resolve names
     // exactly which keys did nothing (and, for a known rename, the replacement to use instead).
+    //
+    // The nested containers are checked too, since a stale key inside one of them is the more
+    // dangerous case: the merges below quietly drop it and the caller keeps this version's default.
     const unknownKeys = Object.keys(rest).filter(k => !RECOGNIZED_PARSER_KEYS.has(k) && !PROTOTYPE_POLLUTION_KEYS.has(k));
+    collectUnknownNestedKeys(ocrConfig, 'ocrConfig', unknownKeys);
+    collectUnknownNestedKeys(pdfParserConfig, 'pdfParserConfig', unknownKeys);
+    collectUnknownNestedKeys(htmlParserConfig, 'htmlParserConfig', unknownKeys);
+    collectUnknownNestedKeys(decompressionLimits, 'decompressionLimits', unknownKeys);
     if (unknownKeys.length) {
         logWarning(OfficeWarningType.UNRECOGNIZED_CONFIG_OPTION, config, { keys: unknownKeys, renames: RENAMED_PARSER_KEYS });
     }

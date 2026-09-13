@@ -2,7 +2,7 @@ import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, DocxGeneratorConfig, GeneratorConfig, ImageMode, OfficeContentNode, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, fillSheetRowGaps, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 
 const EMU_PER_PT = 12700;
@@ -446,7 +446,10 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
         const ref = `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:${kind}Ref/></w:r>`;
         const m = /^<w:p>(<w:pPr>[\s\S]*?<\/w:pPr>)?/.exec(body);
         if (m) return body.slice(0, m[0].length) + ref + body.slice(m[0].length);
-        return ref + body;
+        // The body does not open with a paragraph (a note whose first block is a table). A run is not
+        // valid block content under <w:footnote>/<w:endnote>, so give the marker a paragraph of its own
+        // rather than emitting a bare <w:r> there.
+        return `<w:p><w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr>${ref}</w:p>` + body;
     }
 
     private noteIdMap = new Map<string, number>();
@@ -595,6 +598,15 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                     col++;
                     continue;
                 }
+                // Sparse source grid: ExcelParser emits only the non-empty cells, each carrying its own
+                // column index. Fill the skipped columns with empty cells so a value in D1 lands in
+                // column 4, rather than sliding left to whatever the running cursor happened to reach.
+                const nextCol = (cells[ci].metadata as any)?.col;
+                if (typeof nextCol === 'number' && nextCol > col && col < cols) {
+                    tcs += `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p/></w:tc>`;
+                    col++;
+                    continue;
+                }
                 const cell = cells[ci++];
                 const cmeta = cell.metadata as any;
                 const colSpan = Math.max(1, Math.min(cols, cmeta?.colSpan || 1));
@@ -633,6 +645,9 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                     col++; // gap column before a still-pending vertical merge
                     continue;
                 }
+                // Mirror table()'s sparse-grid placement, or the grid would be narrower than the rows.
+                const nextCol = (cells[ci].metadata as any)?.col;
+                if (typeof nextCol === 'number' && nextCol > col && col < 1000) { col++; continue; }
                 const cmeta = cells[ci++].metadata as any;
                 const colSpan = Math.max(1, Math.min(1000, cmeta?.colSpan || 1));
                 const rowSpan = Math.max(1, Math.min(1000, cmeta?.rowSpan || 1));
@@ -647,7 +662,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     private async sheet(node: OfficeContentNode): Promise<string> {
         const name = (node.metadata as any)?.sheetName;
         const heading = name ? `<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t xml:space="preserve">${xmlText(name)}</w:t></w:r></w:p>` : '';
-        const table = await this.table({ type: 'table', children: (node.children || []).filter(c => c.type === 'row') } as OfficeContentNode);
+        const table = await this.table({ type: 'table', children: fillSheetRowGaps((node.children || []).filter(c => c.type === 'row')) } as OfficeContentNode);
         return heading + table;
     }
 
@@ -675,6 +690,16 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 + `<pic:blipFill><a:blip r:embed="${rel.rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`
                 + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
                 + `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+            // A picture that is itself a link (ImageMetadata.link) wraps in a hyperlink run container,
+            // exactly as ODT wraps the frame in <draw:a>. Dropped here until now, so a linked image
+            // survived ODT round-trip but lost its link through DOCX.
+            if (meta?.link) {
+                const safeLink = sanitizeOfficePackageUrl(meta.link);
+                if (safeLink) {
+                    const rid = this.addRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', escapeXml(encUrl(safeLink)), 'External');
+                    drawing = `<w:hyperlink r:id="${rid}">${drawing}</w:hyperlink>`;
+                }
+            }
         } else if (meta?.url) {
             // Remote-only image: degrade to a link on the alt text (never fetch bytes: SSRF).
             const safe = sanitizeOfficePackageUrl(meta.url);

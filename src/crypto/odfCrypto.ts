@@ -32,12 +32,29 @@ const MAX_ITERATIONS = 1_000_000;
  * Document-wide PBKDF2 budget. An encrypted ODF derives a fresh key for every encrypted entry, so a
  * hostile file with thousands of entries, each individually plausible at the per-entry cap, could
  * still grind for a long time once the correct password is supplied. Real documents write ~100000
- * iterations per entry; even a media-heavy presentation (a few hundred encrypted image entries) stays
- * under this, while it caps the pathological case to a few seconds on the native path (and bounds the
- * `pbkdf2Sync` fallback to the low tens of seconds at worst).
+ * iterations per entry; even a media-heavy presentation (200+ encrypted image entries, i.e. 20M+
+ * iterations) stays under this. Spending the whole budget is not cheap: it costs roughly ten seconds
+ * of CPU on the native path, so the budget is carried across the caller's password retries (see
+ * {@link decryptOdf}'s `budget`) and unverified work is capped far lower by
+ * {@link MAX_UNVERIFIED_ITERATIONS}. Only a file that has already proved its password gets to spend
+ * the full amount.
  */
 const MAX_TOTAL_ITERATIONS = 50_000_000;
+/**
+ * PBKDF2 budget before any entry has proved the password. A wrong password (or a hostile file whose
+ * entries can never verify) must cost one entry's key derivation, not the whole document budget, and
+ * the caller re-asks up to `MAX_PASSWORD_ATTEMPTS` times. Real documents verify on their first
+ * encrypted entry, so this leaves ~20 entries of slack at the usual 100000 iterations.
+ */
+const MAX_UNVERIFIED_ITERATIONS = 2_000_000;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+
+/**
+ * Upper bound on `META-INF/manifest.xml` before it is parsed. The manifest is one short XML element
+ * per zip entry (~200 bytes), so even a presentation with thousands of entries stays well under a
+ * megabyte; the file is untrusted, so refuse an absurd manifest instead of parsing it.
+ */
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 
 /** Detection reads only the tiny manifest; never let a sniff inflate more than this. */
 const MAX_SNIFF_BYTES = 4 * 1024 * 1024;
@@ -111,13 +128,24 @@ function attr(scope: string, name: string): string {
 /** Parses every `<manifest:file-entry>` that carries encryption metadata. */
 function parseEncryptionData(manifest: string): Map<string, EncryptionData> {
     const map = new Map<string, EncryptionData>();
-    // Match a self-closing file-entry OR a child-bearing one. A naive `[\s\S]*?(?:\/>|</...>)` would
-    // stop at the first inner self-closing child (e.g. `<manifest:algorithm/>`), truncating the entry
-    // before `key-derivation`.
-    const entryRe = /<manifest:file-entry\b[^>]*\/>|<manifest:file-entry\b[^>]*>[\s\S]*?<\/manifest:file-entry>/g;
-    let m: RegExpExecArray | null;
-    while ((m = entryRe.exec(manifest))) {
-        const block = m[0];
+    // An entry is either self-closing or child-bearing: a naive `[\s\S]*?(?:\/>|</...>)` would stop at
+    // the first inner self-closing child (e.g. `<manifest:algorithm/>`), truncating the entry before
+    // `key-derivation`, and the corrected `[\s\S]*?</manifest:file-entry>` restarts its scan at every
+    // start token, so a hostile manifest of unclosed tokens costs O(n^2). Split on the start tag
+    // instead and bound each entry to its own piece: one linear pass, identical result on real files
+    // (file-entry elements never nest).
+    const START = '<manifest:file-entry';
+    const CLOSE = '</manifest:file-entry>';
+    const pieces = manifest.split(START);
+    for (let i = 1; i < pieces.length; i++) {
+        const rest = pieces[i];
+        if (/^\w/.test(rest)) continue;              // `\b` after the tag name: `<manifest:file-entryX` is not one
+        const tagEnd = rest.indexOf('>');
+        if (tagEnd < 0) continue;                    // unterminated start tag
+        const selfClosing = rest.charCodeAt(tagEnd - 1) === 0x2f; // '/'
+        const close = selfClosing ? -1 : rest.indexOf(CLOSE);
+        if (!selfClosing && close < 0) continue;     // no closing tag before the next entry
+        const block = START + (selfClosing ? rest.slice(0, tagEnd + 1) : rest.slice(0, close + CLOSE.length));
         if (!block.includes('encryption-data')) continue;
         const algo = /<manifest:algorithm\b[^>]*>/.exec(block)?.[0] || '';
         const kd = /<manifest:key-derivation\b[^>]*>/.exec(block)?.[0] || '';
@@ -148,10 +176,36 @@ function aesBitsFromAlgo(algoName: string): number {
     return 256;
 }
 
-function checksumHash(type: string, data: Uint8Array): Buffer {
-    const algo = /sha256/i.test(type) ? 'sha256' : 'sha1';
-    // ODF checksums cover the first 1024 bytes of the compressed (pre-encryption) data.
-    return createHash(algo).update(data.subarray(0, 1024)).digest();
+/**
+ * Checks a decrypted entry against its `manifest:checksum`: `true` when it matches (the password is
+ * proved), `false` when it definitely does not (the password is wrong), `null` when the entry carries
+ * no checksum we can reproduce.
+ *
+ * ODF checksums cover the first 1024 bytes of the compressed (pre-encryption) data, but only the "1K"
+ * checksum types (`...#sha256-1k`, `SHA1/1K`) hash exactly that prefix. The exact compressed length is
+ * no longer known either: CBC left the tail zero-padded to the 16-byte block. Past 1024 + one block the
+ * padding cannot reach into the hashed prefix, so a single hash is authoritative; below that we try
+ * each of the 16 possible unpadded lengths (16 hashes of at most 1 KiB, negligible) and report a miss
+ * as "unknown" rather than "wrong password", since a writer that padded differently must not turn a
+ * correct password into a rejection. The raw inflate in the caller settles those.
+ */
+function checksumVerdict(enc: EncryptionData, compressed: Buffer): boolean | null {
+    if (!enc.checksum.length || !/1k/i.test(enc.checksumType)) return null;
+    const algo = /sha256/i.test(enc.checksumType) ? 'sha256' : 'sha1';
+    const padded = compressed.length <= 1024 + 16;
+    for (let pad = 0; pad < (padded ? 16 : 1); pad++) {
+        const n = Math.min(compressed.length - pad, 1024);
+        if (n <= 0) break;
+        const actual = createHash(algo).update(compressed.subarray(0, n)).digest();
+        if (actual.subarray(0, enc.checksum.length).equals(enc.checksum)) return true;
+    }
+    return padded ? null : false;
+}
+
+/** Mutable PBKDF2 budget, shared across one document's password attempts. */
+export interface KeyDerivationBudget {
+    /** Iterations spent so far, against {@link MAX_TOTAL_ITERATIONS}. */
+    spent: number;
 }
 
 /**
@@ -204,10 +258,15 @@ async function pbkdf2Sha1(startKey: Uint8Array, salt: Uint8Array, iterations: nu
  * Decrypts an encrypted ODF buffer with the given password, returning a plain (re-zipped) ODF.
  * Throws {@link WRONG_PASSWORD} on a bad password, or a {@link DecryptionError} for an unsupported
  * cipher, an implausible key-derivation parameter, a decompression-limit breach, or a broken package.
+ *
+ * `budget` lets a caller that retries with several passwords (see `decryptIfNeeded`) share one
+ * key-derivation budget across those attempts, so a hostile file cannot re-spend the full allowance on
+ * every retry. Omitted, each call gets its own.
  */
-export async function decryptOdf(buf: Uint8Array, password: string, limits?: DecompressionLimits, config?: OfficeParserConfig): Promise<Uint8Array> {
+export async function decryptOdf(buf: Uint8Array, password: string, limits?: DecompressionLimits, config?: OfficeParserConfig, budget?: KeyDerivationBudget): Promise<Uint8Array> {
     const manifest = await readManifest(buf, limits, config);
     if (!manifest) throw new DecryptionError('encrypted ODF: missing META-INF/manifest.xml');
+    if (manifest.length > MAX_MANIFEST_BYTES) throw new DecryptionError(`encrypted ODF: implausible META-INF/manifest.xml size ${manifest.length} bytes`);
     const encMap = parseEncryptionData(manifest);
     const all = await unzipCapped(buf, () => true, limits, config); // encrypted entries are STORED -> raw bytes
     const maxBytes = maxBytesOf(limits);
@@ -215,9 +274,14 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
     const out: Zippable = {};
     const pwBytes = Buffer.from(password, 'utf8');
     // Both decompression and key-derivation caps are enforced across the whole document, not per entry:
-    // a single plausible entry says nothing about a file that repeats it ten thousand times.
-    let totalIterations = 0;
+    // a single plausible entry says nothing about a file that repeats it ten thousand times. The
+    // key-derivation budget additionally spans the caller's password retries when one is passed in.
+    const work = budget ?? { spent: 0 };
     let inflatedTotal = 0;
+    // Set once an entry has actually proved the password (a matching checksum, or a clean inflate).
+    // Until then only MAX_UNVERIFIED_ITERATIONS may be spent, so a wrong password fails in about the
+    // cost of one entry instead of the whole document budget.
+    let verified = false;
 
     for (const [name, bytes] of Object.entries(all)) {
         const enc = encMap.get(name);
@@ -235,9 +299,12 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
         if (!Number.isFinite(enc.iterationCount) || enc.iterationCount < 1 || enc.iterationCount > MAX_ITERATIONS) {
             throw new DecryptionError(`encrypted ODF: implausible iteration-count ${enc.iterationCount}`);
         }
-        totalIterations += enc.iterationCount;
-        if (totalIterations > MAX_TOTAL_ITERATIONS) {
+        work.spent += enc.iterationCount;
+        if (work.spent > MAX_TOTAL_ITERATIONS) {
             throw new DecryptionError('encrypted ODF: total key-derivation work exceeds the allowed budget');
+        }
+        if (!verified && work.spent > MAX_UNVERIFIED_ITERATIONS) {
+            throw new DecryptionError('encrypted ODF: no entry verified before the key-derivation budget for an unverified password ran out');
         }
 
         // Start key: hash of the password; then PBKDF2 (HMAC-SHA1) stretches it to the AES key. The
@@ -252,16 +319,13 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
         decipher.setAutoPadding(false);
         const compressed = Buffer.concat([decipher.update(aligned), decipher.final()]);
 
-        // The ODF checksum (SHA of the first 1 KiB of the compressed data) is authoritative, but only
-        // for the "1K" checksum types (`...#sha256-1k`, `SHA1/1K`) that hash exactly the first 1 KiB,
-        // and only when we can reproduce those 1 KiB exactly: the tail is zero-padded to the block size,
-        // so a short entry's checksum would cover padding the encoder never hashed. A whole-entry
-        // checksum type would never match a 1 KiB hash, so skip verification for those and rely on the
-        // raw inflate below (which effectively never succeeds on a wrong AES key).
-        if (enc.checksum.length && /1k/i.test(enc.checksumType) && compressed.length > 1024 + 16) {
-            const actual = checksumHash(enc.checksumType, compressed);
-            if (!actual.subarray(0, enc.checksum.length).equals(enc.checksum)) throw WRONG_PASSWORD;
-        }
+        // The entry's own checksum is the cheapest password check there is, so consult it on every
+        // entry and give up on the first definite mismatch (see checksumVerdict for what "definite"
+        // means). A whole-entry checksum type, or a short entry a writer padded unexpectedly, leaves the
+        // verdict open; the raw inflate below settles those (it effectively never succeeds on a bad key).
+        const verdict = checksumVerdict(enc, compressed);
+        if (verdict === false) throw WRONG_PASSWORD;
+        if (verdict === true) verified = true;
 
         let plain: Uint8Array;
         try { plain = inflateRawCapped(compressed, maxBytes - inflatedTotal); }
@@ -269,6 +333,7 @@ export async function decryptOdf(buf: Uint8Array, password: string, limits?: Dec
             if (e instanceof DecryptionError) throw e; // a real limit breach, not a wrong password
             throw WRONG_PASSWORD;                      // an undamaged package only fails to inflate on a bad key
         }
+        if (plain.length) verified = true; // real deflate output: the key, and so the password, was right
         inflatedTotal += plain.length;
         out[name] = plain;
     }

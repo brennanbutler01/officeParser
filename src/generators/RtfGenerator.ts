@@ -239,7 +239,11 @@ export class RtfGenerator extends BaseGenerator<'rtf'> {
                     if (mode === 'none') return '';
                     const meta = node.metadata as any;
                     const ocr = (node.text || '').trim();
-                    const ocrRtf = ocr ? `${this.escapeRtf(ocr)}\\par\n` : '';
+                    // Recognized text from a scanned image is column-aligned across several lines (the
+                    // OCR reader keeps that layout by default). A raw newline is just whitespace to an
+                    // RTF reader, so every line break has to become a \line or the whole block
+                    // collapses into one run. escapeRtf leaves newlines untouched, so split after it.
+                    const ocrRtf = ocr ? `${this.escapeRtf(ocr).split(/\r\n|\r|\n/).join('\\line ')}\\par\n` : '';
                     // ocr-text-only: just the recognized text.
                     if (mode === 'ocr-text-only') return ocrRtf;
 

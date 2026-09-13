@@ -2,7 +2,7 @@ import { zipSync, Zippable } from 'fflate';
 import { ConversionResult, GeneratorConfig, ImageMode, OdtGeneratorConfig, OfficeContentNode, OfficeParserAST, OfficeWarningType, TextFormatting } from '../types.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 import { escapeXml, isSafeStyleMapTag, sanitizeOfficePackageUrl, stripInvalidXmlChars } from '../utils/sanitize.js';
-import { ADMONITION_COLOR, decodeBase64, encUrl, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
+import { ADMONITION_COLOR, decodeBase64, encUrl, fillSheetRowGaps, hexColor, isHeaderRow, lengthToPt, marginPt, MIME_EXT, paperSizePt, resolveZipInstant, sniffImageSize, toBookmarkNameRaw, toW3CDTF } from '../utils/officeGenUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 
 /**
@@ -592,6 +592,15 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
                     col++;
                     continue;
                 }
+                // Sparse source grid: ExcelParser emits only the non-empty cells, each carrying its own
+                // column index. Fill the skipped columns with empty cells so a value in D1 lands in
+                // column 4, rather than sliding left to whatever the running cursor happened to reach.
+                const nextCol = (cells[ci].metadata as any)?.col;
+                if (typeof nextCol === 'number' && nextCol > col && col < cols) {
+                    cellsXml += '<table:table-cell><text:p/></table:table-cell>';
+                    col++;
+                    continue;
+                }
                 const cell = cells[ci++];
                 const cmeta = cell.metadata as any;
                 const colSpan = Math.max(1, Math.min(cols, cmeta?.colSpan || 1));
@@ -634,6 +643,9 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
                     col++; // gap column before a still-pending vertical merge
                     continue;
                 }
+                // Mirror table()'s sparse-grid placement, or the grid would be narrower than the rows.
+                const nextCol = (cells[ci].metadata as any)?.col;
+                if (typeof nextCol === 'number' && nextCol > col && col < 1000) { col++; continue; }
                 const cmeta = cells[ci++].metadata as any;
                 const colSpan = Math.max(1, Math.min(1000, cmeta?.colSpan || 1));
                 const rowSpan = Math.max(1, Math.min(1000, cmeta?.rowSpan || 1));
@@ -665,7 +677,7 @@ export class OdtGenerator extends BaseGenerator<'odt'> {
     private async sheet(node: OfficeContentNode): Promise<string> {
         const name = (node.metadata as any)?.sheetName;
         const heading = name ? `<text:h text:outline-level="2" text:style-name="Heading_20_2">${encodeOdfText(name)}</text:h>` : '';
-        const table = await this.table({ type: 'table', children: (node.children || []).filter(c => c.type === 'row') } as OfficeContentNode);
+        const table = await this.table({ type: 'table', children: fillSheetRowGaps((node.children || []).filter(c => c.type === 'row')) } as OfficeContentNode);
         return heading + table;
     }
 

@@ -62,6 +62,14 @@ interface Cluster {
 }
 
 /**
+ * Hard cap on how many clusters one run (or one super/subscript candidate) may examine. The scans
+ * below walk outward from the nearest baseline, so this only ever trims candidates that are further
+ * away than any real line could be; it exists so a hostile page of hundreds of thousands of runs
+ * cannot turn the search into quadratic work.
+ */
+const MAX_CLUSTER_SCAN = 512;
+
+/**
  * Groups normalized angle-0 runs into visual lines by baseline proximity, attaches stray
  * super/subscript fragments, splits lines at wide horizontal gaps (so columns and table cells become
  * separate atoms), then builds fragments with gap-derived spacing. Returns lines top-to-bottom.
@@ -71,20 +79,40 @@ export function buildLines(runs: RawRun[], cfg: PdfLayoutConfig): PdfLine[] {
     if (!items.length) return [];
     items.sort((a, b) => a.yBaseline - b.yBaseline || a.x - b.x);
 
+    // The runs are baseline-sorted, so every cluster mean is <= the current run's baseline and the
+    // array stays sorted by baseline (a cluster's mean only moves up, never past the current run, and
+    // is bubbled back into place when it does). That makes the search a short backward scan from the
+    // newest cluster instead of a full pass over every cluster, which is what made a page of many
+    // thousands of runs quadratic.
     let clusters: Cluster[] = [];
+    let maxFontSize = 0;
     for (const r of items) {
+        if (r.fontSize > maxFontSize) maxFontSize = r.fontSize;
+        // tol below is factor * min(r.fontSize, c.fontSize), so it can never exceed this reach.
+        const reach = Math.max(1.0, cfg.lineToleranceFactor * r.fontSize);
         let best: Cluster | undefined;
+        let bestIdx = -1;
         let bestDiff = Infinity;
-        for (const c of clusters) {
+        let scanned = 0;
+        for (let i = clusters.length - 1; i >= 0; i--) {
+            const c = clusters[i];
+            if (c.baseline < r.yBaseline - reach) break; // sorted: every earlier cluster is further away
+            if (++scanned > MAX_CLUSTER_SCAN) break;
             const diff = Math.abs(r.yBaseline - c.baseline);
             const tol = Math.max(1.0, cfg.lineToleranceFactor * Math.min(r.fontSize, c.fontSize));
-            if (diff <= tol && diff < bestDiff) { best = c; bestDiff = diff; }
+            if (diff <= tol && diff < bestDiff) { best = c; bestIdx = i; bestDiff = diff; }
         }
-        if (best) addToCluster(best, r);
+        if (best) {
+            addToCluster(best, r);
+            // The absorbed run raised this cluster's mean; slide it back into baseline order.
+            for (let i = bestIdx; i + 1 < clusters.length && clusters[i + 1].baseline < clusters[i].baseline; i++) {
+                const t = clusters[i]; clusters[i] = clusters[i + 1]; clusters[i + 1] = t;
+            }
+        }
         else clusters.push({ runs: [r], baseline: r.yBaseline, weight: Math.max(1, r.text.length), fontSize: r.fontSize, minX: r.x, maxX: r.x + r.width });
     }
 
-    clusters = mergeSuperSubClusters(clusters);
+    clusters = mergeSuperSubClusters(clusters, maxFontSize);
 
     const lines = clusters.flatMap(c => clusterToLines(c.runs, cfg));
     lines.sort((a, b) => a.baseline - b.baseline);
@@ -105,25 +133,43 @@ function addToCluster(c: Cluster, r: RawRun): void {
  * Folds small clusters that are really super/subscripts (a fraction of the size, baseline offset in
  * the super/subscript band, horizontally inside a larger cluster) back into that larger line. Fixes
  * the case where a raised "script" run would otherwise orphan onto its own line.
+ *
+ * The band is deliberately tight (half the host line's size, and the small cluster must sit inside
+ * that line's horizontal extent): a small-font caption sitting just under a body line is a separate
+ * line, not a subscript, and gluing it on would swallow it into the paragraph above with no space.
+ * `clusters` is baseline-sorted, so each candidate only scans its own neighbourhood.
  */
-function mergeSuperSubClusters(clusters: Cluster[]): Cluster[] {
+function mergeSuperSubClusters(clusters: Cluster[], maxFontSize: number): Cluster[] {
     const removed = new Set<Cluster>();
-    for (const s of clusters) {
+    const reach = 0.5 * maxFontSize; // diff <= 0.5 * l.fontSize, so nothing beyond this can match
+    for (let si = 0; si < clusters.length; si++) {
+        const s = clusters[si];
         if (removed.has(s)) continue;
         // Candidate small clusters only: short and small.
         const sChars = s.runs.reduce((n, r) => n + r.text.replace(/\s/g, '').length, 0);
         if (sChars > 12) continue;
         let target: Cluster | undefined;
         let bestDiff = Infinity;
-        for (const l of clusters) {
-            if (l === s || removed.has(l)) continue;
-            if (s.fontSize > 0.8 * l.fontSize) continue;
+        const consider = (l: Cluster): void => {
+            if (l === s || removed.has(l)) return;
+            if (s.fontSize > 0.8 * l.fontSize) return;
             const diff = Math.abs(s.baseline - l.baseline);
-            if (diff > 0.7 * l.fontSize) continue;
-            const within = s.minX >= l.minX - 2 && s.maxX <= l.maxX + 2;
-            const overlap = s.minX < l.maxX && s.maxX > l.minX;
-            if (!within && !overlap) continue;
+            if (diff > 0.5 * l.fontSize) return;
+            // The small cluster must *start* inside the host line's horizontal extent (give or take
+            // half an em): a trailing footnote marker may run past the last word, but something that
+            // begins left of the line, or past its end, is a neighbour and not a script.
+            const pad = Math.max(2, 0.5 * s.fontSize);
+            if (s.minX < l.minX - pad || s.minX > l.maxX + pad) return;
             if (diff < bestDiff) { bestDiff = diff; target = l; }
+        };
+        let scanned = 0;
+        for (let i = si - 1; i >= 0 && s.baseline - clusters[i].baseline <= reach; i--) {
+            if (++scanned > MAX_CLUSTER_SCAN) break;
+            consider(clusters[i]);
+        }
+        for (let i = si + 1; i < clusters.length && clusters[i].baseline - s.baseline <= reach; i++) {
+            if (++scanned > MAX_CLUSTER_SCAN) break;
+            consider(clusters[i]);
         }
         if (target) { for (const r of s.runs) addToCluster(target, r); removed.add(s); }
     }
@@ -370,25 +416,129 @@ interface ParaGroup {
     bold: boolean;
 }
 
+/** The concatenated visible text of one visual line. */
+function lineTextOf(l: PdfLine): string {
+    return l.fragments.map(f => f.text).join('');
+}
+
+/** Rough width of a line's first word, from its first fragment's average character width. */
+function firstWordWidth(l: PdfLine): number {
+    const f = l.fragments[0];
+    const text = (f?.text ?? '').trim();
+    if (!f || !text) return 0;
+    const word = text.split(/\s+/)[0] ?? '';
+    return (f.bounds.width / text.length) * word.length;
+}
+
+/**
+ * True when `prev` was broken by the right margin, so `l` continues it. A line that still had room
+ * for `l`'s first word ended because its paragraph did, not because it ran out of page.
+ */
+function wrappedInto(prev: PdfLine, l: PdfLine, maxRight: number): boolean {
+    return prev.x + prev.width + 0.25 * prev.fontSize + firstWordWidth(l) > maxRight;
+}
+
+/**
+ * Weaker form of {@link wrappedInto} for a list item, whose own indent moves its right edge: a line
+ * covering at least half the block's width plausibly ran out of room, while a short one (a one-line
+ * item) plainly did not, so what follows it is a new item and not its continuation.
+ */
+function couldWrap(prev: PdfLine, blockLeft: number, maxRight: number): boolean {
+    const width = maxRight - blockLeft;
+    return width <= 0 || prev.x + prev.width - blockLeft >= 0.5 * width;
+}
+
+/**
+ * Decides which left edge of a block starts a paragraph: the indented one (a first-line indent) or
+ * the outdented one (a hanging indent, as lists, bibliographies and definition lists use).
+ *
+ * The two are mirror images geometrically, so the edges alone cannot say. The evidence is the line
+ * *above* each edge change: when a line ran into the right margin, the line after it is a
+ * continuation, and the side its edge sits on is therefore the continuation side. A list marker is
+ * the same evidence in stronger form, since an item's wrapped lines always sit right of its marker.
+ * Each such line votes, and the majority decides the block; with no evidence either way, the
+ * indented edge starts the paragraph, which is the common first-line-indent case.
+ */
+function hasHangingIndents(lines: PdfLine[], marked: boolean[], preSplit: boolean[], edgeTol: number, maxRight: number): boolean {
+    let hanging = 0, firstLine = 0;
+    for (let i = 1; i < lines.length; i++) {
+        const dx = lines[i].x - lines[i - 1].x;
+        if (Math.abs(dx) <= edgeTol) continue;
+        if (preSplit[i]) continue;                           // already a boundary: says nothing about indents
+        if (marked[i - 1] && dx > 0) { hanging++; continue; } // an item's text, right of its marker
+        if (!wrappedInto(lines[i - 1], lines[i], maxRight)) continue;
+        if (dx > 0) hanging++; else firstLine++;
+    }
+    return hanging > firstLine;
+}
+
+/**
+ * Decides whether a change of left edge between two consecutive lines starts a new paragraph.
+ *
+ * @param firstIsItem - whether the group being accumulated starts on a line carrying a list marker
+ * @param hanging - whether this block's paragraphs start at the outdented edge
+ */
+function startsNewParagraph(l: PdfLine, prev: PdfLine, firstIsItem: boolean, hanging: boolean, edgeTol: number, blockLeft: number, maxRight: number): boolean {
+    if (prev.endsWithHyphen) return false;               // mid-word wrap: never a boundary
+    // Inside a list item, indentation says nothing: a hanging indent puts the item's wrapped lines
+    // right of its marker, a flush one keeps them at it. Only a line the item could actually have
+    // wrapped into continues it, so a short item line ends the item whatever follows it (the next
+    // item, whose own marker may be a picture the text layer cannot see, or a new paragraph).
+    if (firstIsItem) return !couldWrap(prev, blockLeft, maxRight);
+    const dx = l.x - prev.x;
+    if (Math.abs(dx) <= edgeTol) return false;           // same left edge: a continuation line
+    // Otherwise the block's indent style says which side starts a paragraph, and the line above has
+    // to corroborate a continuation: one that still had room for this line's first word ended its
+    // paragraph there, whatever the indent (a heading, or any short line, above an indented one).
+    if (hanging ? dx > 0 : dx < 0) return !wrappedInto(prev, l, maxRight);
+    return true;
+}
+
 function groupParagraphs(block: PdfLine[]): ParaGroup[] {
     const lines = [...block].sort((a, b) => a.baseline - b.baseline);
     const deltas: number[] = [];
     for (let i = 1; i < lines.length; i++) deltas.push(lines[i].baseline - lines[i - 1].baseline);
     const leading = median(deltas) || (lines[0]?.height ?? 12) * 1.2;
-    const blockLeft = Math.min(...lines.map(l => l.x));
     const spaceGuess = 0.25 * (lines[0]?.fontSize ?? 12);
+    // Two lines share a left edge when they start within a few spaces of each other; the block's
+    // right margin is what tells a wrapped line from one that ended its paragraph.
+    const edgeTol = Math.max(2, 4 * spaceGuess);
+    const blockLeft = Math.min(...lines.map(l => l.x));
+    const maxRight = Math.max(...lines.map(l => l.x + l.width));
+    // A line carries a marker when it starts with one and its item text follows ("• item", "1.
+    // item"); it *is* a marker when the whole line is one ("1.1.1."), which a producer emits as its
+    // own atom in the hanging indent beside the item text. Both start a group; only the first kind
+    // owns the lines below it, since a lone marker's text sits beside it, not under it.
+    const texts = lines.map(lineTextOf);
+    const marked = texts.map(t => detectLineMarker(t) !== null);
+    const anyMarker = texts.map((t, i) => marked[i] || STANDALONE_MARKER_RE.test(t.trim()));
+
+    // Reasons a line starts a new group whatever its indent: a wide vertical gap, a font-size change,
+    // a shared baseline (side-by-side atoms: a marker and its text, two cells, two columns the cut
+    // failed to separate), dot leaders (a table-of-contents entry is always its own line), or its own
+    // list marker, however tight the leading.
+    const preSplit = lines.map((l, i) => {
+        if (i === 0) return false;
+        const prev = lines[i - 1];
+        const gap = l.baseline - prev.baseline;
+        if (gap > 1.45 * leading) return true;
+        if (Math.abs(l.fontSize - prev.fontSize) / Math.max(prev.fontSize, 1) > 0.15) return true;
+        if (gap <= 0.5 * Math.min(l.fontSize, prev.fontSize)) return true;
+        if (/\.{4,}/.test(texts[i])) return true;
+        return anyMarker[i] && !prev.endsWithHyphen;
+    });
+    const hanging = hasHangingIndents(lines, marked, preSplit, edgeTol, maxRight);
 
     const groups: ParaGroup[] = [];
     let cur: PdfLine[] = [];
+    let firstIdx = 0;
     for (let i = 0; i < lines.length; i++) {
         const l = lines[i];
-        if (cur.length) {
-            const prev = cur[cur.length - 1];
-            const gap = l.baseline - prev.baseline;
-            const sizeShift = Math.abs(l.fontSize - prev.fontSize) / Math.max(prev.fontSize, 1) > 0.15;
-            const indent = l.x - blockLeft > 4 * spaceGuess && !prev.endsWithHyphen;
-            if (gap > 1.45 * leading || sizeShift || indent) { groups.push(finishGroup(cur)); cur = []; }
+        if (cur.length && (preSplit[i] || startsNewParagraph(l, lines[i - 1], marked[firstIdx], hanging, edgeTol, blockLeft, maxRight))) {
+            groups.push(finishGroup(cur));
+            cur = [];
         }
+        if (!cur.length) firstIdx = i;
         cur.push(l);
     }
     if (cur.length) groups.push(finishGroup(cur));
@@ -439,9 +589,14 @@ function romanValue(s: string): number {
     return total;
 }
 
-/** Detects a list marker at the start of a group's first line, or null. */
-function detectListMarker(group: ParaGroup): ListMarker | null {
-    const first = (group.lines[0]?.fragments[0]?.text ?? '').replace(/^\s+/, '');
+/**
+ * Detects a list marker at the start of a line's text, or null. The test runs on the whole line, not
+ * on its first fragment: a bullet drawn in a symbol font (Symbol, Wingdings, or any face the body
+ * text does not use) is always a fragment of its own, so matching only the first fragment would miss
+ * every such marker and leave the item as plain prose.
+ */
+function detectLineMarker(text: string): ListMarker | null {
+    const first = text.replace(/^\s+/, '');
     if (!first) return null;
     const u = UNORDERED_RE.exec(first);
     if (u) return { type: 'unordered', raw: u[0], number: null, strongBullet: u[1] !== '-' && u[1] !== '*' };
@@ -455,6 +610,12 @@ function detectListMarker(group: ParaGroup): ListMarker | null {
         return { type: 'ordered', raw: o[0], number: n, strongBullet: false };
     }
     return null;
+}
+
+/** Detects a list marker at the start of a group's first line, or null. */
+function detectListMarker(group: ParaGroup): ListMarker | null {
+    const first = group.lines[0];
+    return first ? detectLineMarker(lineTextOf(first)) : null;
 }
 
 /** Buckets marker left-edges into 0-based indent levels (each distinct column ~a nesting level). */
@@ -472,16 +633,33 @@ function indentLevels(lefts: number[]): (x: number) => number {
 }
 
 /** Removes a list marker (e.g. "•", "1.", "(a)") plus its trailing space from a node's aggregate
- *  text and its first text run. */
+ *  text and from its leading text runs. The marker can span more than one run (a symbol-font bullet
+ *  is its own run, its space belongs to the next), so it is consumed across them and any run left
+ *  empty is dropped rather than emitted as a stray formatting marker. */
 function stripMarkerFrom(node: OfficeContentNode, raw: string): void {
     const re = new RegExp('^\\s*' + escapeRe(raw.trim()) + '[ \\t\\u00a0]*');
     if (node.text) node.text = node.text.replace(re, '');
-    const strip = (n: OfficeContentNode): boolean => {
-        if (n.type === 'text' && typeof n.text === 'string' && re.test(n.text)) { n.text = n.text.replace(re, ''); return true; }
-        for (const c of n.children || []) if (strip(c)) return true;
-        return false;
+    const runs: OfficeContentNode[] = [];
+    const collect = (n: OfficeContentNode): void => {
+        if (n.type === 'text' && typeof n.text === 'string') runs.push(n);
+        for (const c of n.children || []) collect(c);
     };
-    for (const c of node.children || []) if (strip(c)) break;
+    for (const c of node.children || []) collect(c);
+    const m = re.exec(runs.map(r => r.text).join(''));
+    if (!m) return;
+    let left = m[0].length;
+    for (const r of runs) {
+        if (left <= 0) break;
+        const take = Math.min(left, (r.text as string).length);
+        r.text = (r.text as string).slice(take);
+        left -= take;
+    }
+    const prune = (n: OfficeContentNode): void => {
+        if (!n.children) return;
+        for (const c of n.children) prune(c);
+        n.children = n.children.filter(c => !(c.type === 'text' && c.text === '' && !c.children?.length));
+    };
+    prune(node);
 }
 
 // ── geometric table detection ─────────────────────────────────────────────────
@@ -530,13 +708,42 @@ export function detectTables(lines: PdfLine[], page: PageContext, doc: DocContex
     }
     for (const r of rows) r.sort((a, b) => a.x - b.x);
 
+    // Rows of a grid are vertically adjacent. Because the long (prose) lines were filtered out
+    // above, "consecutive" candidate rows can otherwise be hundreds of points apart with whole
+    // paragraphs between them, which is how an invoice's scattered label rows ("Invoice No: | 12345
+    // | Date:", then "Subtotal | $10 | Tax") used to splice into one bogus table. So a run is broken
+    // wherever a prose line lies between two rows, or the pitch between them jumps.
+    const excludedYs = lines.filter(l => l.fragments.length && lineLen(l) > 40).map(l => l.baseline).sort((a, b) => a - b);
+    const proseBetween = (a: number, b: number) => excludedYs.some(y => y > a && y < b);
+    const rowY = (r: PdfLine[]) => r[0].baseline;
+    const adjacentRuns = (rowRun: PdfLine[][]): PdfLine[][][] => {
+        const pitches: number[] = [];
+        for (let k = 1; k < rowRun.length; k++) pitches.push(rowY(rowRun[k]) - rowY(rowRun[k - 1]));
+        const pitch = median(pitches.filter(p => p > 0)) || 0;
+        const out: PdfLine[][][] = [];
+        let cur: PdfLine[][] = [];
+        for (let k = 0; k < rowRun.length; k++) {
+            if (cur.length) {
+                const gap = rowY(rowRun[k]) - rowY(rowRun[k - 1]);
+                if ((pitch > 0 && gap > 2 * pitch) || proseBetween(rowY(rowRun[k - 1]), rowY(rowRun[k]))) { out.push(cur); cur = []; }
+            }
+            cur.push(rowRun[k]);
+        }
+        if (cur.length) out.push(cur);
+        return out;
+    };
+
     let i = 0;
+    const candidates: PdfLine[][][] = [];
     while (i < rows.length) {
         if (rows[i].length < 2) { i++; continue; }
         let j = i;
         while (j < rows.length && rows[j].length >= 2) j++;
-        const run = rows.slice(i, j);
+        candidates.push(...adjacentRuns(rows.slice(i, j)));
         i = j;
+    }
+
+    for (const run of candidates) {
         if (run.length < 3) continue;
 
         const cells = run.flat();

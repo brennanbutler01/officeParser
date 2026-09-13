@@ -22,8 +22,8 @@ const ERRORHEADER = "[OfficeParser]: ";
  * Some entries are functions that take parameters to build dynamic messages.
  */
 const ERROR_MESSAGES: Record<OfficeErrorType, string | ((...args: any[]) => string)> = {
-    [OfficeErrorType.EXTENSION_UNSUPPORTED]: (ext: string) => `Sorry, OfficeParser currently supports docx, pptx, xlsx, odt, odp, ods, pdf, rtf, md, html, csv, epub files only. Create a ticket in Issues on github to add support for ${ext} files. Stay tuned for further updates.`,
-    [OfficeErrorType.FORMAT_UNSUPPORTED]: (format: string) => `Sorry, OfficeGenerator does not support generating '${format}' files. Supported formats: json, text, md, html, csv, rtf, pdf, chunks, epub.`,
+    [OfficeErrorType.EXTENSION_UNSUPPORTED]: (ext: string) => `Sorry, OfficeParser currently supports docx, pptx, xlsx, odt, odp, ods, odg, pdf, rtf, md, html, csv, epub files only. Create a ticket in Issues on github to add support for ${ext} files. Stay tuned for further updates.`,
+    [OfficeErrorType.FORMAT_UNSUPPORTED]: (format: string) => `Sorry, OfficeGenerator does not support generating '${format}' files. Supported formats: json, text, md, html, csv, rtf, pdf, docx, odt, epub, chunks.`,
     [OfficeErrorType.FILE_CORRUPTED]: (filepath: string) => `Your file ${filepath} seems to be corrupted. If you are sure it is fine, please create a ticket in Issues on github with the file to reproduce error.`,
     [OfficeErrorType.FILE_DOES_NOT_EXIST]: (filepath: string) => `File ${filepath} could not be found! Check if the file exists or verify if the relative path to the file is correct from your terminal's location.`,
     [OfficeErrorType.LOCATION_NOT_FOUND]: (location: string) => `Entered location ${location} is not reachable! Please make sure that the entered directory location exists. Check relative paths and reenter.`,
@@ -84,8 +84,16 @@ const WARNING_MESSAGES: Record<OfficeWarningType, string | ((...args: any[]) => 
     [OfficeWarningType.PDF_STRUCT_TREE_UNRELIABLE]: (reason: string) => `PDF tagged-structure tree was not used${reason ? ` (${reason})` : ''}; recovered structure from page geometry instead.`,
     [OfficeWarningType.PDF_TEXT_ENCODING_SUSPECT]: (info: string) => `PDF text extraction produced mostly unmappable glyphs${info ? ` (${info})` : ''}; the font is likely missing a usable ToUnicode map, so the extracted text may be garbage. Consider OCR.`,
     [OfficeWarningType.PDF_NO_TEXT_EXTRACTED]: (pages: number) => `No text was extracted from this PDF${pages ? ` (${pages} page${pages === 1 ? '' : 's'})` : ''}. It is very likely a scanned or image-only document with no text layer; set 'ocr: true' (with 'extractAttachments: true') to recognize text from the page images.`,
+    [OfficeWarningType.PDF_OUTLINE_TRUNCATED]: (reason: string) => `PDF document outline (bookmarks) is incomplete${reason ? ` (${reason})` : ''}; ast.auxiliary.outline holds only what was recovered.`,
     [OfficeWarningType.UNRECOGNIZED_CONFIG_OPTION]: (info: { keys: string[], renames?: Record<string, string> }) => {
-        const detail = info.keys.map(k => info.renames?.[k] ? `'${k}' (renamed to '${info.renames[k]}')` : `'${k}'`).join(', ');
+        const detail = info.keys.map(k => {
+            const replacement = info.renames?.[k];
+            if (!replacement) return `'${k}'`;
+            // A replacement starting with '(' is prose, not a config path: the option was removed with
+            // no one-to-one successor, so the sentence is rendered as written instead of being quoted
+            // as a key the caller could switch to.
+            return replacement.startsWith('(') ? `'${k}' ${replacement}` : `'${k}' (use '${replacement}' instead)`;
+        }).join(', ');
         return `Unrecognized config option${info.keys.length === 1 ? '' : 's'}: ${detail}. ${info.keys.length === 1 ? 'It was' : 'They were'} ignored and had no effect. Check for a typo or a key renamed in a major release.`;
     }
 };

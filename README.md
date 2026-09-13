@@ -137,10 +137,13 @@ npx officeparser my_document --fileType=docx --to=json
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--to` | `json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks` | `json` | Output format |
-| `--output` | path | — | Write output to a file |
-| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | — | Explicitly override input file type detection |
+| `--to` | `json\|text\|md\|html\|csv\|rtf\|pdf\|docx\|odt\|epub\|chunks` | `json` | Output format |
+| `--output` | path | (none) | Write output to a file |
+| `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | (none) | Explicitly override input file type detection |
 | `--ocr` | boolean | `false` | Enable OCR for images |
+| `--ocrConfig.language` | string | `eng` | Tesseract language(s), e.g. `deu` or `eng+fra` |
+| `--ocrConfig.preserveLayout` | boolean | `true` | Keep the line layout of recognized text |
+| `--password` | string | (none) | Password for an encrypted document (PDF, OOXML, or ODF) |
 | `--extractAttachments` | boolean | `false` | Extract images/charts as Base64 |
 | `--ignoreNotes` | boolean | `false` | Ignore footnotes/endnotes/speaker notes |
 | `--ignoreComments` | boolean | `false` | Ignore inline comments |
@@ -153,15 +156,31 @@ npx officeparser my_document --fileType=docx --to=json
 | `--serializeRawContent` | boolean | `true` | Include stringified XML in metadata |
 | `--preserveXmlWhitespace` | boolean | `false` | Keep raw formatting space |
 | `--includeBreakNodes` | boolean | `false` | Include break nodes (DOCX and ODF) |
+| `--ignorePageGeometry` | boolean | `false` | Omit per-node bounding boxes and page dimensions |
+| `--pdfParserConfig.useTags` | boolean | `true` | Use the PDF tag tree; `false` forces geometry-only structure |
+| `--pdfParserConfig.detectColumns` | boolean | `true` | Multi-column reading-order detection |
+| `--pdfParserConfig.pageRange` | string | all | Parse only the given pages, e.g. `1-3,7` |
+| `--pdfParserConfig.headingDetection` | `auto\|font-size\|off` | `auto` | How headings are inferred on the geometry path |
+| `--pdfParserConfig.mergeHyphenatedWords` | boolean | `true` | Rejoin words hyphenated across line breaks |
+| `--pdfParserConfig.normalizeText` | boolean | `true` | Unicode/ligature normalization of extracted text |
+| `--pdfParserConfig.extractTextColor` | boolean | `false` | Record each run's fill colour in `formatting.color` |
 | `--verbose` | boolean | `false` | Show full error stack traces and warning logs |
 | `--includeFormatting` | boolean | `true` | Include formatting style map matching |
 | `--renderMetadata` | boolean | `false` | Render metadata as visible content in the generated output |
+| `--includeImages` | `image-only\|image+ocr-text\|ocr-text-only\|none` | `image-only` | How image nodes render. Works as `--includeImages=<mode>` or `--includeImages <mode>`; a bare `--includeImages` means `image-only` |
+| `--maxInlineImageBytes` | number | `1500000` | Largest image HTML/Markdown inlines as a `data:` URI (`0` never inlines) |
 | `--htmlConfig.containerWidth` | string \| number | `auto` | HTML output container width (e.g. `900px`, `100%`) |
-| ~~`--format`~~ | `json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks` | `json` | **Deprecated.** Use `--to` |
+| `--textConfig.pageSeparator` | string | `\n` | Separator written between pages in text output |
+| `--pdfConfig.engine` | `html\|native` | `html` | PDF engine: Puppeteer (`html`) or pdf-lib (`native`, no browser) |
+| ~~`--format`~~ | `json\|text\|md\|html\|csv\|rtf\|pdf\|docx\|odt\|epub\|chunks` | `json` | **Deprecated.** Use `--to` |
 | ~~`--toText`~~ | | | **Removed in v8.** Use `--to=text`. |
 | ~~`--ocrLanguage`~~ | | | **Removed in v8.** Use `--ocrConfig.language`. |
 | ~~`--putNotesAtLast`~~ | | | **Removed in v8.** Notes are attached structurally via `node.notes`. |
 | ~~`--outputErrorToConsole`~~ | | | **Removed in v8.** Use `--verbose`. |
+
+Every removed flag above exits with status 1 and prints its replacement, rather than being accepted
+and ignored. An unrecognized or renamed **config** key (say `--ignoreBounds`) is not fatal, but the
+CLI always prints the warning naming its replacement, with or without `--verbose`.
 
 ---
 
@@ -1092,7 +1111,7 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 | `renderMetadata` | `boolean` | `false` | Render title/author as visible header block |
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
 | `includeImages` | `boolean \| 'image-only' \| 'image+ocr-text' \| 'ocr-text-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocr-text'` (image then its recognized/OCR text); `'ocr-text-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocr-text'`), or just the OCR text for `'ocr-text-only'` |
-| `maxInlineImageBytes` | `number` | `1500000` | Max decoded image size, in bytes, that is inlined as a `data:` URI (HTML/Markdown); the base64 URI itself is ~1/3 larger. Larger images render their text (e.g. OCR text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. `0` never inlines, `Infinity` always inlines |
+| `maxInlineImageBytes` | `number` | `1500000` | Max decoded image size, in bytes, that is inlined as a `data:` URI (HTML/Markdown); the base64 URI itself is ~1/3 larger, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. Under the default `image-only` mode an image over the cap renders its recognized/OCR text when it has any (multi-line OCR as a fenced block in Markdown), otherwise a compact name reference; Markdown still emits the `IMAGE_NOT_INLINED` warning. Plain text follows the same rule. **Standalone HTML always inlines**, whatever the cap: a self-contained document has nowhere else to resolve the image from. `0` never inlines, `Infinity` always inlines |
 | `includeCharts` | `boolean` | `true` | Include interactive charts (HTML only) |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output |
 | `ignoreDefaultStyleMap` | `boolean` | `false` | Disable built-in style mappings (e.g., "Heading 1" → h1) |
@@ -1549,9 +1568,9 @@ For a full debugging guide, visit the [Live Documentation](https://harshankur.gi
 ## Known Limitations
 
 1. **ODT/ODS Charts**: May show inaccurate data when the chart references external cell ranges or uses complex layout-based data.
-2. **PDF Images (Browser)**: Extracted as BMP files for cross-platform compatibility. Conversion is automatic.
+2. **PDF Images**: Extracted and re-encoded as PNG (`pdf_image_p<page>_<n>.png`, `image/png`) on both Node and the browser, since a PDF stores image data in formats no viewer opens directly. v7 emitted BMP; code that filters attachments by `.bmp` must be updated.
 3. **PDF structure without tags**: Tables, lists and headings come from the PDF's tag tree when present. For untagged PDFs they are recovered geometrically, which is best-effort: complex float-beside-text layouts and tables without a tag tree may not separate perfectly. Column reading order, paragraphs and word spacing are handled on both paths.
-4. **PDF text color, underline and strikethrough** are not extracted (they are drawn as separate graphics operators rather than carried as text properties). Vertical (top-to-bottom) writing is read but not laid out spatially. Table cell row/column spans are not exposed by the underlying library.
+4. **PDF text decoration and spans**: text colour is opt-in via `pdfParserConfig.extractTextColor` (off by default, since reading the fill colour per run costs an extra pass over the page operators). Underline and strikethrough are still not extracted: they are drawn as separate graphics operators rather than carried as text properties. Vertical (top-to-bottom) writing is read but not laid out spatially. Table cell `colSpan`/`rowSpan` are recovered best-effort on the tagged path, from the geometry of the empty placeholder cells the tag tree pads a merge with; untagged PDFs expose no spans.
 
 ---
 

@@ -17,7 +17,8 @@
     "./slim": {
       "types": "./dist/officeparser.browser.slim.d.ts",
       "browser": "./dist/officeparser.browser.slim.mjs",
-      "import": "./dist/officeparser.browser.slim.mjs"
+      "import": "./dist/officeparser.browser.slim.mjs",
+      "default": "./dist/officeparser.browser.slim.mjs"
     },
     "./browser-native-pdf": {
       "types": "./dist/officeparser.browser.d.ts",

@@ -539,9 +539,15 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                             if (bytes <= this.config.maxInlineImageBytes) {
                                 src = `data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`;
                             } else {
-                                // Referenced by name (inlining a multi-MB image would overflow downstream
-                                // Markdown parsers); surface it so the degrade is not silent.
+                                // Over the cap, so the picture itself cannot travel in the output
+                                // (inlining a multi-MB image would overflow downstream Markdown
+                                // parsers). Surface it, then keep the image's recognized text when it
+                                // has any - that is the readable content of a scanned page, and it is
+                                // what maxInlineImageBytes documents - falling back to the compact
+                                // name reference when there is none.
+                                // ('image+ocr-text' already emits both, so only 'image-only' changes.)
                                 this.warn(OfficeWarningType.IMAGE_NOT_INLINED, { name: meta.attachmentName, bytes, limit: this.config.maxInlineImageBytes });
+                                if (ocr && mode === 'image-only') return `${anchorPrefix}${ocrMd}`;
                             }
                         }
                     }

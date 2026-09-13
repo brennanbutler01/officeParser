@@ -122,6 +122,8 @@ export enum OfficeWarningType {
     PDF_TEXT_ENCODING_SUSPECT = 'PDF_TEXT_ENCODING_SUSPECT',
     /** A PDF yielded essentially no text; it is very likely a scanned/image-only document needing OCR */
     PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED',
+    /** A PDF's bookmark outline was cut short by the depth/size cap or could not be read; `ast.auxiliary.outline` holds only what was recovered */
+    PDF_OUTLINE_TRUNCATED = 'PDF_OUTLINE_TRUNCATED',
     /** A config option was passed that this version does not recognize (e.g. a key renamed in a major release); it had no effect */
     UNRECOGNIZED_CONFIG_OPTION = 'UNRECOGNIZED_CONFIG_OPTION'
 }
@@ -893,8 +895,17 @@ export interface CommonGeneratorConfig {
     includeImages?: boolean | ImageMode;
     /**
      * Maximum size, in bytes of decoded image data, of an image that HTML/Markdown will inline as a
-     * `data:` URI. An attachment larger than this is not inlined: the image node renders its text
-     * (e.g. OCR text) when it has any, otherwise a compact reference to the attachment name.
+     * `data:` URI.
+     *
+     * Over the cap under the default `'image-only'` mode, Markdown and plain text render the image's
+     * recognized (OCR) text when it has any (multi-line text as a fenced block in Markdown), and
+     * otherwise a compact reference to the attachment name; Markdown also emits the
+     * `IMAGE_NOT_INLINED` warning so a caller can ship the file alongside the output. Fragment HTML
+     * instead keeps `<img src="name">`, a reference an HTML consumer can resolve, and never falls
+     * back to text. Standalone HTML always inlines, whatever this value is: a standalone document
+     * has nowhere else to resolve the image from. Plain text never inlines at all, so for it the cap
+     * only decides whether a large image contributes its recognized text (over the cap) or the
+     * `[Image: name]` placeholder (under it).
      *
      * This guards against pathologically large single lines. A scanned PDF page, for instance, is
      * one big image; inlined as a multi-megabyte `data:` URI it can overflow downstream Markdown

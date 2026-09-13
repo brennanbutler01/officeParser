@@ -40,7 +40,7 @@ import { createAttachment } from '../utils/imageUtils.js';
 import { loadPdfJs } from '../utils/moduleLoader.js';
 import { performOcr } from '../utils/ocrUtils.js';
 import { collectColorMarks, ColorLookup, makeColorLookup } from './pdf/pdfColor.js';
-import { computeRunBox, roundBounds, rotateBoundsToRendered, unionAll } from './pdf/geometry.js';
+import { computeRunBox, identityMatrix, mulMatrix, roundBounds, rotateBoundsToRendered, toMatrix6, unionAll } from './pdf/geometry.js';
 import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
 import { blockToNodes, buildLines, computeDocContext, detectTables, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
 import { buildTaggedNodes } from './pdf/structTree.js';
@@ -220,7 +220,10 @@ function parsePageRange(spec: string | undefined, numPages: number): number[] {
         if (range) {
             const lo = parseInt(range[1], 10), hi = parseInt(range[2], 10);
             if (lo < 1 || hi < lo) return all();
-            for (let p = lo; p <= hi; p++) if (p <= numPages) pages.add(p);
+            // Clamp to the document before iterating, not inside the loop: "1-999999999999" would
+            // otherwise spin through a trillion integers and only then discard all but the first few.
+            const end = Math.min(hi, numPages);
+            for (let p = lo; p <= end; p++) pages.add(p);
         } else if (/^\d+$/.test(token)) {
             const p = parseInt(token, 10);
             if (p >= 1 && p <= numPages) pages.add(p);
@@ -366,6 +369,14 @@ function destTopY(explicit: any[]): number | null {
 }
 
 /**
+ * Upper bound on the named-destination cache. It exists only to bound memory on a pathological file;
+ * a real document (a hyperref thesis cross-references thousands of labels) must stay well under it,
+ * because a name past the cap resolves to a dead `#internal` link. Misses are cached too, so a
+ * repeated bad name costs one lookup, and this single bound covers both hits and misses.
+ */
+const MAX_DEST_CACHE = 50000;
+
+/**
  * Resolves an internal destination to its target page (0-based) and top y, or null when it cannot be
  * resolved cheaply. Named destinations are resolved via `getDestination` and cached.
  */
@@ -376,7 +387,7 @@ async function resolveDestFull(
         let explicit = dest;
         if (typeof dest === 'string') {
             if (cache.has(dest)) return cache.get(dest) ?? null;
-            if (cache.size >= 2000) return null;
+            if (cache.size >= MAX_DEST_CACHE) return null;
             explicit = await pdfDocument.getDestination(dest);
             if (!explicit) { cache.set(dest, null); return null; }
         }
@@ -476,7 +487,20 @@ function listOptionalContentLayers(oc: any): { name: string; visible: boolean }[
     return out;
 }
 
-/** Builds the document outline (bookmarks) as a tree of `list` nodes carrying destination links. */
+/** Nesting depth the outline walk will follow; deeper bookmarks are dropped, not recursed into. */
+const MAX_OUTLINE_DEPTH = 64;
+/** Total bookmarks converted; the rest are dropped. Bounds the per-item destination round-trips. */
+const MAX_OUTLINE_ITEMS = 10000;
+
+/**
+ * Builds the document outline (bookmarks) as a tree of `list` nodes carrying destination links.
+ *
+ * Walked iteratively and under both a depth and a total-item cap. pdf.js builds the outline
+ * iteratively with a RefSet, so a hostile `/First` chain 100k levels deep is handed back intact: a
+ * recursive conversion would blow the stack (`RangeError`) and take the whole parse down with it,
+ * and a flat outline of a million items would cost a million worker round-trips for its
+ * destinations. A truncated outline is reported as a warning; the rest of the document is unaffected.
+ */
 async function buildOutline(
     pdfDocument: any, destCache: Map<string, SectionTarget | null>, sectionLinks: SectionLinks, config: FullOfficeParserConfig,
 ): Promise<OfficeContentNode[] | undefined> {
@@ -484,33 +508,47 @@ async function buildOutline(
     try { outline = await pdfDocument.getOutline(); } catch { return undefined; }
     if (!Array.isArray(outline) || !outline.length) return undefined;
 
-    const convert = async (items: any[], depth: number): Promise<OfficeContentNode[]> => {
-        const nodes: OfficeContentNode[] = [];
-        for (const item of items) {
-            const title = typeof item?.title === 'string' ? item.title : '';
-            let link: string | undefined;
-            let linkType: 'internal' | 'external' | undefined;
-            if (item?.url) { link = item.url; linkType = 'external'; }
-            else if (item?.dest != null) {
-                const target = await resolveDestFull(item.dest, pdfDocument, destCache);
-                link = target ? sectionLinks.register(target) : '#internal';
-                linkType = 'internal';
-            }
-            const nested = Array.isArray(item?.items) && item.items.length ? await convert(item.items, depth + 1) : [];
-            const label: OfficeContentNode = { type: 'text', text: title };
-            if (link) label.metadata = { link, linkType };
-            nodes.push({
-                type: 'list',
-                text: title,
-                children: [label, ...nested],
-                metadata: { listType: 'unordered', indentation: depth, alignment: 'left', listId: 'pdf-outline', itemIndex: nodes.length },
-            });
-        }
-        return nodes;
-    };
+    const roots: OfficeContentNode[] = [];
+    // Explicit DFS stack: each frame is one sibling list plus the array its nodes are appended to.
+    const stack: { items: any[]; i: number; n: number; depth: number; out: OfficeContentNode[] }[] = [{ items: outline, i: 0, n: 0, depth: 0, out: roots }];
+    let count = 0;
+    let truncated = '';
+    while (stack.length) {
+        const frame = stack[stack.length - 1];
+        if (frame.i >= frame.items.length) { stack.pop(); continue; }
+        const item = frame.items[frame.i++];
+        if (count >= MAX_OUTLINE_ITEMS) { truncated = `more than ${MAX_OUTLINE_ITEMS} bookmarks`; break; }
+        count++;
 
-    const nodes = await convert(outline, 0);
-    return nodes.length ? nodes : undefined;
+        const title = typeof item?.title === 'string' ? item.title : '';
+        let link: string | undefined;
+        let linkType: 'internal' | 'external' | undefined;
+        if (item?.url) { link = item.url; linkType = 'external'; }
+        else if (item?.dest != null) {
+            const target = await resolveDestFull(item.dest, pdfDocument, destCache);
+            link = target ? sectionLinks.register(target) : '#internal';
+            linkType = 'internal';
+        }
+        const label: OfficeContentNode = { type: 'text', text: title };
+        if (link) label.metadata = { link, linkType };
+        const node: OfficeContentNode = {
+            type: 'list',
+            text: title,
+            children: [label],
+            metadata: { listType: 'unordered', indentation: frame.depth, alignment: 'left', listId: 'pdf-outline', itemIndex: frame.n++ },
+        };
+        frame.out.push(node);
+
+        const kids: any[] = Array.isArray(item?.items) ? item.items : [];
+        if (!kids.length) continue;
+        // Children are appended straight onto this node, after its label, as the child frame runs.
+        if (frame.depth + 1 >= MAX_OUTLINE_DEPTH) truncated = truncated || `nesting deeper than ${MAX_OUTLINE_DEPTH} levels`;
+        else stack.push({ items: kids, i: 0, n: 0, depth: frame.depth + 1, out: node.children! });
+    }
+    if (truncated) {
+        logWarning(OfficeWarningType.PDF_OUTLINE_TRUNCATED, config, truncated);
+    }
+    return roots.length ? roots : undefined;
 }
 
 /** Lowercases and hyphenates text into a URL-fragment-safe anchor slug (Unicode letters/digits kept). */
@@ -596,13 +634,23 @@ function resolveSectionLinks(
         return `#page=${pnum}`;
     });
 
-    const rewrite = (n: OfficeContentNode) => {
-        const meta = n.metadata as { link?: string } | undefined;
-        if (meta && typeof meta.link === 'string') {
-            const m = /^#__pdfsec_(\d+)$/.exec(meta.link);
-            if (m) meta.link = resolved[Number(m[1])] ?? '#internal';
+    // Iterative walk over children *and* the side branches (`notes`, `comments`): a cross-reference
+    // inside a footnote body hangs off `notes`, never off `children`, so a recursive children-only
+    // rewrite would ship the raw `#__pdfsec_k` placeholder. Iterative so a pathologically deep
+    // outline (see `buildOutline`) cannot blow the stack here either.
+    const rewrite = (root: OfficeContentNode) => {
+        const stack: OfficeContentNode[] = [root];
+        while (stack.length) {
+            const n = stack.pop()!;
+            const meta = n.metadata as { link?: string } | undefined;
+            if (meta && typeof meta.link === 'string') {
+                const m = /^#__pdfsec_(\d+)$/.exec(meta.link);
+                if (m) meta.link = resolved[Number(m[1])] ?? '#internal';
+            }
+            for (const c of n.children || []) stack.push(c);
+            for (const c of n.notes || []) stack.push(c);
+            for (const c of n.comments || []) stack.push(c);
         }
-        for (const c of n.children || []) rewrite(c);
     };
     for (const roots of rewriteRoots) for (const n of roots) rewrite(n);
 }
@@ -742,8 +790,26 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
         const ops = prefetchedOps || await page.getOperatorList();
         const fnArray = ops.fnArray;
         const argsArray = ops.argsArray;
+        // Graphics-state CTM, tracked exactly as `collectColorMarks` tracks it: an image fills the
+        // unit square under the CTM in force when it is painted, and that CTM is built from the page
+        // `cm`s, the surrounding `q`/`Q` brackets and any form XObject's `/Matrix`. Reading back only
+        // the nearest preceding `transform` gets the image's own placement matrix but none of its
+        // context, so a Chrome/Skia page (`1 0 0 -1 0 H cm` then `q w 0 0 h x y cm /Im Do Q`) placed
+        // every image mirrored, and an image inside a form got the form-local box.
+        let ctm = identityMatrix();
+        const ctmStack: number[][] = [];
         for (let j = 0; j < fnArray.length; j++) {
             const fn = fnArray[j];
+            if (fn === pdfjs.OPS.save) { ctmStack.push(ctm); continue; }
+            if (fn === pdfjs.OPS.restore) { if (ctmStack.length) ctm = ctmStack.pop()!; continue; }
+            if (fn === pdfjs.OPS.transform) { const m = toMatrix6(argsArray[j]); if (m) ctm = mulMatrix(ctm, m); continue; }
+            if (fn === pdfjs.OPS.paintFormXObjectBegin) {
+                ctmStack.push(ctm);
+                const m = toMatrix6(argsArray[j]?.[0]);
+                if (m) ctm = mulMatrix(ctm, m);
+                continue;
+            }
+            if (fn === pdfjs.OPS.paintFormXObjectEnd) { if (ctmStack.length) ctm = ctmStack.pop()!; continue; }
             if (fn === pdfjs.OPS.dependency) {
                 for (const dep of argsArray[j]) {
                     try {
@@ -776,12 +842,8 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
                         }
                     }
                     if (imgObj?.data && imgObj.width > 0 && imgObj.height > 0) {
-                        // Nearest preceding CTM gives the image placement (unit square mapped by [a,b,c,d,e,f]).
-                        let ctm: number[] | null = null;
-                        for (let k = j - 1; k >= 0; k--) {
-                            if (fnArray[k] === pdfjs.OPS.transform) { ctm = argsArray[k]; break; }
-                        }
-                        const bounds = ctm ? imageBounds(viewport, ctm) : { x: 0, y: 0, width: 0, height: 0 };
+                        // The tracked CTM is the image placement (unit square mapped by [a,b,c,d,e,f]).
+                        const bounds = imageBounds(viewport, ctm);
                         // Encode to PNG now, while this page's raw pixel buffer is in hand, so the large
                         // uncompressed RGBA data is freed as the page goes out of scope instead of being
                         // retained for every page until the emit pass. Encode failures are logged (as the
@@ -1035,7 +1097,13 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     }
 
     const allRuns = extracts.flatMap(e => e.runs);
-    const docCtx = computeDocContext(allRuns, pdfCfg, config.newlineDelimiter);
+    // Layout always runs in the authored (rotation-0) frame with geometry ON, whatever the caller
+    // asked for: reading-order splicing, table span inference and header/footer bands are geometric
+    // decisions, and making them depend on `ignorePageGeometry` or on `/Rotate` is how nodes ended up
+    // ordered differently (or arbitrarily) between the two. `finalizeBounds` then rotates the boxes
+    // into rendered space, or strips them entirely, once the page is assembled.
+    const layoutCfg: PdfLayoutConfig = { ...pdfCfg, includeBounds: true };
+    const docCtx = computeDocContext(allRuns, layoutCfg, config.newlineDelimiter);
 
     // Warn when extracted text is mostly unmappable glyphs (broken/missing ToUnicode), so consumers
     // can tell "genuinely empty" from "font could not be decoded" and reach for OCR.
@@ -1069,11 +1137,22 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
     const auxHeaders: OfficeContentNode[] = [];
     const auxFooters: OfficeContentNode[] = [];
 
+    const taggedListCounter = { n: 0 };
     let imageCounter = 0;
     for (const extract of extracts) {
         checkAbortSignal(config.abortSignal);
         const pageCtx: PageContext = { pageNumber: extract.pageNumber, authoredW: extract.authoredW, authoredH: extract.authoredH, rotation: extract.rotation };
-        const bodyRuns = extract.runs.filter(r => !r.inArtifact);
+        // The frame every node is built in: authored space, so a `/Rotate` page's boxes stay
+        // comparable to the runs they came from. `finalizeBounds` maps them at the end of the page.
+        const layoutCtx: PageContext = { ...pageCtx, rotation: 0 };
+
+        // Artifact runs split by where they render: only the top and bottom bands are running
+        // headers/footers. Everything else an Artifact scope covers (watermarks, figure labels,
+        // decorative headings, whatever an InDesign or Acrobat export marked as artifact) is real
+        // page text and joins the body flow instead of being dropped on the floor.
+        const { header: headerRuns, footer: footerRuns, body: midArtifacts } = splitArtifacts(extract);
+        const midSet = new Set(midArtifacts);
+        const bodyRuns = extract.runs.filter(r => !r.inArtifact || midSet.has(r));
 
         let pageContent: OfficeContentNode[] | null = null;
 
@@ -1085,8 +1164,10 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
                 const list = runsByMcid.get(r.mcid);
                 if (list) list.push(r); else runsByMcid.set(r.mcid, [r]);
             }
-            const { nodes, coveredMcids } = buildTaggedNodes(extract.structTree, runsByMcid, pageCtx, docCtx, { ignoreNotes: config.ignoreNotes });
-            const textMcids = new Set(bodyRuns.filter(r => r.text.trim() && r.mcid).map(r => r.mcid as string));
+            const { nodes, coveredMcids } = buildTaggedNodes(extract.structTree, runsByMcid, layoutCtx, docCtx, { ignoreNotes: config.ignoreNotes, listCounter: taggedListCounter });
+            // Coverage measures the tag tree against the page's *tagged* text, so artifact runs
+            // (which by definition live outside the structure) never drag the trust signal down.
+            const textMcids = new Set(bodyRuns.filter(r => !r.inArtifact && r.text.trim() && r.mcid).map(r => r.mcid as string));
             let coveredText = 0;
             for (const m of textMcids) if (coveredMcids.has(m)) coveredText++;
             const coverage = textMcids.size ? coveredText / textMcids.size : 1;
@@ -1096,12 +1177,14 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
                 // recovered node into reading order by its y instead of dumping them at the page end.
                 const leftover = bodyRuns.filter(r => r.text.trim() && (!r.mcid || !coveredMcids.has(r.mcid)));
                 if (leftover.length) {
-                    for (const ln of geometricNodes(leftover, pageCtx, docCtx, pdfCfg)) {
+                    for (const ln of geometricNodes(leftover, layoutCtx, docCtx, layoutCfg)) {
                         const y = ln.bounds?.y ?? Infinity;
                         const at = pageContent.findIndex(n => (n.bounds?.y ?? Infinity) > y);
                         if (at < 0) pageContent.push(ln); else pageContent.splice(at, 0, ln);
                     }
-                    warnStruct('some text on a page was outside the tag tree');
+                    // Mid-page artifact text is expected to be outside the tag tree, so it is not
+                    // evidence of a broken one: only untagged *body* text warrants the warning.
+                    if (leftover.some(r => !r.inArtifact)) warnStruct('some text on a page was outside the tag tree');
                 }
             } else {
                 warnStruct('the tag tree covered too little of the page text');
@@ -1109,23 +1192,31 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
         }
 
         // Geometric fallback (untagged, distrusted, or low coverage).
-        if (!pageContent) pageContent = geometricNodes(bodyRuns, pageCtx, docCtx, pdfCfg);
+        if (!pageContent) pageContent = geometricNodes(bodyRuns, layoutCtx, docCtx, layoutCfg);
 
         // Images: emit as attachments/OCR, then splice each into the flow before the first text node
         // that sits lower on the page, so reading order is preserved without reordering text.
         for (const img of extract.images) {
-            const node = await emitImage(img, extract.pageNumber, ++imageCounter, config, attachments, pageCtx, pdfCfg);
+            const node = await emitImage(img, extract.pageNumber, ++imageCounter, config, attachments);
             if (!node) continue;
             const y = node.bounds?.y ?? Infinity;
             const at = pageContent.findIndex(n => n.type !== 'image' && (n.bounds?.y ?? Infinity) > y);
             if (at < 0) pageContent.push(node); else pageContent.splice(at, 0, node);
         }
 
-        // Artifact runs (running headers/footers, decorations) route to auxiliary unless dropped.
+        // Running headers/footers route to auxiliary unless the caller asked for them to be dropped.
         if (!config.ignoreHeadersAndFooters) {
-            const artifacts = extract.runs.filter(r => r.inArtifact && r.text.trim());
-            classifyArtifacts(artifacts, extract, pageCtx, docCtx, pdfCfg, auxHeaders, auxFooters);
+            const pageHeaders: OfficeContentNode[] = [];
+            const pageFooters: OfficeContentNode[] = [];
+            for (const node of geometricNodes(headerRuns, layoutCtx, docCtx, layoutCfg, false)) pageHeaders.push(retypeAsHeaderFooter(node, 'header'));
+            for (const node of geometricNodes(footerRuns, layoutCtx, docCtx, layoutCfg, false)) pageFooters.push(retypeAsHeaderFooter(node, 'footer'));
+            finalizeBounds(pageHeaders, pageCtx, pdfCfg.includeBounds);
+            finalizeBounds(pageFooters, pageCtx, pdfCfg.includeBounds);
+            auxHeaders.push(...pageHeaders);
+            auxFooters.push(...pageFooters);
         }
+
+        finalizeBounds(pageContent, pageCtx, pdfCfg.includeBounds);
 
         const pageNode: OfficeContentNode = {
             type: 'page',
@@ -1145,8 +1236,13 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
         content.push(pageNode);
     }
 
-    // Document outline (bookmarks / TOC), when present, into auxiliary.
-    const outline = config.ignoreInternalLinks ? undefined : await buildOutline(pdfDocument, destCache, sectionLinks, config);
+    // Document outline (bookmarks / TOC), when present, into auxiliary. A malformed or hostile
+    // outline must never cost the caller the whole document, so anything thrown here is a warning.
+    let outline: OfficeContentNode[] | undefined;
+    if (!config.ignoreInternalLinks) {
+        try { outline = await buildOutline(pdfDocument, destCache, sectionLinks, config); }
+        catch { logWarning(OfficeWarningType.PDF_OUTLINE_TRUNCATED, config, 'it could not be read'); }
+    }
 
     // Now that every page's headings and their positions are known, point each internal link at the
     // nearest heading on its target page (falling back to the page itself), rather than a page jump.
@@ -1211,17 +1307,50 @@ function rotatedTextNodes(runs: RawRun[], pageCtx: PageContext, pdfCfg: PdfLayou
     return out;
 }
 
-/** Sorts artifact text in the top/bottom margins into header/footer paragraph groups. */
-function classifyArtifacts(
-    runs: RawRun[], extract: PageExtract, pageCtx: PageContext, docCtx: DocContext, pdfCfg: PdfLayoutConfig,
-    headers: OfficeContentNode[], footers: OfficeContentNode[],
-): void {
-    if (!runs.length) return;
-    const h = extract.authoredH;
-    const headerRuns = runs.filter(r => r.yTop < 0.15 * h);
-    const footerRuns = runs.filter(r => r.yTop > 0.85 * h);
-    for (const node of geometricNodes(headerRuns, pageCtx, docCtx, pdfCfg, false)) headers.push(retypeAsHeaderFooter(node, 'header'));
-    for (const node of geometricNodes(footerRuns, pageCtx, docCtx, pdfCfg, false)) footers.push(retypeAsHeaderFooter(node, 'footer'));
+/**
+ * Splits a page's `/Artifact` text into the running-header band, the running-footer band, and
+ * everything in between.
+ *
+ * The bands are measured in RENDERED space (top and bottom 15% of the page as the reader sees it),
+ * so a `/Rotate 90` page - whose running footer sits at authored *right*, halfway down in authored y
+ * - is still classified as a footer instead of being mistaken for body text. The middle is returned
+ * as body: an Artifact scope marks content as non-structural, not as unwanted, and a watermark, a
+ * figure label or a decorative heading is text the caller asked to extract.
+ */
+function splitArtifacts(extract: PageExtract): { header: RawRun[]; footer: RawRun[]; body: RawRun[] } {
+    const header: RawRun[] = [], footer: RawRun[] = [], body: RawRun[] = [];
+    const renderedH = extract.rotation % 180 === 0 ? extract.authoredH : extract.authoredW;
+    for (const r of extract.runs) {
+        if (!r.inArtifact || !r.text.trim()) continue;
+        const box = { x: r.x, y: r.yTop, width: r.width, height: r.height };
+        const y = rotateBoundsToRendered(box, extract.rotation, extract.authoredW, extract.authoredH).y;
+        if (y < 0.15 * renderedH) header.push(r);
+        else if (y > 0.85 * renderedH) footer.push(r);
+        else body.push(r);
+    }
+    return { header, footer, body };
+}
+
+/**
+ * Converts a page's nodes from the authored frame the layout runs in to what the AST reports:
+ * rendered-space boxes on a `/Rotate` page, or no boxes at all under `ignorePageGeometry`. Reading
+ * order, table span inference and the header/footer bands are all decided on the authored boxes
+ * before this runs, so neither setting can change the structure or the order of the nodes - only
+ * whether, and in which frame, their geometry is reported.
+ */
+function finalizeBounds(nodes: OfficeContentNode[], page: PageContext, includeBounds: boolean): void {
+    if (includeBounds && page.rotation === 0) return;   // authored space already is rendered space
+    const stack = [...nodes];
+    while (stack.length) {
+        const n = stack.pop()!;
+        if (n.bounds) {
+            if (!includeBounds) delete n.bounds;
+            else n.bounds = roundBounds(rotateBoundsToRendered(n.bounds, page.rotation, page.authoredW, page.authoredH));
+        }
+        for (const c of n.children || []) stack.push(c);
+        for (const c of n.notes || []) stack.push(c);
+        for (const c of n.comments || []) stack.push(c);
+    }
 }
 
 /** Wraps a paragraph produced from margin artifacts as a header/footer node. */
@@ -1229,10 +1358,13 @@ function retypeAsHeaderFooter(node: OfficeContentNode, type: 'header' | 'footer'
     return { type, text: node.text, children: node.children, bounds: node.bounds, metadata: { type: 'default' } };
 }
 
-/** Encodes/OCRs one image and returns its positioned image node (or null when nothing was emitted). */
+/**
+ * Encodes/OCRs one image and returns its positioned image node (or null when nothing was emitted).
+ * Its box is authored-space, like every other node's at this stage; {@link finalizeBounds} maps it.
+ */
 async function emitImage(
     img: PdfImage, pageNumber: number, index: number, config: FullOfficeParserConfig,
-    attachments: OfficeAttachment[], page: PageContext, pdfCfg: PdfLayoutConfig,
+    attachments: OfficeAttachment[],
 ): Promise<OfficeContentNode | null> {
     if (!config.extractAttachments) return null;
     const attachmentName = `pdf_image_p${pageNumber}_${index}.png`;
@@ -1248,7 +1380,7 @@ async function emitImage(
         attachments.push(attachment);
         const metadata: ImageMetadata = { attachmentName };
         const node: OfficeContentNode = { type: 'image', text: attachment.ocrText || '', metadata };
-        if (pdfCfg.includeBounds) node.bounds = roundBounds(rotateBoundsToRendered(img.bounds, page.rotation, page.authoredW, page.authoredH));
+        node.bounds = roundBounds(img.bounds);
         return node;
     } catch (e) {
         logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, attachmentName, e);

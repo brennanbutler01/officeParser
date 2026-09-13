@@ -65,9 +65,13 @@
                 <td><code>number</code></td>
                 <td><code>1500000</code></td>
                 <td><strong>Resources</strong>: Max decoded image size, in bytes, that is inlined as a <code>data:</code>
-                    URI in HTML/Markdown (the base64 URI itself is ~1/3 larger). Larger images render their text (e.g. OCR
-                    text) or a name reference instead, so a scanned page cannot emit a multi-megabyte line that breaks
-                    downstream parsers. <code>0</code> never inlines; <code>Infinity</code> always inlines.</td>
+                    URI in HTML/Markdown (the base64 URI itself is ~1/3 larger), so a scanned page cannot emit a
+                    multi-megabyte line that breaks downstream parsers. Under the default <code>'image-only'</code> mode
+                    an image over the cap renders its recognized/OCR text when it has any (multi-line OCR as a fenced
+                    block in Markdown), otherwise a compact name reference; Markdown still emits the
+                    <code>IMAGE_NOT_INLINED</code> warning. Plain text follows the same rule. <strong>Standalone HTML
+                    always inlines</strong>, whatever the cap: a self-contained document has nowhere else to resolve the
+                    image from. <code>0</code> never inlines; <code>Infinity</code> always inlines.</td>
             </tr>
             <tr>
                 <td><code>includeCharts</code></td>

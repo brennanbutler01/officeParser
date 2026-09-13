@@ -926,6 +926,12 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
             const cells: OfficeContentNode[] = [];
             // Only get direct child cells, not nested table cells
             const tcNodes = getDirectChildren(trNode, "w:tc");
+            // <w:trPr><w:tblHeader/> marks a row that repeats as the table's header on every page -
+            // Word's own header-row flag, and what this library's DOCX generator writes. Without
+            // reading it, a header row survived only when it happened to be all-bold.
+            const trPr = getFirstElementByTagName(trNode, "w:trPr");
+            const tblHeader = trPr ? getFirstElementByTagName(trPr, "w:tblHeader") : null;
+            const isHeaderRowNode = !!tblHeader && tblHeader.getAttribute("w:val") !== "false" && tblHeader.getAttribute("w:val") !== "0";
 
             let visualCol = 0;
             for (let tcIndex = 0; tcIndex < tcNodes.length; tcIndex++) {
@@ -979,6 +985,10 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
                 };
 
                 if (colSpan > 1) (cellNode.metadata as CellMetadata).colSpan = colSpan;
+                // A row node cannot carry metadata of its own, so the header flag rides on its cells -
+                // the same `style: 'header'` convention the PDF parser uses for TH cells, which is what
+                // `isHeaderRow` (and therefore every generator) reads.
+                if (isHeaderRowNode) (cellNode.metadata as CellMetadata).style = 'header';
 
                 if (tcPr) {
                     const shd = getFirstElementByTagName(tcPr, "w:shd");
@@ -1000,7 +1010,11 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
                             mergeInfo.span++;
                             (mergeInfo.node.metadata as CellMetadata).rowSpan = mergeInfo.span;
 
-                            if (cellChildren.length > 0) {
+                            // A continuation cell must still contain a block child, so a generated
+                            // document carries an empty <w:p/> here; only real content is worth
+                            // folding into the merged cell, otherwise the round-trip gains an empty
+                            // paragraph and a stray space.
+                            if (cellChildren.length > 0 && cellText.trim()) {
                                 if (!mergeInfo.node.children) mergeInfo.node.children = [];
                                 mergeInfo.node.children.push(...cellChildren);
                                 mergeInfo.node.text += " " + cellText;

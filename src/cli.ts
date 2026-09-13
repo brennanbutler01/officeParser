@@ -23,16 +23,22 @@
  *   --serializeRawContent     Include stringified XML in metadata (default: true)
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX & ODF, default: false)
- *   --ignorePageGeometry            Omit per-node bounding boxes and page dimensions (default: false)
+ *   --ignorePageGeometry      Omit per-node bounding boxes and page dimensions (default: false)
  *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF)
+ *   --includeImages=<mode>    image-only | image+ocr-text | ocr-text-only | none (default: image-only)
+ *   --maxInlineImageBytes=N   Largest image inlined as a data: URI by HTML/Markdown (default: 1500000)
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
+ *   --pdfConfig.engine=native Render PDF with pdf-lib instead of Puppeteer (default: html)
  *   --verbose                 Show full error stack traces and warning logs
+ *
+ * Removed in v8 (these exit with a migration hint): --toText, --ocrLanguage,
+ * --putNotesAtLast, --outputErrorToConsole. Run with --help for the full option list.
  */
 
 
 import { OfficeParser } from './OfficeParser.js';
 import { OfficeGenerator } from './OfficeGenerator.js';
-import { OfficeParserAST, OfficeParserConfig, UniversalGeneratorFormat } from './types.js';
+import { OfficeParserAST, OfficeParserConfig, OfficeWarningType, UniversalGeneratorFormat } from './types.js';
 import * as fs from 'fs';
 
 const args = process.argv.slice(2);
@@ -68,8 +74,31 @@ const knownGeneratorBooleans = new Set([
     'docxConfig.landscape', 'odtConfig.landscape',
     'textConfig.preserveLayout', 'textConfig.renderNotes',
     'htmlConfig.standalone', 'htmlConfig.sourceAttributes', 'htmlConfig.gatedEmbeds',
-    'mdConfig.fallbackToHtml',
+    'mdConfig.fallbackToHtml', 'mdConfig.fallbackToHtml.inlineFormatting',
 ]);
+
+/**
+ * Keys that are listed as booleans above but also accept a fixed set of string values, mapped to
+ * every value the space-separated form may consume. Without this, `--includeImages image+ocr-text`
+ * reads as a bare boolean and leaves the mode behind as a stray positional, which the CLI then
+ * takes for the input file.
+ */
+const knownEnumValues: Record<string, Set<string>> = {
+    includeImages: new Set(['image-only', 'image+ocr-text', 'ocr-text-only', 'none']),
+};
+
+/**
+ * Options removed in v8, mapped to the message shown before exiting non-zero. Accepting them
+ * silently is worse than rejecting them: `--ocrLanguage=deu` would run English OCR and
+ * `--putNotesAtLast` would produce a document whose notes are somewhere else entirely, with no
+ * indication either flag did nothing.
+ */
+const REMOVED_CLI_FLAGS: Record<string, string> = {
+    toText: '--toText was removed in v8. Use --to=text instead.',
+    ocrLanguage: '--ocrLanguage was removed in v8. Use --ocrConfig.language instead.',
+    putNotesAtLast: '--putNotesAtLast was removed in v8. Notes are attached to the node they belong to (node.notes) and rendered in place.',
+    outputErrorToConsole: '--outputErrorToConsole was removed in v8. Use --verbose to print warnings and errors.',
+};
 
 // Prefixes used to identify configurations targeted for the generator instead of the parser.
 const generatorPrefixes = [
@@ -110,11 +139,14 @@ for (let i = 0; i < args.length; i++) {
             const isKnownBoolean = knownParserBooleans.has(cleanKey) ||
                                    knownGeneratorBooleans.has(cleanKey) ||
                                    cleanKey === 'verbose';
+            const nextValue = i + 1 < args.length ? args[i + 1].toLowerCase() : '';
             const isNextBool = i + 1 < args.length &&
-                               (args[i + 1].toLowerCase() === 'true' || args[i + 1].toLowerCase() === 'false');
+                               (nextValue === 'true' || nextValue === 'false' ||
+                                knownEnumValues[cleanKey]?.has(nextValue) === true);
 
             // If the next arg is not another option flag, treat it as the value (e.g., --to html)
-            // But if this is a known boolean, only consume the next argument if it is a valid boolean string.
+            // But if this is a known boolean, only consume the next argument if it is a valid boolean
+            // string, or one of the enum values that key also accepts (e.g. --includeImages none).
             if (i + 1 < args.length && !args[i + 1].startsWith('-') && (!isKnownBoolean || isNextBool)) {
                 val = args[i + 1];
                 i++;
@@ -137,8 +169,8 @@ for (let i = 0; i < args.length; i++) {
             usedFormat = true;
         } else if (cleanKey === 'output') {
             outputFile = val;
-        } else if (cleanKey === 'toText') {
-            console.error('Error: --toText was removed in v8. Use --to=text instead.');
+        } else if (REMOVED_CLI_FLAGS[cleanKey]) {
+            console.error(`Error: ${REMOVED_CLI_FLAGS[cleanKey]}`);
             process.exit(1);
         } else if (cleanKey === 'verbose') {
             verbose = boolValue !== undefined ? boolValue : true;
@@ -201,13 +233,18 @@ if (fileArg && !showHelp) {
     if (usedFormat) {
         console.warn('Warning: --format is deprecated. Use --to instead.');
     }
-    // Intercept parser warning callbacks to format and print issues when verbose is enabled
+    // Intercept parser warning callbacks to format and print issues when verbose is enabled.
+    // An unrecognized option is the exception: it reports a mistake in the command that was just
+    // typed, not a detail of the document being parsed, so it always prints. Hiding it behind
+    // --verbose is how a misspelled or renamed flag ends up silently doing nothing.
     const originalOnWarning = config.onWarning;
     config.onWarning = (issue) => {
-        if (verbose) {
+        if (verbose || issue.code === OfficeWarningType.UNRECOGNIZED_CONFIG_OPTION) {
             const severity = issue.type === 'error' ? 'Error' : 'Warning';
             console.error(`[OfficeParser ${severity}] [${issue.code}]: ${issue.message}`);
-            if (issue.details) {
+            // The message already names every offending key, so the raw details object is only
+            // noise unless the caller asked for the full log.
+            if (verbose && issue.details) {
                 console.error(issue.details);
             }
         }
@@ -303,35 +340,45 @@ if (fileArg && !showHelp) {
     console.log('  --serializeRawContent                       Serialize raw XML content (default: true)');
     console.log('  --preserveXmlWhitespace                     Keep raw formatting space (default: false)');
     console.log('  --includeBreakNodes                         Include break nodes (DOCX & ODF, default: false)');
-    console.log('  --ignorePageGeometry                              Omit per-node bounding boxes and page dimensions (default: false)');
+    console.log('  --ignorePageGeometry                        Omit per-node bounding boxes and page dimensions (default: false)');
     console.log('  --verbose                                   Show full error stack traces and warning logs');
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');
     console.log('  --password=secret                           Password for an encrypted document (PDF, OOXML, or ODF)');
     console.log('  --htmlParserConfig.preserveIframes          Keep non-YouTube <iframe> embeds (dropped by default)');
+    console.log('  --ocrConfig.preserveLayout=false            Flatten OCR text instead of keeping its line layout (default: true)');
     console.log('');
     console.log('PDF Parser Options (pdfParserConfig.*):');
     console.log('  --pdfParserConfig.useTags=false             Ignore the tagged-structure tree, use geometry only (default: true)');
     console.log('  --pdfParserConfig.detectColumns=false       Disable multi-column reading-order detection (default: true)');
     console.log('  --pdfParserConfig.pageRange=1-3,7           Parse only the given pages (default: all)');
     console.log('  --pdfParserConfig.headingDetection=off      Heading detection: auto | font-size | off (default: auto)');
+    console.log('  --pdfParserConfig.mergeHyphenatedWords=false Keep words hyphenated across line breaks (default: true)');
+    console.log('  --pdfParserConfig.normalizeText=false       Skip Unicode/ligature normalization of PDF text (default: true)');
+    console.log('  --pdfParserConfig.extractTextColor          Record each PDF run\'s fill colour in formatting.color (default: false)');
     console.log('');
     console.log('High-Value Generator Options:');
     console.log('  --includeFormatting                         Include font formatting like bold/italic (default: true)');
     console.log('  --renderMetadata                            Render metadata in output content (default: false)');
+    console.log('  --includeImages=<mode>                      Image rendering: image-only | image+ocr-text | ocr-text-only | none (default: image-only)');
+    console.log('  --maxInlineImageBytes=1500000               Largest image HTML/Markdown inlines as a data: URI (0 = never, default: 1500000)');
     console.log('  --htmlConfig.containerWidth=value           HTML container width (auto | px | % | vw etc., default: auto)');
     console.log('  --htmlConfig.sourceAttributes               Carry each rich node\'s source in a data-* attribute (default: false)');
+    console.log('  --textConfig.pageSeparator=string           Separator written between pages in text output (default: \\n)');
     console.log('');
     console.log('Advanced Nested Config Examples:');
+    console.log('  --pdfConfig.engine=native                   PDF engine: html (Puppeteer) | native (pdf-lib, no browser) (default: html)');
     console.log('  --pdfConfig.format=Letter                   PDF paper format (A4 | Letter | Legal | A3 ...), both engines');
     console.log('  --chunksConfig.strategy=fixed-size          Chunking strategy (fixed-size | document-structure | semantic)');
     console.log('  --mdConfig.dialect=github                   Markdown dialect (extended | github | gitlab | obsidian | pandoc | commonmark)');
-    console.log('  --mdConfig.fallbackToHtml=false              Disable HTML fallback for unsupported Markdown features (default: true)');
-    console.log('  --mdConfig.fallbackToHtml.inlineFormatting   Round-trip inline color/highlight/font-size as <span style> (opt-in, default: false)');
+    console.log('  --mdConfig.fallbackToHtml=false             Disable HTML fallback for unsupported Markdown features (default: true)');
+    console.log('  --mdConfig.fallbackToHtml.inlineFormatting  Round-trip inline color/highlight/font-size as <span style> (opt-in, default: false)');
     console.log('');
     console.log('Format Syntax:');
     console.log('  Flags can be written as --flag (presence implies true), --no-flag (negation),');
     console.log('  --flag=value, or --flag value.');
+    console.log('  --includeImages accepts both forms: --includeImages=image+ocr-text or');
+    console.log('  --includeImages image+ocr-text (a bare --includeImages still means "on").');
     console.log('');
     console.log('Examples:');
     console.log('  officeparser document.docx');

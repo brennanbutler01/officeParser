@@ -13,4 +13,5 @@
 export { isCfb } from './cfb.js';
 export { isEncryptedOoxml, decryptOoxml } from './ooxmlCrypto.js';
 export { isEncryptedOdf, decryptOdf } from './odfCrypto.js';
+export type { KeyDerivationBudget } from './odfCrypto.js';
 export { WRONG_PASSWORD } from './wrongPassword.js';

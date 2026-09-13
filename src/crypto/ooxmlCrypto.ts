@@ -14,6 +14,14 @@ import { createDecipheriv, createHash } from 'crypto';
 import { CfbContainer, isCfb } from './cfb.js';
 import { WRONG_PASSWORD, DecryptionError } from './wrongPassword.js';
 
+/**
+ * Upper bound on the `EncryptionInfo` stream. A real agile descriptor is a single-element XML blob
+ * well under 4 KB and a standard header is a few hundred bytes, but the stream is attacker-controlled
+ * and gets parsed as XML, so refuse an implausible one up front (16x headroom) rather than hand
+ * megabytes of hostile bytes to the descriptor parser.
+ */
+const MAX_ENCRYPTION_INFO_BYTES = 64 * 1024;
+
 /** Block keys from [MS-OFFCRYPTO] §2.3.4.10, one per derived sub-key in the agile scheme. */
 const BLOCK_VERIFIER_INPUT = Uint8Array.from([0xfe, 0xa7, 0xd2, 0x76, 0x3b, 0x4b, 0x9e, 0x79]);
 const BLOCK_VERIFIER_VALUE = Uint8Array.from([0xd7, 0xaa, 0x0f, 0x6d, 0x30, 0x61, 0x34, 0x4e]);
@@ -40,6 +48,8 @@ export function decryptOoxml(buf: Uint8Array, password: string): Uint8Array {
     const info = cfb.read('EncryptionInfo');
     const pkg = cfb.read('EncryptedPackage');
     if (!info || !pkg) throw new DecryptionError('encrypted OOXML: missing EncryptionInfo/EncryptedPackage');
+    if (info.length > MAX_ENCRYPTION_INFO_BYTES) throw new DecryptionError(`encrypted OOXML: implausible EncryptionInfo size ${info.length} bytes`);
+    if (info.length < 8) throw new DecryptionError('encrypted OOXML: truncated EncryptionInfo');
 
     const view = new DataView(info.buffer, info.byteOffset, info.byteLength);
     const versionMajor = view.getUint16(0, true);
@@ -60,11 +70,30 @@ interface AgileKeyBlock {
     cipherAlgorithm: string;
 }
 
-function attr(xml: string, tag: string, name: string): string {
-    // Attributes never contain '>' unescaped, so a per-element slice keeps `keyData` and
-    // `encryptedKey` attributes of the same name apart.
-    const el = new RegExp(`<[^>]*\\b${tag}\\b[^>]*>`).exec(xml);
-    const scope = el ? el[0] : xml;
+/**
+ * Returns the first `<...>` element mentioning `tag`, located by one forward-only scan over the
+ * descriptor's `<`/`>` boundaries. A regex such as `<[^>]*\btag\b[^>]*>` restarts at every position,
+ * so a hostile descriptor (a long run of `<` with no `>`) costs O(n^2); here each element is looked at
+ * once and the scan never revisits a byte. Falls back to the whole descriptor when the element is
+ * absent, as the previous per-element slice did.
+ */
+function element(xml: string, tag: string): string {
+    const re = new RegExp(`\\b${tag}\\b`);
+    for (let i = xml.indexOf('<'); i >= 0; i = xml.indexOf('<', i)) {
+        const end = xml.indexOf('>', i + 1);
+        if (end < 0) break;
+        const el = xml.slice(i, end + 1);
+        if (re.test(el)) return el;
+        i = end + 1;
+    }
+    return xml;
+}
+
+/**
+ * Reads one attribute out of a single element's text. Attributes never contain '>' unescaped, so a
+ * per-element scope keeps `keyData` and `encryptedKey` attributes of the same name apart.
+ */
+function attr(scope: string, name: string): string {
     const m = new RegExp(`\\b${name}="([^"]*)"`).exec(scope);
     return m ? m[1] : '';
 }
@@ -121,24 +150,27 @@ function agilePasswordHash(salt: Buffer, password: string, spinCount: number, al
 
 function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint8Array {
     const xml = Buffer.from(info.subarray(8)).toString('utf8'); // skip 4-byte version + 4-byte reserved
-    const cipher = attr(xml, 'keyData', 'cipherAlgorithm');
+    // Locate the two descriptor elements once, then read every attribute out of those bounded slices.
+    const keyDataEl = element(xml, 'keyData');
+    const encKeyEl = element(xml, 'encryptedKey');
+    const cipher = attr(keyDataEl, 'cipherAlgorithm');
     if (cipher && cipher.toUpperCase() !== 'AES') throw new DecryptionError(`encrypted OOXML: unsupported cipher '${cipher}' (only AES)`);
     // We decrypt every segment as CBC; a file declaring another chaining mode (e.g. ChainingModeCFB)
     // would silently produce garbage and be misreported as a wrong password. Reject it as unsupported.
-    const chaining = attr(xml, 'keyData', 'cipherChaining');
+    const chaining = attr(keyDataEl, 'cipherChaining');
     if (chaining && chaining.toUpperCase() !== 'CHAININGMODECBC') throw new DecryptionError(`encrypted OOXML: unsupported cipher chaining '${chaining}' (only ChainingModeCBC)`);
 
     const keyData: AgileKeyBlock = {
-        saltValue: Buffer.from(attr(xml, 'keyData', 'saltValue'), 'base64'),
-        blockSize: parseInt(attr(xml, 'keyData', 'blockSize'), 10) || 16,
-        keyBits: parseInt(attr(xml, 'keyData', 'keyBits'), 10) || 256,
-        hashAlgorithm: hashId(attr(xml, 'keyData', 'hashAlgorithm')),
+        saltValue: Buffer.from(attr(keyDataEl, 'saltValue'), 'base64'),
+        blockSize: parseInt(attr(keyDataEl, 'blockSize'), 10) || 16,
+        keyBits: parseInt(attr(keyDataEl, 'keyBits'), 10) || 256,
+        hashAlgorithm: hashId(attr(keyDataEl, 'hashAlgorithm')),
         cipherAlgorithm: 'AES',
     };
-    const encSalt = Buffer.from(attr(xml, 'encryptedKey', 'saltValue'), 'base64');
-    const encKeyBits = parseInt(attr(xml, 'encryptedKey', 'keyBits'), 10) || 256;
-    const encHash = hashId(attr(xml, 'encryptedKey', 'hashAlgorithm'));
-    const spinCount = parseInt(attr(xml, 'encryptedKey', 'spinCount'), 10) || 100000;
+    const encSalt = Buffer.from(attr(encKeyEl, 'saltValue'), 'base64');
+    const encKeyBits = parseInt(attr(encKeyEl, 'keyBits'), 10) || 256;
+    const encHash = hashId(attr(encKeyEl, 'hashAlgorithm'));
+    const spinCount = parseInt(attr(encKeyEl, 'spinCount'), 10) || 100000;
     // `spinCount`, `keyBits` and `blockSize` come from the attacker-controlled descriptor. The key
     // stretch here is a synchronous hash loop, so a hostile file with a huge spinCount blocks the event
     // loop for that whole time before we can even check the password (a server-side CPU DoS). Real
@@ -150,12 +182,12 @@ function decryptAgile(info: Uint8Array, pkg: Uint8Array, password: string): Uint
     for (const bits of [keyData.keyBits, encKeyBits]) {
         if (bits !== 128 && bits !== 192 && bits !== 256) throw new DecryptionError(`encrypted OOXML: unsupported keyBits ${bits}`);
     }
-    for (const bs of [keyData.blockSize, parseInt(attr(xml, 'encryptedKey', 'blockSize'), 10) || 16]) {
+    for (const bs of [keyData.blockSize, parseInt(attr(encKeyEl, 'blockSize'), 10) || 16]) {
         if (!Number.isFinite(bs) || bs < 1 || bs > 64) throw new DecryptionError(`encrypted OOXML: implausible blockSize ${bs}`);
     }
-    const encVerifierInput = Buffer.from(attr(xml, 'encryptedKey', 'encryptedVerifierHashInput'), 'base64');
-    const encVerifierValue = Buffer.from(attr(xml, 'encryptedKey', 'encryptedVerifierHashValue'), 'base64');
-    const encKeyValue = Buffer.from(attr(xml, 'encryptedKey', 'encryptedKeyValue'), 'base64');
+    const encVerifierInput = Buffer.from(attr(encKeyEl, 'encryptedVerifierHashInput'), 'base64');
+    const encVerifierValue = Buffer.from(attr(encKeyEl, 'encryptedVerifierHashValue'), 'base64');
+    const encKeyValue = Buffer.from(attr(encKeyEl, 'encryptedKeyValue'), 'base64');
 
     const pwHash = agilePasswordHash(encSalt, password, spinCount, encHash);
 
@@ -204,6 +236,10 @@ function decryptStandard(info: Uint8Array, pkg: Uint8Array, password: string): U
         throw new DecryptionError(`encrypted OOXML: standard encryption uses an unsupported cipher (algId 0x${algId.toString(16)}); only AES is supported`);
     }
     if (!keyBits) keyBits = algId === 0x660e ? 128 : algId === 0x660f ? 192 : 256;
+    // keyBits comes straight from the attacker-controlled header. Without this check a bogus value
+    // reaches `aes-${keyBits}-ecb` and only fails incidentally (an obscure OpenSSL error), so validate
+    // it here exactly as the agile path does.
+    if (keyBits !== 128 && keyBits !== 192 && keyBits !== 256) throw new DecryptionError(`encrypted OOXML: unsupported keyBits ${keyBits}`);
 
     // EncryptionVerifier follows the header.
     let p = headerStart + headerSize;

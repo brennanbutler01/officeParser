@@ -778,11 +778,24 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
         cellBudget: CellBudget
     ): OfficeContentNode => {
         const rows: OfficeContentNode[] = [];
-        // Use getDirectChildren to avoid nested table rows
-        const tableRows = getDirectChildren(tableNode, "table:table-row");
+        // Rows sit directly under <table:table>, but a repeating header block is wrapped in
+        // <table:table-header-rows> - written by LibreOffice and by this library's own ODT generator.
+        // Reading only the direct <table:table-row> children dropped every header row on the floor, so
+        // walk the direct children in document order and descend into the wrapper, flagging its rows.
+        // (Nested tables are still excluded: only direct children are considered at each level.)
+        const tableRows: { row: Element; isHeader: boolean }[] = [];
+        for (let i = 0; i < (tableNode.childNodes?.length || 0); i++) {
+            const child = tableNode.childNodes[i];
+            if (!isElement(child)) continue;
+            const element = child as Element;
+            if (element.tagName === "table:table-row") tableRows.push({ row: element, isHeader: false });
+            else if (element.tagName === "table:table-header-rows") {
+                for (const headerRow of getDirectChildren(element, "table:table-row")) tableRows.push({ row: headerRow, isHeader: true });
+            }
+        }
         let rowIndex = 0;
 
-        for (const row of tableRows) {
+        for (const { row, isHeader } of tableRows) {
             checkAbortSignal(config.abortSignal);
             const cells: OfficeContentNode[] = [];
             // Use getDirectChildren to avoid nested table cells
@@ -894,6 +907,10 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                     const cellMetadata = cellNode.metadata as CellMetadata;
                     if (colSpan > 1) cellMetadata.colSpan = colSpan;
                     if (rowSpan > 1) cellMetadata.rowSpan = rowSpan;
+                    // A row node cannot carry metadata of its own, so the header flag rides on its
+                    // cells - the same `style: 'header'` convention the PDF parser uses for TH cells,
+                    // which is what `isHeaderRow` (and therefore every generator) reads.
+                    if (isHeader) cellMetadata.style = 'header';
 
                     if (config.includeRawContent) {
                         cellNode.rawContent = getRawContent(cell, sourceXml, config);

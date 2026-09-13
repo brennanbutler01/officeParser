@@ -1,6 +1,7 @@
 import { ConversionResult, GeneratorConfig, OfficeContentNode, OfficeContentNodeType, OfficeParserAST } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { median } from '../utils/numberUtils.js';
+import { base64ByteLength } from '../utils/officeGenUtils.js';
 
 const escapeRegExpChars = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -85,6 +86,10 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 if (mode === 'ocr-text-only') return ocr ? `${ocr}${newline}` : '';
                 const label = `[Image: ${meta?.altText || meta?.attachmentName || 'Untitled'}]`;
                 if (mode === 'image+ocr-text' && ocr) return `${label}${newline}${ocr}${newline}`;
+                // An image too large to inline anywhere renders its recognized text instead of a bare
+                // placeholder, matching what maxInlineImageBytes promises and what Markdown now does:
+                // for a scanned page that text is the whole content, and a `[Image: ...]` line loses it.
+                if (mode === 'image-only' && ocr && this.overInlineCap(meta?.attachmentName)) return `${ocr}${newline}`;
                 return `${label}${newline}`;
             }
 
@@ -200,6 +205,19 @@ export class TextGenerator extends BaseGenerator<'text'> {
         };
     }
 
+    /**
+     * True when the named attachment is larger than `maxInlineImageBytes`, the size past which an
+     * image can no longer travel inside the output. Plain text never embeds a picture at all, so the
+     * cap is what decides whether the image is still resolvable alongside the text (small: the
+     * `[Image: name]` reference points at something a packager can supply) or effectively lost (large:
+     * the recognized text is all that is left of it).
+     */
+    private overInlineCap(attachmentName: string | undefined): boolean {
+        if (!attachmentName) return false;
+        const attachment = this.getAttachment(attachmentName);
+        return !!attachment && base64ByteLength(attachment.data) > this.config.maxInlineImageBytes;
+    }
+
     /** True when a page carries the geometry needed for spatial layout rendering. */
     private pageHasLayout(page: OfficeContentNode): boolean {
         if (!(page.metadata as any)?.pageWidth) return false;
@@ -239,7 +257,10 @@ export class TextGenerator extends BaseGenerator<'text'> {
                 if (mode !== 'none' && n.bounds) {
                     const m = n.metadata as any;
                     const ocr = (n.text || '').trim();
-                    const text = mode === 'ocr-text-only' ? ocr : `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`;
+                    // Same over-cap rule as the flow path: an image too large to travel with the
+                    // output renders its recognized text rather than a placeholder that loses it.
+                    const useOcr = !!ocr && (mode === 'ocr-text-only' || (mode === 'image-only' && this.overInlineCap(m?.attachmentName)));
+                    const text = useOcr ? ocr : (mode === 'ocr-text-only' ? '' : `[Image: ${m?.altText || m?.attachmentName || 'Untitled'}]`);
                     if (text) atoms.push({ text, x: n.bounds.x, y: n.bounds.y, w: n.bounds.width, h: n.bounds.height });
                 }
                 return;

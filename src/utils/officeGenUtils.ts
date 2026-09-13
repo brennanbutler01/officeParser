@@ -51,6 +51,64 @@ export function isHeaderRow(row: OfficeContentNode, isFirstRow: boolean): boolea
 }
 
 /**
+ * Largest grid a sparse spreadsheet may be expanded back into by {@link fillSheetRowGaps}. A sheet
+ * whose only populated rows are 1 and 50,000 is a real (if unusual) file, and materialising every
+ * empty row between them as table XML would dwarf the document; past this many rows the gaps are
+ * left unfilled, which is the historical behaviour.
+ */
+const MAX_SHEET_GRID_ROWS = 4096;
+
+/**
+ * Re-inserts the empty rows a sparse spreadsheet AST leaves out.
+ *
+ * `ExcelParser` (and the ODS reader) emit a `row` node only for rows with at least one non-empty
+ * cell, and each cell carries its absolute `{ row, col }`, so a sheet with values in rows 1 and 3
+ * arrives as two adjacent `row` nodes. Rendering those as a two-row table silently moves the data up
+ * a row. `HtmlGenerator` rebuilds the full grid from the indices; this gives the DOCX and ODT table
+ * writers the same view without each re-deriving it.
+ *
+ * The synthesized row holds a single empty cell placed at the grid's last column, which the sparse
+ * placement in those writers expands into a full-width run of empty cells.
+ *
+ * Rows whose cells carry no `row` index (an ordinary document table) are returned untouched.
+ */
+export function fillSheetRowGaps(rows: OfficeContentNode[]): OfficeContentNode[] {
+    const cellsOf = (row: OfficeContentNode) => (row.children || []).filter(c => c.type === 'cell');
+    const rowIndex = (row: OfficeContentNode): number | null => {
+        const own = (row.metadata as any)?.row;
+        if (typeof own === 'number') return own;
+        for (const c of cellsOf(row)) {
+            const r = (c.metadata as any)?.row;
+            if (typeof r === 'number') return r;
+        }
+        return null;
+    };
+    if (!rows.some(r => rowIndex(r) !== null)) return rows;
+
+    let maxCol = 0;
+    for (const row of rows) {
+        for (const c of cellsOf(row)) {
+            const meta = c.metadata as any;
+            if (typeof meta?.col === 'number') maxCol = Math.max(maxCol, meta.col + Math.max(1, meta.colSpan || 1) - 1);
+        }
+    }
+
+    const out: OfficeContentNode[] = [];
+    let expected = 0;
+    for (const row of rows) {
+        const idx = rowIndex(row);
+        if (idx !== null && idx > expected && idx - expected + out.length <= MAX_SHEET_GRID_ROWS) {
+            for (let r = expected; r < idx; r++) {
+                out.push({ type: 'row', children: [{ type: 'cell', metadata: { row: r, col: maxCol } as any, children: [] }] });
+            }
+        }
+        out.push(row);
+        expected = (idx === null ? expected : idx) + 1;
+    }
+    return out;
+}
+
+/**
  * Percent-encodes URL-unsafe characters (space, `<>"{}|^[]` and the like) for an href/Target sink.
  * `encodeURI` leaves existing `%xx` escapes and structural characters (`/?:@&=#`) intact, so it is
  * idempotent for already-valid URLs; Word rejects some of those raw characters in a relationship

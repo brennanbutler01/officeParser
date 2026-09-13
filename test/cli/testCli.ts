@@ -321,15 +321,25 @@ async function runTests() {
         results.push({ name: 'Custom config flag', status: 'FAIL', details: `CLI failed with exit code ${res8.status}`, duration: d8 });
     }
 
-    // 9. Removed --toText flag errors clearly
-    console.log('Test 9: Removed --toText flag');
-    const t9 = Date.now();
-    const res9 = runCli(['--toText=true']);
-    const d9 = Date.now() - t9;
-    if (res9.status !== 0 && /removed in v8/i.test(res9.stderr)) {
-        results.push({ name: 'Removed --toText flag errors', status: 'PASS', details: 'CLI exited nonzero with removal message', duration: d9 });
-    } else {
-        results.push({ name: 'Removed --toText flag errors', status: 'FAIL', details: `status ${res9.status}, stderr: ${res9.stderr.slice(0, 80)}`, duration: d9 });
+    // 9. Every flag removed in v8 errors clearly and names its replacement. Silently accepting one
+    //    is worse than rejecting it: --ocrLanguage=deu would quietly run English OCR.
+    console.log('Test 9: Removed v8 flags');
+    const removedFlags: Array<[string, RegExp]> = [
+        ['--toText=true', /--to=text/],
+        ['--ocrLanguage=deu', /--ocrConfig\.language/],
+        ['--putNotesAtLast', /node\.notes/],
+        ['--outputErrorToConsole', /--verbose/],
+    ];
+    for (const [flag, hint] of removedFlags) {
+        const tR = Date.now();
+        const resR = runCli([flag]);
+        const dR = Date.now() - tR;
+        const name = `Removed flag errors: ${flag.split('=')[0]}`;
+        if (resR.status !== 0 && /removed in v8/i.test(resR.stderr) && hint.test(resR.stderr)) {
+            results.push({ name, status: 'PASS', details: 'Exited nonzero with a migration hint', duration: dR });
+        } else {
+            results.push({ name, status: 'FAIL', details: `status ${resR.status}, stderr: ${resR.stderr.slice(0, 80)}`, duration: dR });
+        }
     }
 
     // 10. Help / Usage output
@@ -703,6 +713,72 @@ async function runTests() {
         results.push({ name: 'CLI: generated ODT re-parses through the CLI', status: textOk ? 'PASS' : 'FAIL', details: textOk ? 'round-tripped text via --to=text' : `exit ${back.status}, stdout: ${back.stdout.slice(0, 120)}`, duration: 0 });
     } else {
         results.push({ name: 'CLI: --to odt writes a valid ODF package', status: 'FAIL', details: `exit ${res42.status}, file exists: ${fs.existsSync(odtOut)}. stderr: ${res42.stderr.slice(0, 120)}`, duration: d42 });
+    }
+
+    // 43. A renamed option reaches ast.warnings even though no onWarning was supplied, and the CLI
+    //     prints it without --verbose. Both halves regressed silently before: the collector that
+    //     fills ast.warnings used to be installed after config resolution (so the warning went to
+    //     the default no-op handler), and the CLI only printed warnings under --verbose.
+    console.log('Test 43: Renamed option surfaces in ast.warnings and on stderr');
+    const t43 = Date.now();
+    const res43 = runCli(['--ignoreBounds=true']);
+    const d43 = Date.now() - t43;
+    try {
+        const json = JSON.parse(res43.stdout);
+        const warn = (json.warnings || []).find((w: any) => w.code === 'UNRECOGNIZED_CONFIG_OPTION');
+        if (warn && /ignoreBounds/.test(warn.message) && /ignorePageGeometry/.test(warn.message)) {
+            results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'PASS', details: 'Warning names both the old key and its replacement', duration: d43 });
+        } else {
+            results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'FAIL', details: `Expected UNRECOGNIZED_CONFIG_OPTION naming ignorePageGeometry, got: ${JSON.stringify(json.warnings)?.slice(0, 90)}`, duration: d43 });
+        }
+    } catch (e) {
+        results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'FAIL', details: 'Failed to parse JSON', duration: d43 });
+    }
+    if (res43.stderr.includes('UNRECOGNIZED_CONFIG_OPTION') && res43.stderr.includes('ignorePageGeometry')) {
+        results.push({ name: 'CLI: unrecognized option printed without --verbose', status: 'PASS', details: 'Warning found on stderr', duration: 0 });
+    } else {
+        results.push({ name: 'CLI: unrecognized option printed without --verbose', status: 'FAIL', details: `stderr: ${res43.stderr.slice(0, 80)}`, duration: 0 });
+    }
+
+    // 44. v8 parser flags reach the resolved config: --password, --ignorePageGeometry and the
+    //     dotted --pdfParserConfig.* family (a boolean and a string in the same run).
+    console.log('Test 44: v8 parser flags passthrough');
+    const t44 = Date.now();
+    const res44 = runCli([
+        '--password=secret',
+        '--ignorePageGeometry=true',
+        '--pdfParserConfig.useTags=false',
+        '--pdfParserConfig.pageRange=1-3'
+    ]);
+    const d44 = Date.now() - t44;
+    try {
+        const c = JSON.parse(res44.stdout).config;
+        const checks: Array<[string, boolean, string]> = [
+            ['Config: --password passed', c.password === 'secret', `password was ${JSON.stringify(c.password)}`],
+            ['Config: --ignorePageGeometry passed', c.ignorePageGeometry === true, `ignorePageGeometry was ${c.ignorePageGeometry}`],
+            ['Config: --pdfParserConfig.useTags passed', c.pdfParserConfig?.useTags === false, `useTags was ${c.pdfParserConfig?.useTags}`],
+            ['Config: --pdfParserConfig.pageRange passed', c.pdfParserConfig?.pageRange === '1-3', `pageRange was ${JSON.stringify(c.pdfParserConfig?.pageRange)}`],
+        ];
+        for (const [name, ok, detail] of checks) {
+            results.push({ name, status: ok ? 'PASS' : 'FAIL', details: ok ? 'Reflected in AST config' : detail, duration: d44 });
+        }
+    } catch (e) {
+        results.push({ name: 'Config: v8 parser flags check', status: 'FAIL', details: 'Failed to parse JSON', duration: d44 });
+    }
+
+    // 45. --includeImages takes an ImageMode in both the `=` and the space-separated form. The
+    //     space form used to read as a bare boolean, leaving the mode behind as a stray positional
+    //     that the CLI then mistook for the input file.
+    console.log('Test 45: --includeImages=<mode> and --includeImages <mode>');
+    const t45 = Date.now();
+    const res45eq = runCli(['--to=md', '--includeImages=none']);
+    const res45sp = runCli(['--to=md', '--includeImages', 'none']);
+    const res45default = runCli(['--to=md']);
+    const d45 = Date.now() - t45;
+    if (res45sp.status === 0 && res45sp.stdout === res45eq.stdout && res45eq.stdout !== res45default.stdout) {
+        results.push({ name: 'CLI: --includeImages accepts a mode in both forms', status: 'PASS', details: 'Space form matches = form and changes the output', duration: d45 });
+    } else {
+        results.push({ name: 'CLI: --includeImages accepts a mode in both forms', status: 'FAIL', details: `space exit ${res45sp.status}, forms equal: ${res45sp.stdout === res45eq.stdout}, mode had effect: ${res45eq.stdout !== res45default.stdout}`, duration: d45 });
     }
 
     // Print summary report

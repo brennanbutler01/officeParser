@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { OfficeParser } from '../../src/OfficeParser';
 import { DeepRequired, OfficeContentNode, OfficeIssue, OfficeParserAST, OfficeParserConfig } from '../../src/types';
+import { testTextLayout } from './testTextLayout';
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -3316,7 +3317,7 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('layout text', false, 'rendered', e?.message || String(e));
     }
 
-    // --- ignorePageGeometry strips geometry ---
+    // --- ignorePageGeometry strips geometry, and ONLY geometry ---
     try {
         const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignorePageGeometry: true });
         let anyBounds = false;
@@ -3324,8 +3325,32 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         const page1 = ast.content[0] as any;
         add('ignorePageGeometry strips bounds', !anyBounds, 'no bounds', anyBounds ? 'bounds present' : 'none');
         add('ignorePageGeometry strips page dims', page1?.metadata?.pageWidth === undefined, 'no pageWidth', page1?.metadata?.pageWidth);
+        // Reading order and structure are decided on authored geometry BEFORE bounds are emitted, so
+        // turning geometry off must not move a single node. It used to: tables, images and untagged
+        // leftovers were spliced by the emitted `bounds.y`, which is undefined here, so they all fell
+        // to the end of the page (three tables on page 3 of test.pdf moved past every paragraph).
+        const shape = (a: any) => a.content.map((p: any) => (p.children || []).map((n: any) => n.type).join(',')).join('|');
+        const flat = (a: any) => a.content.map((p: any) => p.text).join('\n');
+        for (const cfg of [{}, { pdfParserConfig: { useTags: false } }]) {
+            const label = 'useTags' in (cfg.pdfParserConfig || {}) ? 'geometric path' : 'tagged path';
+            const withGeom = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ...cfg });
+            const without = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, ignorePageGeometry: true, ...cfg });
+            add(`ignorePageGeometry keeps node order (${label})`, shape(withGeom) === shape(without), 'identical node order', shape(withGeom) === shape(without) ? 'identical' : 'reordered');
+            add(`ignorePageGeometry keeps text order (${label})`, flat(withGeom) === flat(without), 'identical text', flat(withGeom) === flat(without) ? 'identical' : 'differs');
+        }
     } catch (e: any) {
         add('ignorePageGeometry parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- pageRange is clamped to the document before it is expanded ---
+    try {
+        const started = Date.now();
+        const ast = await OfficeParser.parseOffice(getFilePath('pdf'), { ocr: false, extractAttachments: false, pdfParserConfig: { pageRange: '1-999999999999' } });
+        const elapsed = Date.now() - started;
+        // Before the clamp this loop counted to a trillion and the parse never returned.
+        add('Huge pageRange is clamped', ast.content.length === 8 && elapsed < 60000, '8 pages, returns', `${ast.content.length} pages in ${elapsed}ms`);
+    } catch (e: any) {
+        add('Huge pageRange is clamped', false, '8 pages', e?.message || String(e));
     }
 
     // --- ignoreInternalLinks removes internal link runs ---
@@ -3359,6 +3384,124 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('Rotated rotation metadata', page1?.metadata?.rotation === 90, 90, page1?.metadata?.rotation);
     } catch (e: any) {
         add('rotated parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- cm_transform fixture: a page that opens with the Chrome/Skia y-flipping `cm` ---
+    // pdf.js reports text through the full CTM, so ignoring the page `cm` put the colour marks (and
+    // the image box) in a frame the text never occupied: no colour was ever found and the image
+    // landed at the bottom of the page instead of the top.
+    try {
+        const ast = await OfficeParser.parseOffice(path.join(pdfDir, 'cm_transform.pdf'),
+            { ocr: false, extractAttachments: true, pdfParserConfig: { extractTextColor: true } });
+        const colors: Record<string, string | undefined> = {};
+        const images: any[] = [];
+        ast.content.forEach((p: any) => walk(p, (n: any) => {
+            if (n.type === 'text') colors[String(n.text).split(' ')[0]] = n.formatting?.color;
+            if (n.type === 'image') images.push(n);
+        }));
+        add('Text colour survives a page cm', colors['RED'] === '#ff0000', '#ff0000', colors['RED']);
+        // The blue string sits inside a `q ... Q`; the red one after it proves the restore works.
+        add('Text colour inside q/Q bracket', colors['BLUE'] === '#0000ff', '#0000ff', colors['BLUE']);
+        const box = images[0]?.bounds;
+        add('Image box follows the page cm', !!box && box.y < 10 && Math.round(box.x) === 50 && Math.round(box.width) === 200,
+            'y≈0, x=50, w=200 (top of page)', JSON.stringify(box));
+        const firstType = (ast.content[0] as any)?.children?.[0]?.type;
+        add('Image spliced by its real position', firstType === 'image', 'image first', firstType);
+    } catch (e: any) {
+        add('cm_transform parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- table_image / rotated_table_image: reading order must not depend on /Rotate or on bounds ---
+    try {
+        const shape = (a: any) => a.content.map((p: any) => (p.children || []).map((n: any) => n.type).join(',')).join('|');
+        const flat = (a: any) => a.content.map((p: any) => p.text).join('\n');
+        const plain = await OfficeParser.parseOffice(path.join(pdfDir, 'table_image.pdf'), { ocr: false, extractAttachments: true });
+        const rotated = await OfficeParser.parseOffice(path.join(pdfDir, 'rotated_table_image.pdf'), { ocr: false, extractAttachments: true });
+        const rotatedNoGeom = await OfficeParser.parseOffice(path.join(pdfDir, 'rotated_table_image.pdf'), { ocr: false, extractAttachments: true, ignorePageGeometry: true });
+        add('Table and image spliced into the flow', shape(plain) === 'paragraph,table,image,paragraph', 'paragraph,table,image,paragraph', shape(plain));
+        // Splicing used to compare rendered y, which on a /Rotate 90 page is the AUTHORED x, so the
+        // table and the image were ordered by where they sat horizontally on the authored page.
+        add('Rotation does not reshuffle the flow', shape(rotated) === shape(plain) && flat(rotated) === flat(plain), shape(plain), shape(rotated));
+        add('Rotated flow is geometry-independent', shape(rotatedNoGeom) === shape(plain), shape(plain), shape(rotatedNoGeom));
+    } catch (e: any) {
+        add('table_image parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- artifacts / rotated_artifacts: margin bands are auxiliary, mid-page artifacts are content ---
+    for (const name of ['artifacts', 'rotated_artifacts']) {
+        try {
+            const ast = await OfficeParser.parseOffice(path.join(pdfDir, `${name}.pdf`), { ocr: false });
+            const dropped = await OfficeParser.parseOffice(path.join(pdfDir, `${name}.pdf`), { ocr: false, ignoreHeadersAndFooters: true });
+            const body = textOf(ast);
+            const aux = ast.auxiliary as any;
+            // A watermark is marked as an artifact but is still page text; it used to be dropped
+            // silently, because only the top and bottom bands were routed anywhere at all.
+            add(`${name}: mid-page artifact kept in the body`, body.includes('WATERMARK DRAFT'), 'WATERMARK DRAFT in body', body.includes('WATERMARK DRAFT') ? 'present' : 'dropped');
+            add(`${name}: body text intact`, body.includes('FIRST BODY PARAGRAPH') && body.includes('SECOND BODY PARAGRAPH'), 'both body paragraphs', body.replace(/\s+/g, ' ').slice(0, 60));
+            // On the rotated page the running header/footer sit at the authored left/right edges, so
+            // only a rendered-space band test finds them.
+            const headerText = (aux?.headers || []).map((h: any) => h.text).join(' ');
+            const footerText = (aux?.footers || []).map((f: any) => f.text).join(' ');
+            add(`${name}: running header to auxiliary`, headerText.includes('RUNNING HEADER'), 'RUNNING HEADER', headerText || 'none');
+            add(`${name}: running footer to auxiliary`, footerText.includes('RUNNING FOOTER'), 'RUNNING FOOTER', footerText || 'none');
+            // ignoreHeadersAndFooters drops the bands only; it is not a switch for all artifact text.
+            const droppedText = textOf(dropped);
+            add(`${name}: ignoreHeadersAndFooters drops only the bands`,
+                !(dropped.auxiliary as any)?.headers && !(dropped.auxiliary as any)?.footers && droppedText.includes('WATERMARK DRAFT'),
+                'no headers/footers, watermark kept',
+                `headers=${((dropped.auxiliary as any)?.headers || []).length} watermark=${droppedText.includes('WATERMARK DRAFT')}`);
+        } catch (e: any) {
+            add(`${name} parse`, false, 'parsed', e?.message || String(e));
+        }
+    }
+
+    // --- deep_outline: the bookmark walk is bounded, and never fails the parse ---
+    try {
+        const warnings: string[] = [];
+        const ast = await OfficeParser.parseOffice(path.join(pdfDir, 'deep_outline.pdf'), { ocr: false, onWarning: (w: any) => warnings.push(w.code) });
+        const outline = (ast.auxiliary as any)?.outline || [];
+        let items = 0, maxIndent = -1;
+        for (const root of outline) walk(root, (n: any) => { if (n.type === 'list') { items++; maxIndent = Math.max(maxIndent, n.metadata?.indentation ?? -1); } });
+        // pdf.js hands back the whole 200-level chain; a recursive conversion of a deep enough one
+        // throws RangeError and takes the entire parse with it, so the walk caps itself at 64.
+        add('Deep outline is depth-capped', items === 64 && maxIndent === 63, '64 items, max depth 63', `${items} items, max depth ${maxIndent}`);
+        add('Deep outline still parses the page', textOf(ast).includes('OUTLINE TARGET PAGE'), 'page text present', textOf(ast).trim().slice(0, 30));
+        add('Deep outline warns when truncated', warnings.length > 0, 'a warning', warnings.join(',') || 'none');
+    } catch (e: any) {
+        add('deep_outline parse', false, 'parsed', e?.message || String(e));
+    }
+
+    // --- tagged_lists: notes under list items, links inside notes, document-wide list ids ---
+    try {
+        const warnings: string[] = [];
+        const ast = await OfficeParser.parseOffice(path.join(pdfDir, 'tagged_lists.pdf'), { ocr: false, onWarning: (w: any) => warnings.push(w.code) });
+        const notes: any[] = [], links: string[] = [];
+        const idsPerPage: string[][] = [];
+        const deepWalk = (n: any, fn: (x: any) => void) => { fn(n); for (const c of n.children || []) deepWalk(c, fn); for (const c of n.notes || []) deepWalk(c, fn); };
+        for (const page of ast.content) {
+            const ids: string[] = [];
+            deepWalk(page, (n: any) => {
+                if (n.type === 'note') notes.push(n);
+                if (n.type === 'list' && n.metadata?.listId) ids.push(n.metadata.listId);
+                if (typeof n.metadata?.link === 'string') links.push(n.metadata.link);
+            });
+            idsPerPage.push([...new Set(ids)]);
+        }
+        let noteUnderListItem = false;
+        for (const page of ast.content) deepWalk(page, (n: any) => {
+            if (n.type === 'list') deepWalk(n, (c: any) => { if ((c.notes || []).length) noteUnderListItem = true; });
+        });
+        add('Tagged notes under a list item', notes.length === 2 && noteUnderListItem, '2 notes, one under a list item', `${notes.length} notes, underList=${noteUnderListItem}`);
+        // A list item's note used to be left uncovered: its text came back as a stray paragraph and
+        // the page was reported as having text outside the tag tree.
+        add('List-item note does not look like broken tags', !warnings.includes('PDF_STRUCT_TREE_UNRELIABLE'), 'no struct warning', warnings.join(',') || 'none');
+        // The link inside a note body is reachable only through `notes`, never through `children`.
+        add('No link placeholder leaks into a note', !links.some(l => l.startsWith('#__pdfsec_')), 'no #__pdfsec_ links', links.join(',') || 'none');
+        add('Note link resolved to a destination', links.includes('#page=2'), '#page=2', links.join(','));
+        // Numbering is keyed on listId, so per-page ids would continue page 2's list from page 1's.
+        add('Tagged list ids are document-wide', idsPerPage.length === 2 && idsPerPage[0][0] !== idsPerPage[1][0], 'different ids per page', JSON.stringify(idsPerPage));
+    } catch (e: any) {
+        add('tagged_lists parse', false, 'parsed', e?.message || String(e));
     }
 
     // --- encrypted fixture: password handling (top-level password/onPassword, shared with OOXML/ODF) ---
@@ -3464,6 +3607,222 @@ async function testCryptoSmoke(): Promise<FeatureTest[]> {
     return results;
 }
 
+// ── hostile-input fixtures (built here, not committed: the shape is the point) ──────────────────
+
+/** Minimal CFB (OLE2) writer: just enough to wrap named streams, with v4 (4096-byte) sectors. */
+function buildCfb(streams: Record<string, Uint8Array>): Buffer {
+    const SEC = 4096, ENDOFCHAIN = 0xfffffffe, FREESECT = 0xffffffff, FATSECT = 0xfffffffd;
+    const names = Object.keys(streams);
+    // sector 0 = FAT, sector 1 = directory, then one chain per stream. One FAT sector covers 4 MB.
+    const dirSectors = Math.ceil(((1 + names.length) * 128) / SEC);
+    const chains: { start: number; sectors: number }[] = [];
+    let next = 1 + dirSectors;
+    for (const n of names) {
+        const sectors = Math.max(1, Math.ceil(streams[n].length / SEC));
+        chains.push({ start: next, sectors });
+        next += sectors;
+    }
+    const out = Buffer.alloc(SEC * (1 + next));
+    out.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], 0);
+    out.writeUInt16LE(0x3e, 24);
+    out.writeUInt16LE(4, 26);        // major version 4
+    out.writeUInt16LE(0xfffe, 28);
+    out.writeUInt16LE(12, 30);       // 4096-byte sectors
+    out.writeUInt16LE(6, 32);        // 64-byte mini sectors
+    out.writeUInt32LE(1, 44);        // one FAT sector
+    out.writeUInt32LE(1, 48);        // directory starts at sector 1
+    out.writeUInt32LE(0, 56);        // mini cutoff 0: every stream uses the normal FAT chain
+    out.writeUInt32LE(ENDOFCHAIN, 60);
+    out.writeUInt32LE(ENDOFCHAIN, 68);
+    out.writeUInt32LE(0, 76);        // DIFAT[0] = FAT sector 0
+    for (let i = 1; i < 109; i++) out.writeUInt32LE(FREESECT, 76 + i * 4);
+
+    const fat = new Array<number>(SEC / 4).fill(FREESECT);
+    fat[0] = FATSECT;
+    for (let i = 0; i < dirSectors; i++) fat[1 + i] = i === dirSectors - 1 ? ENDOFCHAIN : 2 + i;
+    for (const c of chains) for (let i = 0; i < c.sectors; i++) fat[c.start + i] = i === c.sectors - 1 ? ENDOFCHAIN : c.start + i + 1;
+    for (let i = 0; i < fat.length; i++) out.writeUInt32LE(fat[i], SEC + i * 4);
+
+    const writeDir = (idx: number, name: string, type: number, start: number, size: number) => {
+        const off = SEC * 2 + idx * 128;
+        for (let i = 0; i < name.length; i++) out.writeUInt16LE(name.charCodeAt(i), off + i * 2);
+        out.writeUInt16LE((name.length + 1) * 2, off + 64);
+        out.writeUInt8(type, off + 66);
+        out.writeUInt32LE(start, off + 116);
+        out.writeUInt32LE(size, off + 120);
+    };
+    writeDir(0, 'Root Entry', 5, ENDOFCHAIN, 0);
+    names.forEach((n, i) => writeDir(i + 1, n, 2, chains[i].start, streams[n].length));
+    names.forEach((n, i) => out.set(streams[n], SEC * (chains[i].start + 1)));
+    return out;
+}
+
+/** A standard-encryption (`EncryptionInfo` version 3.2) descriptor with the given AlgID/KeyBits. */
+function standardEncryptionInfo(algId: number, keyBits: number, minor = 2): Buffer {
+    const info = Buffer.alloc(116);
+    info.writeUInt16LE(3, 0);        // version major
+    info.writeUInt16LE(minor, 2);    // version minor (2 = standard, 3 = extensible)
+    info.writeUInt32LE(32, 8);       // header size
+    info.writeUInt32LE(algId, 20);   // EncryptionHeader.AlgID
+    info.writeUInt32LE(keyBits, 28); // EncryptionHeader.KeyBits
+    info.writeUInt32LE(16, 44);      // EncryptionVerifier.SaltSize
+    info.writeUInt32LE(20, 80);      // EncryptionVerifier.VerifierHashSize
+    return info;
+}
+
+/** An encrypted-looking ODF: the manifest verbatim, plus each named entry stored. */
+async function buildOdf(manifest: string, entries: Record<string, Uint8Array>): Promise<Buffer> {
+    const { zipSync } = await import('fflate');
+    const files: Record<string, [Uint8Array, { level: 0 }]> = {
+        mimetype: [Buffer.from('application/vnd.oasis.opendocument.text'), { level: 0 }],
+        'META-INF/manifest.xml': [Buffer.from(manifest, 'utf8'), { level: 0 }],
+    };
+    for (const [name, bytes] of Object.entries(entries)) files[name] = [bytes, { level: 0 }];
+    return Buffer.from(zipSync(files, { level: 0 }));
+}
+
+/** One `<manifest:file-entry>` declaring `path` encrypted with the given scheme. */
+function odfEntryXml(path: string, opts: { algo?: string; kdf?: string; iterations?: number } = {}): string {
+    const b64 = Buffer.alloc(16, 7).toString('base64');
+    return `<manifest:file-entry manifest:full-path="${path}" manifest:media-type="text/xml" manifest:size="10">`
+        + '<manifest:encryption-data manifest:checksum-type="SHA1/1K">'
+        + `<manifest:algorithm manifest:algorithm-name="${opts.algo ?? 'http://www.w3.org/2001/04/xmlenc#aes256-cbc'}" manifest:initialisation-vector="${b64}"/>`
+        + `<manifest:key-derivation manifest:key-derivation-name="${opts.kdf ?? 'PBKDF2'}" manifest:key-size="32" manifest:iteration-count="${opts.iterations ?? 1024}" manifest:salt="${b64}"/>`
+        + '<manifest:start-key-generation manifest:start-key-generation-name="http://www.w3.org/2000/09/xmldsig#sha256" manifest:key-size="32"/>'
+        + '</manifest:encryption-data></manifest:file-entry>';
+}
+
+/** A `.docx` from one `word/document.xml` body, with no other parts. */
+async function buildDocxBytes(bodyXml: string): Promise<Buffer> {
+    const { zipSync } = await import('fflate');
+    const xml = '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        + `<w:body>${bodyXml}</w:body></w:document>`;
+    return Buffer.from(zipSync({ 'word/document.xml': [Buffer.from(xml, 'utf8'), { level: 0 }] }, { level: 0 }));
+}
+
+/**
+ * Adversarial decryption/templating inputs. Every case here is a shape that used to cost seconds to
+ * tens of seconds of CPU on a tiny file (a superlinear regex over an attacker-controlled descriptor,
+ * manifest or `<w:t>` run, or a key-derivation budget spent in full on a wrong password), plus the
+ * unsupported-scheme error mapping those paths rely on. Each asserts the typed outcome *and* a
+ * wall-clock budget, so a regression shows up as a slow test rather than a wrong answer.
+ */
+async function testHostileInputs(): Promise<FeatureTest[]> {
+    const results: FeatureTest[] = [];
+    const category = 'Hostile Inputs';
+    /**
+     * Runs `fn`, recording the error code it produced (or `ok`), whether it beat `budgetMs`, and
+     * optionally that the error's detail text names the right reason: several of these inputs would
+     * fail for an incidental reason (an OpenSSL complaint about a key length, say) without the
+     * validation that is being tested, so the code alone does not prove the fix.
+     */
+    const timed = async (feature: string, fileType: string, budgetMs: number, expected: string, fn: () => Promise<unknown>, detail?: RegExp) => {
+        const t = Date.now();
+        let actual = 'ok';
+        let details = '';
+        try { await fn(); } catch (e: any) {
+            actual = e?.officeIssue?.code || e?.message || String(e);
+            // `details` is free-form (a string, a list of parts): stringify before matching on it.
+            details = String(e?.officeIssue?.details ?? e?.message ?? e);
+        }
+        const ms = Date.now() - t;
+        const pass = (expected === 'completes' || actual === expected) && (!detail || detail.test(details)) && ms < budgetMs;
+        results.push({
+            category, feature, fileType,
+            result: {
+                status: pass ? 'PASS' : 'FAIL',
+                expected: `${expected}${detail ? ` /${detail.source}/` : ''} in < ${budgetMs}ms`,
+                actual: `${actual} in ${ms}ms`, details: details.slice(0, 90), duration: ms,
+            },
+        });
+    };
+    const FAILED = 'DOCUMENT_DECRYPTION_FAILED';
+    const parse = (buf: Buffer, cfg: OfficeParserConfig = {}) => OfficeParser.parseOffice(buf, { password: 'test123', ocr: false, ...cfg });
+
+    // C1: a descriptor that is one long run of '<'. The old per-attribute `<[^>]*\btag\b[^>]*>` regex
+    // restarted at every position: 22s for 50 KB, and it ran 15 times.
+    const runOfAngles = (kb: number) => {
+        const info = Buffer.alloc(4 + kb * 1024, 0x3c);
+        info.writeUInt16LE(4, 0); info.writeUInt16LE(4, 2); // version 4.4 -> agile
+        return buildCfb({ EncryptionInfo: info, EncryptedPackage: Buffer.alloc(4096) });
+    };
+    await timed('Hostile EncryptionInfo (48 KB of "<") rejected fast', 'docx', 2000, FAILED, () => parse(runOfAngles(48)));
+    await timed('Oversized EncryptionInfo rejected', 'docx', 2000, FAILED, () => parse(runOfAngles(200)), /implausible EncryptionInfo size/);
+
+    // L-T3: the standard path validated neither AlgID's key size nor a nonsense KeyBits.
+    const cfbWith = (info: Buffer) => buildCfb({ EncryptionInfo: info, EncryptedPackage: Buffer.alloc(4096) });
+    await timed('Standard encryption rejects implausible keyBits', 'docx', 5000, FAILED, () => parse(cfbWith(standardEncryptionInfo(0x660e, 777))), /unsupported keyBits 777/);
+    await timed('RC4/CryptoAPI encryption reports unsupported', 'docx', 5000, FAILED, () => parse(cfbWith(standardEncryptionInfo(0x6801, 128))), /algId 0x6801/);
+    await timed('Extensible encryption reports unsupported', 'docx', 5000, FAILED, () => parse(cfbWith(standardEncryptionInfo(0x660e, 128, 3))), /unsupported encryption version 3\.3/);
+
+    // H1: unclosed `<manifest:file-entry` tokens. The old `[\s\S]*?</manifest:file-entry>` scan ran to
+    // end-of-string from every start token: 4.4s for 256 KB, under the caller's full 512 MiB budget.
+    const hostileManifestTok = '<manifest:file-entry manifest:full-path="a" ';
+    const hostileManifest = '<?xml version="1.0"?><manifest:manifest><!-- encryption-data -->'
+        + hostileManifestTok.repeat(Math.ceil((512 * 1024) / hostileManifestTok.length));
+    const hostileOdf = await buildOdf(hostileManifest, {});
+    await timed('Hostile ODF manifest (512 KB of unclosed entries) parsed fast', 'odt', 2000, 'completes', () => parse(hostileOdf));
+
+    // M1: 50 zero-length "encrypted" entries, each at the per-entry iteration cap and unverifiable.
+    // Pre-fix, a wrong password paid all 50 derivations (12.4s) and paid them again on every retry.
+    let manyEntries = '<?xml version="1.0"?><manifest:manifest>';
+    const manyFiles: Record<string, Uint8Array> = {};
+    for (let i = 0; i < 50; i++) {
+        manyEntries += odfEntryXml(`part${i}.xml`, { iterations: 1_000_000 });
+        manyFiles[`part${i}.xml`] = new Uint8Array(0);
+    }
+    manyEntries += '</manifest:manifest>';
+    const manyEntryOdf = await buildOdf(manyEntries, manyFiles);
+    await timed('Wrong password stops before the whole ODF key-derivation budget', 'odt', 4000, FAILED,
+        () => parse(manyEntryOdf, { password: 'wrong' }), /key-derivation budget/);
+
+    // Unsupported ODF schemes: handled in code, previously untested. All map to one typed error.
+    const oneEntry = (opts: Parameters<typeof odfEntryXml>[1]) =>
+        buildOdf(`<?xml version="1.0"?><manifest:manifest>${odfEntryXml('content.xml', opts)}</manifest:manifest>`, { 'content.xml': Buffer.alloc(32) });
+    for (const [feature, opts, detail] of [
+        ['ODF Blowfish reports unsupported', { algo: 'Blowfish CFB' }, /Blowfish/],
+        ['ODF AES-256-GCM reports unsupported', { algo: 'http://www.w3.org/2009/xmlenc11#aes256-gcm' }, /unsupported cipher/],
+        ['ODF Argon2id reports unsupported', { kdf: 'urn:org:documentfoundation:names:experimental:office:manifest:argon2id' }, /unsupported key derivation/],
+    ] as const) {
+        const odf = await oneEntry(opts);
+        await timed(feature, 'odt', 5000, FAILED, () => parse(odf), detail);
+    }
+
+    // L-T1: the template `<w:t>` scan had the same superlinear shape (80k unclosed tokens: 5.7s), and
+    // `OfficeTemplate.render` takes arbitrary caller bytes.
+    const { OfficeTemplate } = await import('../../src/OfficeTemplate');
+    const hostileTemplate = await buildDocxBytes('<w:p>' + '<w:t>'.repeat(80000) + '{{v}}</w:p>');
+    await timed('Hostile <w:t> run rendered fast', 'docx', 2000, 'completes', () => OfficeTemplate.render(hostileTemplate, { data: { v: 'OK' } }));
+
+    // The same renderer must still substitute across split runs, unchanged.
+    try {
+        const split = await buildDocxBytes('<w:p><w:r><w:t>Hi {{na</w:t></w:r><w:r><w:t>me}}</w:t></w:r><w:r><w:t/></w:r></w:p>');
+        const out = await OfficeTemplate.render(split, { data: { name: 'World' } });
+        const ast: any = await OfficeParser.parseOffice(Buffer.from(out), { fileType: 'docx', ocr: false });
+        const text = ((await ast.to('text')).value as string) || '';
+        results.push({
+            category, feature: 'Split-run placeholder still substitutes', fileType: 'docx',
+            result: { status: text.includes('Hi World') ? 'PASS' : 'FAIL', expected: 'Hi World', actual: text.trim().slice(0, 40), details: '' },
+        });
+    } catch (e: any) {
+        results.push({ category, feature: 'Split-run placeholder still substitutes', fileType: 'docx', result: { status: 'FAIL', expected: 'Hi World', actual: e?.officeIssue?.code || e?.message, details: '' } });
+    }
+
+    // L-T3: a bogus mini-sector shift (31 makes `1 << shift` negative) is rejected, not indexed with.
+    try {
+        const cfb = runOfAngles(1);
+        cfb.writeUInt16LE(31, 32);
+        const { decryptOoxml } = await import('../../src/crypto/index');
+        decryptOoxml(cfb, 'test123');
+        results.push({ category, feature: 'CFB rejects an implausible mini sector size', fileType: 'docx', result: { status: 'FAIL', expected: 'mini sector size error', actual: 'accepted', details: '' } });
+    } catch (e: any) {
+        const msg = String(e?.message || e);
+        results.push({ category, feature: 'CFB rejects an implausible mini sector size', fileType: 'docx', result: { status: /mini sector/.test(msg) ? 'PASS' : 'FAIL', expected: 'mini sector size error', actual: msg.slice(0, 60), details: '' } });
+    }
+
+    return results;
+}
+
 async function runAllTests() {
     const outputDir = path.join(__dirname, 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
@@ -3529,9 +3888,19 @@ async function runAllTests() {
     console.log('Running PDF smoke tests...');
     allResults.push(...await testPdfSmoke());
 
-    // 10. Encrypted OOXML/ODF smoke tests (decryption is CPU-light, so they run in every mode)
+    // 10. PDF text-layout unit tests (synthetic runs through the pure geometric helpers: no PDF, no
+    // OCR, milliseconds, so they cover the geometric path even in fast mode where PDF is skipped)
+    console.log('Running PDF text layout unit tests...');
+    allResults.push(...await testTextLayout());
+
+    // 11. Encrypted OOXML/ODF smoke tests (decryption is CPU-light, so they run in every mode)
     console.log('Running crypto smoke tests...');
     allResults.push(...await testCryptoSmoke());
+
+    // 12. Hostile decryption/templating inputs (superlinear regexes, key-derivation budgets): each
+    // case is a tiny synthetic file, and each asserts a wall-clock budget, so they run in every mode.
+    console.log('Running hostile input tests...');
+    allResults.push(...await testHostileInputs());
 
     // 9. Generate report
     console.log('\n');

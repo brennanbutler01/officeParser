@@ -7,6 +7,14 @@ import { escapeHtml, isSafeHtmlAttributeName, isSafeStyleMapTag, sanitizeCssValu
 type ResolvedStandalone = Required<StandaloneConfig>;
 
 /**
+ * A boxed `onNode` verdict, passed from the caller that already asked the hook down to the recursion
+ * that would otherwise ask it again. Boxing matters because "render normally" is itself `undefined`,
+ * so only the presence of the box distinguishes an answered hook from an unasked one - `onNode` is
+ * allowed to have side effects, and must fire exactly once per node.
+ */
+type OnNodeVerdict = { value: string | false | void };
+
+/**
  * Attributes that carry a URL and therefore must go through `sanitizeUrl` rather than plain
  * escaping - an escaped `javascript:` payload is still a `javascript:` payload.
  */
@@ -166,7 +174,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             if (footnotes.length > 0) {
                 let footnotesHtml = '';
                 for (const note of footnotes) {
-                    footnotesHtml += await this.processNodeRecursive(note, this.nodeProcessor.bind(this));
+                    footnotesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor);
                 }
                 // data-footnotes carries an explicit empty value (not a bare attribute) so
                 // the markup is valid XHTML too - EpubGenerator embeds this verbatim, and
@@ -177,7 +185,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             if (otherNotes.length > 0) {
                 let notesHtml = '';
                 for (const note of otherNotes) {
-                    notesHtml += await this.processNodeRecursive(note, this.nodeProcessor.bind(this));
+                    notesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor);
                 }
                 bodyContent += `\n<div class="document-notes-section">\n<hr class="page-break">\n${notesHtml}\n</div>\n`;
             }
@@ -191,15 +199,10 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
         let spreadsheetScript = '';
 
         if (this.isSpreadsheetMode) {
-            const sheets: OfficeContentNode[] = [];
-            for (const node of this.ast.content) {
-                if (node.type === 'sheet') {
-                    const override = await this.handleOnNode(node);
-                    if (override !== false) {
-                        sheets.push(node);
-                    }
-                }
-            }
+            // The tab bar lists the sheets the body actually rendered. That decision was already made
+            // (and recorded) during the body walk above, so read it back rather than asking `onNode` a
+            // second time about every sheet - the hook is allowed to have side effects.
+            const sheets = this.ast.content.filter(node => node.type === 'sheet' && !this.onNodeSkipped.has(node));
             const tabs = sheets.map((n, i) => {
                 const sheetName = (n.metadata as any)?.sheetName || `Sheet ${i + 1}`;
                 return `<a href="#sheet-${i}" class="spreadsheet-tab">${this.escape(sheetName)}</a>`;
@@ -497,6 +500,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
         // grid column -> number of rows it stays occupied by a rowspan started above this row.
         const carry = new Map<number, number>();
         for (let r = 0; r < rows.length; r++) {
+            // This path builds each <tr> itself rather than recursing into the row node, so the row
+            // has to be offered to `onNode` here or it would be the one node type the hook never saw
+            // in a rowspan table: `false` drops the row, a string replaces its markup outright.
+            const rowOverride = await this.handleOnNode(rows[r]);
+            if (rowOverride === false) continue;
+            if (typeof rowOverride === 'string') { out.push(rowOverride); continue; }
             const cells = (rows[r].children || []).filter(c => c.type === 'cell');
             const newCarry = new Map<number, number>();
             let col = 0;
@@ -512,7 +521,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     tr += '<td></td>';
                     col++;
                 }
-                let cellHtml = await this.processNodeRecursive(cell, this.nodeProcessor.bind(this));
+                let cellHtml = await this.processNodeRecursive(cell, this.boundNodeProcessor);
                 // Promote the cell's own tag to <th> for the header row. Match the first <td> (not the
                 // string start) so a leading extraAnchors prefix does not defeat the promotion, and the
                 // last </td> (anchored at end) so a nested table's inner cells are left as <td>.
@@ -558,6 +567,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             // Check if node should be filtered out or overridden
             const override = await this.handleOnNode(node);
             if (override === false) {
+                // Remembered so a later pass (the spreadsheet tab bar) can honour the same verdict
+                // without asking the hook again.
+                this.onNodeSkipped.add(node);
                 continue;
             }
 
@@ -609,7 +621,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                     listStack.push({ indentation, type, isTask, liClose: '' });
                 }
 
-                html += await this.processNodeRecursive(node, this.nodeProcessor.bind(this), override);
+                html += await this.processNodeRecursive(node, this.boundNodeProcessor, { value: override });
                 // Defer this item's close so a nested list can land inside it. A string override is
                 // a complete replacement item that already carries its own close, so add none.
                 listStack[listStack.length - 1].liClose = (typeof override === 'string')
@@ -618,7 +630,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             } else {
                 // Non-list node closes all active lists
                 closeListsToLevel(-1);
-                let result = await this.processNodeRecursive(node, this.nodeProcessor.bind(this), override);
+                let result = await this.processNodeRecursive(node, this.boundNodeProcessor, { value: override });
 
                 // Add a blank line after BLOCK nodes for readable HTML source. Inline nodes (a
                 // paragraph's text/link runs) must concatenate with no separator: adding `\n\n`
@@ -637,6 +649,60 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     }
 
     /**
+     * The first-row-is-a-header heuristic: an explicit "header" row style, or an all-bold first row.
+     * Read both when deciding how to render the table and (via {@link rendersOwnChildren}) before the
+     * generic children pass, so the two cannot disagree about which shape the table takes.
+     */
+    private firstRowIsHeader(node: OfficeContentNode): boolean {
+        const rows = node.children || [];
+        if (!rows.length || rows[0].type !== 'row') return false;
+        const firstRow = rows[0];
+        const firstRowCells = firstRow.children || [];
+        const isHeaderStyle = (firstRow.metadata as any)?.style?.toLowerCase().includes('header');
+        const allBold = firstRowCells.length > 0 && firstRowCells.every(c =>
+            c.children?.every(child => child.formatting?.bold === true)
+        );
+        return !!(isHeaderStyle || allBold);
+    }
+
+    /** True when any cell of the table spans more than one row. */
+    private tableHasRowSpan(node: OfficeContentNode): boolean {
+        return (node.children || []).some(r => r.type === 'row' &&
+            (r.children || []).some(c => c.type === 'cell' && ((c.metadata as CellMetadata)?.rowSpan || 1) > 1));
+    }
+
+    /**
+     * True when this node's own branch in {@link nodeProcessor} lays its children out itself and so
+     * discards the generic children pass entirely: a `table` that re-renders its rows (a rowspan grid,
+     * or a first row promoted into `<thead>`), a `sheet` (which rebuilds the whole grid from the cell
+     * indices), or a sparse `row` (whose cells carry explicit column indices). Checked before that
+     * pass runs - rendering the subtree twice was pure waste, and it fired the caller's `onNode` hook
+     * a second time for every node inside it.
+     *
+     * Each condition mirrors the branch it guards; they must stay in step, so both read the same
+     * helpers rather than restating the heuristic.
+     */
+    private rendersOwnChildren(node: OfficeContentNode): boolean {
+        if (node.type === 'sheet') return true;
+        if (node.type === 'table') return this.tableHasRowSpan(node) || this.firstRowIsHeader(node);
+        if (node.type === 'row') {
+            const cells = (node.children || []).filter(c => c.type === 'cell');
+            return cells.length > 0 && cells.some(c => (c.metadata as CellMetadata)?.col !== undefined);
+        }
+        return false;
+    }
+
+    /** Nodes whose `onNode` verdict was `false`, so a later pass can honour it without re-asking. */
+    private readonly onNodeSkipped = new WeakSet<OfficeContentNode>();
+
+    /**
+     * The default node processor, bound once so a recursion can tell it apart from a caller-supplied
+     * one by identity (see {@link rendersOwnChildren}) - and so the binding is not re-allocated at
+     * every call site.
+     */
+    private readonly boundNodeProcessor = this.nodeProcessor.bind(this);
+
+    /**
      * Overridden to handle children using processNodeArray for list grouping.
      */
     private tableNestingLevel = 0;
@@ -644,7 +710,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     protected override async processNodeRecursive(
         node: OfficeContentNode,
         processor: (node: OfficeContentNode, childrenOutput: string) => string | Promise<string>,
-        override?: string | boolean | void
+        override?: OnNodeVerdict
     ): Promise<string> {
         // Mirrors the check in BaseGenerator.processNodeRecursive. This override replaces that
         // method entirely, so without repeating the check here the signal would be silently
@@ -667,10 +733,13 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     private async processNodeRecursiveInner(
         node: OfficeContentNode,
         processor: (node: OfficeContentNode, childrenOutput: string) => string | Promise<string>,
-        override?: string | boolean | void
+        override?: OnNodeVerdict
     ): Promise<string> {
-        // Use pre-evaluated override if provided, otherwise call handleOnNode
-        const actualOverride = override !== undefined ? override : await this.handleOnNode(node);
+        // Use the pre-evaluated verdict when the caller already asked the hook, otherwise ask it here.
+        // The verdict is boxed because "no override" IS `undefined`: comparing the bare value against
+        // undefined could not tell an answered hook from an unasked one, so every node processed
+        // through processNodeArray fired `onNode` a second time here.
+        const actualOverride = override ? override.value : await this.handleOnNode(node);
 
         // Returning false skips the node and its children
         if (actualOverride === false) {
@@ -687,7 +756,13 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
         let childrenOutput = '';
         if (node.children && node.children.length > 0) {
-            childrenOutput = await this.processNodeArray(node.children);
+            // A node whose own branch lays its children out throws this output away, so skip producing
+            // it: the subtree would otherwise be walked twice, firing `onNode` twice for every node in
+            // it. Only when the DEFAULT processor is rendering this node, though - a caller that passes
+            // its own processor (the header-row promotion) consumes the children output itself.
+            if (processor !== this.boundNodeProcessor || !this.rendersOwnChildren(node)) {
+                childrenOutput = await this.processNodeArray(node.children);
+            }
         } else if (node.text && node.type !== 'text') {
             // Fallback for nodes that have text property but no children (e.g. simple paragraphs)
             childrenOutput = this.escape(node.text);
@@ -1024,28 +1099,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 // Smart Table Header Detection
                 let finalChildren = childrenOutput;
                 const rows = node.children || [];
-                let firstRowIsHeader = false;
-                if (rows.length > 0 && rows[0].type === 'row') {
-                    const firstRow = rows[0];
-                    const firstRowCells = firstRow.children || [];
-
-                    // Heuristic: Is the first row a header?
-                    // 1. Explicitly marked via style containing "Header"
-                    // 2. All cells have bold formatting
-                    // 3. All cells have a background color different from the second row (if exists)
-                    const isHeaderStyle = (firstRow.metadata as any)?.style?.toLowerCase().includes('header');
-                    const allBold = firstRowCells.length > 0 && firstRowCells.every(c =>
-                        c.children?.every(child => child.formatting?.bold === true)
-                    );
-                    firstRowIsHeader = !!(isHeaderStyle || allBold);
-                }
-
+                const firstRowIsHeader = this.firstRowIsHeader(node);
                 // When any cell spans rows, the plain per-row path (which only fills horizontal gaps)
                 // would shift the cells sitting under a rowspan. Render with an HTML grid-occupancy
                 // model instead, so a rowspan reserves its column in the rows below. Scoped to tables
                 // that actually contain a rowspan, so every other table renders exactly as before.
-                const hasRowSpan = rows.some(r => r.type === 'row' &&
-                    (r.children || []).some(c => c.type === 'cell' && ((c.metadata as CellMetadata)?.rowSpan || 1) > 1));
+                const hasRowSpan = this.tableHasRowSpan(node);
                 if (hasRowSpan) {
                     const rowNodes = rows.filter(r => r.type === 'row');
                     const trs = await this.renderRowsWithRowspans(rowNodes, firstRowIsHeader);
@@ -1105,7 +1164,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                                 lastCol++;
                             }
 
-                            sparseChildren += await this.processNodeRecursive(cell, this.nodeProcessor.bind(this));
+                            sparseChildren += await this.processNodeRecursive(cell, this.boundNodeProcessor);
 
                             const colSpan = (cell.metadata as any)?.colSpan || 1;
                             lastCol = currentCol + colSpan - 1;
@@ -1213,6 +1272,12 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                         const rowNode = rowNodeMap.get(r);
                         let trAttrs = '';
                         if (rowNode) {
+                            // This branch assembles each <tr> from the grid rather than recursing into
+                            // the row node, so the row is offered to `onNode` here - otherwise it would
+                            // be the one node type the hook never saw in a spreadsheet.
+                            const rowOverride = await this.handleOnNode(rowNode);
+                            if (rowOverride === false) continue;
+                            if (typeof rowOverride === 'string') { tbodyRows += rowOverride; continue; }
                             const mapping = this.getSemanticMapping(rowNode);
                             const rClasses = ['excel-row'];
                             if (mapping?.classes) rClasses.push(...mapping.classes);
@@ -1245,7 +1310,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                             }
                             const cell = grid[r][c];
                             if (cell) {
-                                const cellHtml = await this.processNodeRecursive(cell, this.nodeProcessor.bind(this));
+                                const cellHtml = await this.processNodeRecursive(cell, this.boundNodeProcessor);
                                 rowCellsHtml += cellHtml;
                             } else {
                                 rowCellsHtml += '<td class="excel-cell-empty"></td>';

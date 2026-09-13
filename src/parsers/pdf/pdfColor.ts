@@ -8,38 +8,22 @@
  * matrix that `getTextContent` uses, compute each show's start point in the same viewport space as a
  * text item's `transform`. That lets a run look up its color by position.
  *
- * `getTextContent` derives an item's `transform` from `ctm ∘ textMatrix` and, in its main pass,
- * ignores the page `cm`/`q`/`Q` (only form-XObject `/Matrix` moves its ctm). We ignore them here too,
- * so both share the same cm-less frame and their coordinates coincide. Pattern/shading/transparent
+ * `getTextContent` derives an item's `transform` from `ctm ∘ textMatrix`, where its `ctm` is the full
+ * graphics-state matrix: `q`/`Q` save and restore it, every page `cm` multiplies into it, and a form
+ * XObject's `/Matrix` composes on entry. We mirror all four here, so both share one frame and their
+ * coordinates coincide. That matters because most producers open the page with a `cm` - Chrome/Skia
+ * flips with `1 0 0 -1 0 H cm`, Ghostscript scales with `0.1 0 0 0.1 0 0 cm`, Cairo flips too - and
+ * a cm-less frame would put every mark somewhere the runs never are. Pattern/shading/transparent
  * fills yield no color, so a run over them simply keeps its default (never a wrong color).
  *
  * @module parsers/pdf/pdfColor
  */
 
-const IDENTITY = [1, 0, 0, 1, 0, 0];
-
-/** Composes two affine matrices, `pdfjs.Util.transform(a, b)`, inlined to keep pdf.js types out. */
-function mul(a: number[], b: number[]): number[] {
-    return [
-        a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
-        a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
-        a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
-    ];
-}
+import { identityMatrix, mulMatrix as mul, toMatrix6 as toMat6 } from './geometry.js';
 
 /** Applies the text-move translation `[x, y]` to a matrix, as pdf.js's `TextState` does. */
 function translate(m: number[], x: number, y: number): number[] {
     return [m[0], m[1], m[2], m[3], m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
-}
-
-/**
- * Coerces a pdf.js matrix operand to a plain `number[6]`, or null if it is not a 6-element
- * array-like. pdf.js passes the matrix for `setTextMatrix`/`paintFormXObjectBegin` as a single
- * argument that is a `Float32Array` (so `Array.isArray` is false and its six values sit at `[0]`).
- */
-function toMat6(m: any): number[] | null {
-    if (!m || typeof m.length !== 'number' || m.length < 6) return null;
-    return [+m[0], +m[1], +m[2], +m[3], +m[4], +m[5]];
 }
 
 /** One text-show occurrence: its start point in viewport space plus the active fill color. */
@@ -52,9 +36,9 @@ export interface ColorMark {
 /**
  * Walks an already-fetched operator list and returns, in paint order, the viewport-space start point
  * and fill color of every text-show. Mirrors `getTextContent`'s matrix bookkeeping (text matrix plus
- * form-XObject CTM; page `cm`/`q`/`Q` ignored). Marks are skipped when the active fill is a pattern,
- * shading or transparent, or when the text is invisible (render modes 3/7); stroke-render text
- * (modes 1/5) uses the stroke color.
+ * the full CTM: `q`/`Q`, page `cm` and form-XObject matrices). Marks are skipped when the active fill
+ * is a pattern, shading or transparent, or when the text is invisible (render modes 3/7);
+ * stroke-render text (modes 1/5) uses the stroke color.
  *
  * @param viewportTransform - `viewport.transform` for the page (scale-1 layout viewport).
  */
@@ -64,28 +48,34 @@ export function collectColorMarks(ops: any, viewportTransform: number[], OPS: an
     const argsArray: any[] | undefined = ops?.argsArray;
     if (!fnArray || !argsArray) return marks;
 
-    let ctm = IDENTITY.slice();
+    let ctm = identityMatrix();
     const ctmStack: number[][] = [];
-    let tm = IDENTITY.slice();
-    let tlm = IDENTITY.slice();
+    let tm = identityMatrix();
+    let tlm = identityMatrix();
     let leading = 0, rise = 0, renderMode = 0;
     let fill: string | undefined;   // current fill color hex, or undefined for pattern/unknown
     let stroke: string | undefined;
-    // The fill/stroke color IS part of the graphics state, so it must be saved/restored across q/Q
-    // (and form XObjects), unlike the CTM which we deliberately ignore for q/Q to stay in
-    // getTextContent's coordinate frame. Without this, a color set inside a `q ... Q` bracket (a
-    // border, a background, a logo) would leak onto all following text.
+    // The CTM and the fill/stroke color are both graphics state, so both are saved and restored
+    // together across q/Q (and form XObjects). Without the color half, a color set inside a
+    // `q ... Q` bracket (a border, a background, a logo) would leak onto all following text; without
+    // the CTM half, every mark on a page that opens with a `cm` lands in the wrong place.
     const colorStack: { fill: string | undefined; stroke: string | undefined }[] = [];
 
     for (let i = 0; i < fnArray.length; i++) {
         const a = argsArray[i];
         switch (fnArray[i]) {
-            // Graphics-state save/restore: track color only (the CTM is left in getTextContent's frame).
-            case OPS.save: colorStack.push({ fill, stroke }); break;
-            case OPS.restore: { const s = colorStack.pop(); if (s) { fill = s.fill; stroke = s.stroke; } break; }
+            // Graphics-state save/restore: CTM and color together, exactly as pdf.js's StateManager.
+            case OPS.save: ctmStack.push(ctm); colorStack.push({ fill, stroke }); break;
+            case OPS.restore: {
+                if (ctmStack.length) ctm = ctmStack.pop()!;
+                const s = colorStack.pop(); if (s) { fill = s.fill; stroke = s.stroke; }
+                break;
+            }
 
-            // CTM: only form-XObject matrices move it (page cm/q/Q are ignored, as getTextContent does).
-            // A form localizes graphics state, so its color is saved/restored around it too.
+            // Page `cm`: composes into the CTM, as getTextContent's Util.transform(ctm, args) does.
+            case OPS.transform: { const cm = toMat6(a); if (cm) ctm = mul(ctm, cm); break; }
+
+            // A form XObject composes its /Matrix and localizes graphics state, colors included.
             case OPS.paintFormXObjectBegin: {
                 ctmStack.push(ctm);
                 colorStack.push({ fill, stroke });
@@ -94,7 +84,7 @@ export function collectColorMarks(ops: any, viewportTransform: number[], OPS: an
                 break;
             }
             case OPS.paintFormXObjectEnd: {
-                ctm = ctmStack.pop() ?? IDENTITY.slice();
+                if (ctmStack.length) ctm = ctmStack.pop()!;
                 const s = colorStack.pop(); if (s) { fill = s.fill; stroke = s.stroke; }
                 break;
             }
@@ -108,7 +98,7 @@ export function collectColorMarks(ops: any, viewportTransform: number[], OPS: an
             case OPS.setStrokeTransparent: stroke = undefined; break;
 
             // Text matrix (mirror of pdf.js TextState).
-            case OPS.beginText: tm = IDENTITY.slice(); tlm = IDENTITY.slice(); break;
+            case OPS.beginText: tm = identityMatrix(); tlm = identityMatrix(); break;
             case OPS.setTextMatrix: { const tmx = toMat6(a?.[0]); if (tmx) { tm = tmx; tlm = tmx.slice(); } break; }
             case OPS.moveText: tlm = translate(tlm, +a[0], +a[1]); tm = tlm.slice(); break;
             case OPS.setLeadingMoveText: leading = -(+a[1]); tlm = translate(tlm, +a[0], +a[1]); tm = tlm.slice(); break;

@@ -157,21 +157,61 @@ class NativeLayout {
         return r.text;
     }
 
-    /** Flattens a node into inline text runs (text + formatting + link flag), recursing into children. */
-    private collectRuns(node: OfficeContentNode): { text: string; fmt: TextFormatting; link: boolean }[] {
+    /**
+     * Flattens a node into inline text runs (text + formatting + link flag), recursing into children.
+     *
+     * The caller's `onNode` hook is applied to every descendant visited here - a text run is a node
+     * like any other, and `CommonGeneratorConfig.onNode` promises every node - so `false` drops the run
+     * (and its subtree) and a returned string replaces its text. The root `node` itself is NOT hooked:
+     * whoever passes it here (render(), or the table/cell walk) has already applied the hook to it, so
+     * hooking it again would fire twice for the same node.
+     */
+    private async collectRuns(node: OfficeContentNode): Promise<{ text: string; fmt: TextFormatting; link: boolean }[]> {
         const out: { text: string; fmt: TextFormatting; link: boolean }[] = [];
-        const walk = (n: OfficeContentNode, inherited: TextFormatting) => {
+        const walk = async (n: OfficeContentNode, inherited: TextFormatting, isRoot: boolean): Promise<void> => {
+            let text = n.text;
+            if (!isRoot) {
+                const override = await this.onNodeValue(n);
+                if (override === false) return;
+                if (typeof override === 'string') text = override;
+            }
             const fmt = { ...inherited, ...(n.formatting || {}) };
             const link = !!(n.metadata as any)?.link;
-            if (n.type === 'text' || (!n.children?.length && n.text)) {
-                if (n.text) out.push({ text: n.text, fmt, link });
+            if (n.type === 'text' || (!n.children?.length && text)) {
+                if (text) out.push({ text, fmt, link });
                 return;
             }
-            for (const c of n.children || []) walk(c, fmt);
+            for (const c of n.children || []) await walk(c, fmt, false);
         };
-        walk(node, {});
+        await walk(node, {}, true);
         if (!out.length && node.text) out.push({ text: node.text, fmt: node.formatting || {}, link: false });
         return out;
+    }
+
+    /**
+     * The plain string a table cell (or any node the engine paints as flat text rather than as a block)
+     * renders as. Cells built by the markup parsers carry their content only in `children` with no
+     * `text` of their own, so reading `cell.text` alone painted every Markdown/HTML table empty.
+     * Block children each own a line, which `wrapPlain` keeps as separate lines.
+     */
+    private async flatText(node: OfficeContentNode): Promise<string> {
+        const children = node.children || [];
+        // Inline-only children (the common Markdown cell) flatten to a single line; block children
+        // (paragraphs, headings, lists, a nested table's rows) are each a line of their own.
+        if (children.some(c => BLOCK_CELL_TYPES.has(c.type))) {
+            const lines: string[] = [];
+            for (const c of children) {
+                // Each block child is a node in its own right, so it gets the hook here (collectRuns
+                // only hooks the descendants of whatever root it is handed).
+                const override = await this.onNodeValue(c);
+                if (override === false) continue;
+                const t = typeof override === 'string' ? override : (await this.collectRuns(c)).map(r => r.text).join('');
+                if (t !== '') lines.push(t);
+            }
+            if (lines.length) return lines.join('\n');
+        }
+        const flat = (await this.collectRuns(node)).map(r => r.text).join('');
+        return flat || node.text || '';
     }
 
     /**
@@ -229,6 +269,19 @@ class NativeLayout {
             lineWidth += (line.length > 1 ? gap : 0) + w;
         }
         flush();
+    }
+
+    /**
+     * The caller's `onNode` verdict for one node, normalized to `false` (drop it) / a replacement
+     * string / undefined (render normally). Used for the nodes the engine paints as flat text - text
+     * runs, table rows and cells - where a returned string is spliced in as text rather than drawn as
+     * its own paragraph, so no "not representable" warning is owed.
+     */
+    private async onNodeValue(node: OfficeContentNode): Promise<false | string | undefined> {
+        if (!this.config.onNode) return undefined;
+        const override = await this.config.onNode(node);
+        if (override === false) return false;
+        return typeof override === 'string' ? override : undefined;
     }
 
     private onNodeWarned = false;
@@ -289,28 +342,35 @@ class NativeLayout {
             case 'break': return this.breakNode(node);
             default:
                 if (node.children?.length) { for (const c of node.children) await this.render(c); }
-                else if (node.text) this.paragraph(node);
+                else if (node.text) await this.paragraph(node);
                 return;
         }
     }
 
-    private heading(node: OfficeContentNode): void {
+    private async heading(node: OfficeContentNode): Promise<void> {
         const level = Math.min(6, Math.max(1, (node.metadata as any)?.level || 1));
         const size = [24, 20, 16, 14, 12, 11][level - 1];
         this.y += size * 0.6;
-        const runs = this.collectRuns(node).map(r => ({ ...r, fmt: { ...r.fmt, bold: true, size: `${size}pt` } }));
+        const runs = (await this.collectRuns(node)).map(r => ({ ...r, fmt: { ...r.fmt, bold: true, size: `${size}pt` } }));
         this.drawRuns(runs.length ? runs : [{ text: node.text || '', fmt: { bold: true, size: `${size}pt` }, link: false }], this.margin.left, this.contentWidth);
         this.y += size * 0.35;
     }
 
-    private paragraph(node: OfficeContentNode, indentLeft = 0): void {
-        const runs = this.collectRuns(node);
+    private async paragraph(node: OfficeContentNode, indentLeft = 0): Promise<void> {
+        const runs = await this.collectRuns(node);
         if (!runs.length) { this.y += 6; return; }
         this.drawRuns(runs, this.margin.left + indentLeft, this.contentWidth - indentLeft);
         this.y += 6;
     }
 
-    private listItem(node: OfficeContentNode): void {
+    /** Draws one already-known plain string as a paragraph (an image's alt text, a note marker). */
+    private plainParagraph(text: string): void {
+        if (!text) return;
+        this.drawRuns([{ text, fmt: {}, link: false }], this.margin.left, this.contentWidth);
+        this.y += 6;
+    }
+
+    private async listItem(node: OfficeContentNode): Promise<void> {
         const meta = node.metadata as any;
         const level = Math.max(0, meta?.indentation || 0);
         const indent = 18 + level * 18;
@@ -323,19 +383,21 @@ class NativeLayout {
         const baseline = this.pageH - this.y - size;
         this.page.drawText(this.enc(marker), { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
         // Body: the item's own text runs (its non-list children); nested list children render after.
-        const bodyRuns = this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
+        const bodyRuns = await this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
         if (bodyRuns.length) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
         else this.y += size * 1.35;
-        for (const c of (node.children || []).filter(c => c.type === 'list')) this.listItem(c);
+        for (const c of (node.children || []).filter(c => c.type === 'list')) await this.listItem(c);
     }
 
     private code(node: OfficeContentNode): void {
         const size = 10, lh = size * 1.35;
         this.y += 2;
         // Draw each source line verbatim in a monospace font so leading indentation is preserved
-        // (word-splitting would trim it); over-wide lines wrap at character boundaries.
-        for (const raw of this.enc(node.text || '').split('\n')) {
-            const expanded = raw.replace(/\t/g, '    ');
+        // (word-splitting would trim it); over-wide lines wrap at character boundaries. Split BEFORE
+        // encoding: `enc` maps every newline to a space (there are no line breaks inside a drawn
+        // string), so encoding first would collapse the whole block onto one line.
+        for (const raw of String(node.text || '').split(/\r\n|\r|\n/)) {
+            const expanded = this.enc(raw.replace(/\t/g, '    '));
             const chunks = splitToWidth(expanded || ' ', this.fonts.mono, size, this.contentWidth - 12);
             for (const chunk of (chunks.length ? chunks : [' '])) {
                 this.ensureSpace(lh);
@@ -346,8 +408,8 @@ class NativeLayout {
         this.y += 6;
     }
 
-    private note(node: OfficeContentNode): void {
-        const runs = this.collectRuns(node).map(r => ({ ...r, fmt: { ...r.fmt, size: '9pt' } }));
+    private async note(node: OfficeContentNode): Promise<void> {
+        const runs = (await this.collectRuns(node)).map(r => ({ ...r, fmt: { ...r.fmt, size: '9pt' } }));
         if (runs.length) this.drawRuns(runs, this.margin.left + 12, this.contentWidth - 12);
         this.y += 4;
     }
@@ -373,12 +435,20 @@ class NativeLayout {
         const mode = this.imageMode;
         if (mode === 'none') return;
         const ocr = (node.text || '').trim();
-        if (mode === 'ocr-text-only') { if (ocr) this.paragraph(node); return; }
+        if (mode === 'ocr-text-only') { if (ocr) await this.paragraph(node); return; }
 
         const meta = node.metadata as any;
         const name = meta?.attachmentName;
+        // Nothing renderable: keep the alt text (or the OCR text) rather than drawing nothing, and
+        // report the failure - the DOCX and ODT generators degrade and warn for the same input, and a
+        // picture that silently vanishes gives the caller no way to find out.
+        const fallback = () => this.plainParagraph(meta?.altText || ocr);
         const attachment = name ? this.attachmentsByName.get(name) : undefined;
-        if (!attachment?.data) { if (node.text) this.paragraph(node); return; }
+        if (!attachment?.data) {
+            if (name) this.reportWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name, reason: attachment ? 'attachment has no data' : 'missing attachment' });
+            fallback();
+            return;
+        }
         try {
             const bytes = base64ToBytes(attachment.data);
             const isJpg = /jpe?g/i.test(attachment.extension || '') || attachment.mimeType === 'image/jpeg';
@@ -409,11 +479,13 @@ class NativeLayout {
             this.page.drawImage(img, { x: this.margin.left, y: this.pageH - this.y - h, width: w, height: h });
             this.y += h + 6;
         } catch {
-            if (node.text) this.paragraph(node);
+            // pdf-lib embeds PNG and JPEG only, so a GIF/BMP/WebP/TIFF/SVG attachment lands here.
+            this.reportWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name, reason: 'unsupported image format (the native PDF engine embeds PNG and JPEG only)' });
+            fallback();
             return;
         }
         // 'image+ocr-text': draw the recognized text just below the successfully embedded image.
-        if (mode === 'image+ocr-text' && ocr) this.paragraph(node);
+        if (mode === 'image+ocr-text' && ocr) await this.paragraph(node);
     }
 
     /**
@@ -428,17 +500,17 @@ class NativeLayout {
     }
 
     /** Draws the footnote/endnote bodies gathered during the walk, under a short separating rule. */
-    flushNotes(): void {
+    async flushNotes(): Promise<void> {
         if (!this.collectedNotes.length) return;
         this.y += 8;
         this.ensureSpace(14);
         const yy = this.pageH - this.y;
         this.page.drawLine({ start: { x: this.margin.left, y: yy }, end: { x: this.margin.left + Math.min(180, this.contentWidth), y: yy }, thickness: 0.5, color: this.lib.rgb(0.7, 0.7, 0.7) });
         this.y += 8;
-        for (const n of this.collectedNotes) this.note(n);
+        for (const n of this.collectedNotes) await this.note(n);
     }
 
-    private table(node: OfficeContentNode): void {
+    private async table(node: OfficeContentNode): Promise<void> {
         const rows = (node.children || []).filter(r => r.type === 'row');
         if (!rows.length) return;
         // Total columns = the widest grid extent any cell reaches (col + colSpan), falling back to
@@ -457,10 +529,14 @@ class NativeLayout {
         const border = this.lib.rgb(0.6, 0.6, 0.6);
 
         this.y += 2;
+        /** Wraps a cell's (un-encoded) text to the width of the columns it spans. */
+        const wrap = (text: string, span: number) => wrapPlain(text, this.fonts.regular, size, Math.max(10, colW * span - 2 * pad), t => this.enc(t));
         // Grid occupancy: column -> rows still covered by a rowspan from above, so a spanning cell
         // reserves its column(s) below instead of letting later rows slide left under it.
         const carry = new Map<number, number>();
         for (const row of rows) {
+            const rowOverride = await this.onNodeValue(row);
+            if (rowOverride === false) continue;
             const cells = (row.children || []).filter(c => c.type === 'cell');
             // Header detection via the shared heuristic every other generator uses (row/cell `style`,
             // `isHeader`, or an all-bold first row), so a bold first row from DOCX/Markdown bolds here
@@ -468,14 +544,23 @@ class NativeLayout {
             const rowIsHeader = isHeaderRow(row, row === rows[0]);
             // Place each cell into a grid column: honour explicit `col`, otherwise the next free one.
             let cursor = 0;
-            const placed: { col: number; span: number; lines: string[]; header: boolean }[] = [];
-            for (const cell of cells) {
+            const placed: { col: number; span: number; rowSpan: number; lines: string[]; header: boolean }[] = [];
+            if (typeof rowOverride === 'string') {
+                // An onNode string for a whole row: paint it across the full grid width, since the
+                // engine has no markup to splice a replacement row into.
+                placed.push({ col: 0, span: cols, rowSpan: 1, lines: wrap(rowOverride, cols), header: rowIsHeader });
+            }
+            for (const cell of typeof rowOverride === 'string' ? [] : cells) {
+                const override = await this.onNodeValue(cell);
+                if (override === false) continue;
                 const meta = cell.metadata as CellMeta;
                 const span = meta?.colSpan && meta.colSpan > 1 ? meta.colSpan : 1;
                 let col = typeof meta?.col === 'number' ? meta.col : -1;
                 if (col < 0) { while ((carry.get(cursor) || 0) > 0) cursor++; col = cursor; }
-                const cw = colW * span - 2 * pad;
-                placed.push({ col, span, lines: wrapPlain(this.enc(cell.text || ''), this.fonts.regular, size, Math.max(10, cw)), header: rowIsHeader || meta?.style === 'header' });
+                // Cells built by the markup parsers carry their text only in `children`; reading
+                // `cell.text` alone rendered every Markdown/HTML table as an empty grid.
+                const text = typeof override === 'string' ? override : await this.flatText(cell);
+                placed.push({ col, span, rowSpan: Math.max(1, meta?.rowSpan || 1), lines: wrap(text, span), header: rowIsHeader || meta?.style === 'header' });
                 cursor = col + span;
             }
             const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * size * 1.35)) + 2 * pad;
@@ -490,10 +575,9 @@ class NativeLayout {
                 for (const line of p.lines) { this.page.drawText(line, { x: x + pad, y: ty, size, font, color: this.lib.rgb(0.12, 0.12, 0.12) }); ty -= size * 1.35; }
             }
             // Record this row's rowspans, then age the carries by one row.
-            placed.forEach((p, i) => {
-                const rSpan = (cells[i].metadata as CellMeta)?.rowSpan;
-                if (rSpan && rSpan > 1) for (let c = p.col; c < p.col + p.span; c++) newCarry.set(c, rSpan - 1);
-            });
+            for (const p of placed) {
+                if (p.rowSpan > 1) for (let c = p.col; c < p.col + p.span; c++) newCarry.set(c, p.rowSpan - 1);
+            }
             for (const [c, v] of [...carry]) { if (v > 1) carry.set(c, v - 1); else carry.delete(c); }
             for (const [c, v] of newCarry) carry.set(c, v);
             this.y += rowH;
@@ -504,6 +588,12 @@ class NativeLayout {
 
 /** Minimal shape of `CellMetadata` the native engine reads. */
 interface CellMeta { col?: number; colSpan?: number; rowSpan?: number; style?: string; }
+
+/**
+ * Node types that own a line of their own inside a table cell. A cell holding these is flattened one
+ * line per child; a cell holding only inline content (the usual Markdown/HTML cell) flattens to one.
+ */
+const BLOCK_CELL_TYPES = new Set<string>(['paragraph', 'heading', 'list', 'code', 'table', 'row', 'admonition', 'note', 'page', 'slide', 'sheet']);
 
 /** Parses a `TextFormatting.size` ("12pt", "14") into points, or null. */
 function parseFontSize(size: string | undefined): number | null {
@@ -532,11 +622,16 @@ function splitToWidth(text: string, font: any, size: number, width: number): str
     return chunks.length ? chunks : [text];
 }
 
-/** Greedy word-wrap of plain text to a pixel width, returning the wrapped lines. */
-function wrapPlain(text: string, font: any, size: number, width: number): string[] {
-    text = toWinAnsi(text).text; // defensive (see splitToWidth)
+/**
+ * Greedy word-wrap of plain, UN-ENCODED text to a pixel width, returning the wrapped lines. The text
+ * is split into source lines first and encoded one line at a time: `toWinAnsi` maps every newline to
+ * a space (a drawn string cannot contain one), so encoding up front would collapse a multi-line cell
+ * onto a single line. `enc` defaults to the bare mapping for callers with no warning channel.
+ */
+function wrapPlain(text: string, font: any, size: number, width: number, enc: (s: string) => string = t => toWinAnsi(t).text): string[] {
     const out: string[] = [];
-    for (const para of text.split('\n')) {
+    for (const raw of String(text ?? '').split(/\r\n|\r|\n/)) {
+        const para = enc(raw);
         const words = para.split(/\s+/).filter(Boolean);
         let line = '';
         for (const w of words) {
@@ -627,7 +722,7 @@ export async function renderNativePdf(ast: OfficeParserAST, config: FullGenerato
     for (const node of ast.content) layout.collectNotes(node);
     for (const node of ast.content) await layout.render(node, true);
     for (const n of ast.auxiliary?.footers || []) await layout.render(n);
-    layout.flushNotes();
+    await layout.flushNotes();
 
     return await pdf.save();
 }

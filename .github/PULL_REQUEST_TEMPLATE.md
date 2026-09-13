@@ -5,7 +5,7 @@ Please include a summary of the changes and the related issue (if any).
 - [ ] WordParser (DOCX)
 - [ ] PowerPointParser (PPTX)
 - [ ] ExcelParser (XLSX)
-- [ ] OpenOfficeParser (ODT/ODS/ODP)
+- [ ] OpenOfficeParser (ODT/ODS/ODP/ODG)
 - [ ] EpubParser / EpubGenerator
 - [ ] PDFParser
 - [ ] OCR / Worker Pool

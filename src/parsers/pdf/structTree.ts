@@ -27,6 +27,12 @@ interface StructNode {
 /** Options that gate which tagged roles are emitted. */
 export interface TaggedOptions {
     ignoreNotes: boolean;
+    /**
+     * Document-wide list counter, owned by the caller and shared across pages. Numbering is keyed on
+     * `listId`, so a per-page counter would hand every page's first list the same `pdf-list-1` and
+     * make a generator continue page 2's list from page 1's. The geometric path counts the same way.
+     */
+    listCounter: { n: number };
 }
 
 /** Result of walking one page's structure tree. */
@@ -67,7 +73,7 @@ export function buildTaggedNodes(
     structTree: any, runsByMcid: Map<string, RawRun[]>, page: PageContext, doc: DocContext, opts: TaggedOptions,
 ): TaggedResult {
     const covered = new Set<string>();
-    const ctx: WalkCtx = { runsByMcid, page, doc, covered, opts, listCounter: { n: 0 } };
+    const ctx: WalkCtx = { runsByMcid, page, doc, covered, opts, listCounter: opts.listCounter };
     const nodes = structTree ? walkChildren(structTree as StructNode, ctx, 0) : [];
     return { nodes, coveredMcids: covered };
 }
@@ -176,13 +182,13 @@ function lastTextChild(node: OfficeContentNode): OfficeContentNode | undefined {
     return found;
 }
 
-/** Finds Note/FENote subtrees anywhere under a node. */
-function findNotes(node: StructNode): StructNode[] {
+/** Finds Note/FENote subtrees anywhere under a node, without descending into `skip` roles. */
+function findNotes(node: StructNode, skip?: Set<string>): StructNode[] {
     const out: StructNode[] = [];
     const recurse = (n: StructNode) => {
         for (const c of n.children || []) {
             if (ALWAYS_SKIP.has(role(c))) out.push(c);
-            else recurse(c);
+            else if (!skip || !skip.has(role(c))) recurse(c);
         }
     };
     recurse(node);
@@ -427,6 +433,9 @@ function parseListNumber(label: string): number | null {
     return null;
 }
 
+/** Roles inside a list body that build their own nodes, so the item must not absorb their content. */
+const NESTED_IN_LBODY = new Set(['L', 'Table']);
+
 function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeContentNode[] {
     const items: OfficeContentNode[] = [];
     const listId = `pdf-list-${++ctx.listCounter.n}`;
@@ -440,14 +449,24 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
         let label = '';
         const bodyNodes: OfficeContentNode[] = [];
         const nested: OfficeContentNode[] = [];
+        const itemNotes: OfficeContentNode[] = [];
         for (const part of li.children || []) {
             const pr = role(part);
             if (pr === 'Lbl') {
                 label = collectRuns(part, ctx).map(r => r.text).join('').trim();
             } else if (pr === 'LBody') {
                 // Direct text runs of the body (excluding nested lists/tables).
-                const directRuns = collectRuns(part, ctx, new Set(['L', 'Table']));
+                const directRuns = collectRuns(part, ctx, NESTED_IN_LBODY);
                 if (directRuns.length) { const p = runsToParagraph(directRuns, ctx.page, ctx.doc, 0); if (p) bodyNodes.push(p); }
+                // Footnotes hanging off the item text, collected exactly as a paragraph's are. Without
+                // this their runs stay uncovered: they come back as stray paragraphs spliced into the
+                // page and, worse, make the page look like it has text outside the tag tree. Nested
+                // lists and tables build their own notes, so this must not descend into them.
+                for (const noteNode of findNotes(part, NESTED_IN_LBODY)) {
+                    if (ctx.opts.ignoreNotes) { markCovered(noteNode, ctx); continue; }
+                    const n = buildNote(noteNode, ctx);
+                    if (n) itemNotes.push(n);
+                }
                 for (const b of part.children || []) {
                     const br = role(b);
                     if (br === 'L') nested.push(...buildList(b, ctx, indent + 1));
@@ -482,6 +501,13 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
         };
         const b = unionAll(bodyNodes.map(n => n.bounds));
         if (b) item.bounds = b;
+        if (itemNotes.length) {
+            // Anchor on the item's last text run so generators render the citation inline, as the
+            // paragraph path does; with no text run to hang them on, keep them as trailing children.
+            const anchor = lastTextChild(item);
+            if (anchor) anchor.notes = [...(anchor.notes || []), ...itemNotes];
+            else item.children = [...(item.children || []), ...itemNotes];
+        }
         items.push(item);
         items.push(...nested);
         idx++;

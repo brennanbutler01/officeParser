@@ -24,8 +24,11 @@ export const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig
         if (isEncryptedOoxml(buffer)) decrypt = decryptOoxml;
     } else if (await isEncryptedOdf(buffer, limits)) {
         // The ODF detection and decryption reuse the caller's decompression limits, so a zip-bomb
-        // in a would-be encrypted ODF is bounded exactly as an ordinary document is.
-        decrypt = (b, password) => decryptOdf(b, password, limits, config);
+        // in a would-be encrypted ODF is bounded exactly as an ordinary document is. The PBKDF2 budget
+        // is created here, outside the retry loop below, so the whole password dance shares one
+        // allowance instead of granting a hostile file a fresh one on every attempt.
+        const budget = { spent: 0 };
+        decrypt = (b, password) => decryptOdf(b, password, limits, config, budget);
     }
     if (!decrypt) return buffer;
 

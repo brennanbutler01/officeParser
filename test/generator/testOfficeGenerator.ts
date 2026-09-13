@@ -32,6 +32,7 @@ import {
 } from '../../src/types';
 import { resolveGeneratorConfig } from '../../src/utils/configUtils.js';
 import { createAST } from '../../src/utils/astUtils.js';
+import { isHeaderRow } from '../../src/utils/officeGenUtils.js';
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -1834,6 +1835,370 @@ async function runWhitespaceFidelityTests(): Promise<GenFeatureTest[]> {
 }
 
 // ============================================================================
+// PRE-MERGE REVIEW REGRESSIONS (v8.0.0)
+// ============================================================================
+
+/** Concatenated text of a node's whole subtree, for asserting on a re-parsed document. */
+function subtreeText(node: OfficeContentNode | undefined): string {
+    if (!node) return '';
+    let out = node.type === 'text' ? (node.text || '') : '';
+    if (!node.children?.length && node.text && node.type !== 'text') out += node.text;
+    for (const c of node.children || []) out += subtreeText(c);
+    return out;
+}
+
+/** The first `table` node anywhere in a parsed document. */
+function firstTable(nodes: OfficeContentNode[] | undefined): OfficeContentNode | null {
+    for (const n of nodes || []) {
+        if (n.type === 'table') return n;
+        const found = firstTable(n.children);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** The rendered cell strings of a table, row by row. */
+const tableGrid = (table: OfficeContentNode | null): string[][] =>
+    (table?.children || []).filter(r => r.type === 'row').map(r => (r.children || []).filter(c => c.type === 'cell').map(subtreeText));
+
+/** A 1x1 GIF: a real image pdf-lib cannot embed (it handles PNG and JPEG only). */
+const GIF_1PX = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+/** A 1x1 PNG. */
+const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+const synthAst = (type: string, content: OfficeContentNode[], attachments: any[] = []) =>
+    createAST(type as any, {}, content, attachments, { newlineDelimiter: '\n' }, undefined, () => '');
+
+/**
+ * Regressions for the native PDF engine (`pdfConfig.engine: 'native'`), which lays a PDF out itself
+ * with pdf-lib instead of printing HTML through a headless browser. Each case generates a PDF, parses
+ * it back, and asserts on the text that comes out - the engine paints pixels, so the only honest way
+ * to test it is to read the result back.
+ */
+async function runNativePdfEngineTests(): Promise<GenFeatureTest[]> {
+    const results: GenFeatureTest[] = [];
+    const category = 'Native PDF Engine';
+    const mk = (feature: string, exp: any, act: any, ok: boolean, details: string): GenFeatureTest => ({
+        category, feature, sourceFormat: 'synthetic', destFormat: 'pdf',
+        result: { status: ok ? 'PASS' : 'FAIL', expected: exp, actual: act, details, duration: 0 }
+    });
+    const nativeText = async (ast: any, config: any = {}): Promise<{ text: string; messages: any[] }> => {
+        const res = await OfficeGenerator.generate(ast, 'pdf' as any, { ...config, pdfConfig: { engine: 'native' } } as any);
+        const back = await OfficeParser.parseOffice(Buffer.from(res.value as Uint8Array), { ...PARSER_CONFIG, ocr: false });
+        return { text: String((await (back as any).to('text')).value), messages: (res as any).messages || [] };
+    };
+
+    // --- Cell text comes from the cell's children, not only from `cell.text` ---
+    // Markdown and HTML build cells as `{ type:'cell', children:[...] }` with no `text` of their own,
+    // so an engine reading `cell.text` painted every table from those sources as an empty grid. The
+    // DOCX/ODT/XLSX/PDF parsers all set `text`, which is why no fixture caught it.
+    const mdCellAst = synthAst('md', [{
+        type: 'table', children: [
+            { type: 'row', children: [{ type: 'cell', children: [{ type: 'text', text: 'HeadOne' }] }, { type: 'cell', children: [{ type: 'text', text: 'HeadTwo' }] }] },
+            { type: 'row', children: [{ type: 'cell', children: [{ type: 'paragraph', children: [{ type: 'text', text: 'CellOne' }] }] }, { type: 'cell', children: [{ type: 'text', text: 'CellTwo' }] }] },
+        ],
+    } as OfficeContentNode]);
+    const cellOut = await nativeText(mdCellAst);
+    results.push(mk('table cells with no `text` (Markdown/HTML shape) still render',
+        'HeadOne/CellOne/CellTwo present', JSON.stringify(cellOut.text).slice(0, 160),
+        ['HeadOne', 'HeadTwo', 'CellOne', 'CellTwo'].every(t => cellOut.text.includes(t)),
+        'a Markdown table converted with engine:native produced a table of empty boxes'));
+
+    // --- A code block keeps one line per source line, with its indentation ---
+    // The WinAnsi mapping replaces every newline with a space, so splitting AFTER encoding collapsed
+    // the whole block onto one wrapped line.
+    const codeAst = synthAst('md', [{ type: 'code', text: 'line one\n    line two indented\nline three' } as OfficeContentNode]);
+    const codeOut = await nativeText(codeAst);
+    const codeLines = codeOut.text.split('\n').filter(l => l.trim());
+    results.push(mk('a fenced code block keeps its lines',
+        '3 lines', `${codeLines.length}: ${JSON.stringify(codeOut.text)}`,
+        codeLines.length === 3 && codeOut.text.includes('line three'),
+        'encoding before splitting turned every newline into a space, so the block rendered as one line'));
+    results.push(mk('a code line keeps its leading indentation',
+        'indented second line', JSON.stringify(codeLines[1] ?? ''),
+        /^\s+line two indented/.test(codeLines[1] ?? ''),
+        'leading whitespace is the whole point of drawing code lines verbatim in a monospace font'));
+
+    // --- A multi-line cell keeps its lines too (same collapse, via wrapPlain) ---
+    const multiLineCell = synthAst('docx', [{
+        type: 'table', children: [{ type: 'row', children: [{ type: 'cell', children: [
+            { type: 'paragraph', children: [{ type: 'text', text: 'CellLineA' }] },
+            { type: 'paragraph', children: [{ type: 'text', text: 'CellLineB' }] },
+        ] }] }],
+    } as OfficeContentNode]);
+    const multiOut = await nativeText(multiLineCell);
+    results.push(mk('a cell with two paragraphs renders two lines',
+        'CellLineA and CellLineB on separate lines', JSON.stringify(multiOut.text),
+        /CellLineA[\s\S]*\n[\s\S]*CellLineB/.test(multiOut.text),
+        'block children of a cell each own a line; joining them would run the words together'));
+
+    // --- onNode reaches text runs, which is where nearly all the text lives ---
+    let runCalls = 0;
+    const hookAst = synthAst('md', [{ type: 'paragraph', children: [{ type: 'text', text: 'Original words' }] } as OfficeContentNode]);
+    const hookOut = await nativeText(hookAst, { onNode: (n: OfficeContentNode) => { if (n.type === 'text') { runCalls++; return 'OVERRIDDEN'; } return undefined; } });
+    results.push(mk('onNode fires for text runs and its string override is drawn',
+        '1 call, output contains OVERRIDDEN', `${runCalls} call(s), ${JSON.stringify(hookOut.text)}`,
+        runCalls === 1 && hookOut.text.includes('OVERRIDDEN') && !hookOut.text.includes('Original'),
+        'CommonGeneratorConfig.onNode promises every node; the engine flattened runs without ever asking'));
+
+    // --- An image the engine cannot embed degrades to its alt text, and says so ---
+    const gifAst = synthAst('docx', [{ type: 'image', metadata: { attachmentName: 'pic.gif', altText: 'A described picture' } } as OfficeContentNode],
+        [{ name: 'pic.gif', extension: 'gif', mimeType: 'image/gif', data: GIF_1PX, size: 40 }]);
+    const gifOut = await nativeText(gifAst);
+    results.push(mk('an unembeddable image (GIF) falls back to its alt text',
+        'alt text drawn', JSON.stringify(gifOut.text).slice(0, 120),
+        gifOut.text.includes('A described picture'),
+        'pdf-lib embeds PNG/JPEG only; a bare catch drew nothing at all for every other format'));
+    results.push(mk('an unembeddable image warns (IMAGE_PROCESSING_FAILED)',
+        'IMAGE_PROCESSING_FAILED', JSON.stringify(gifOut.messages.map((m: any) => m.code)),
+        gifOut.messages.some((m: any) => m.code === OfficeWarningType.IMAGE_PROCESSING_FAILED),
+        'DOCX and ODT warn and degrade for the same input; a silently vanishing picture is unfindable'));
+
+    const missingAst = synthAst('docx', [{ type: 'image', metadata: { attachmentName: 'gone.png', altText: 'Missing picture alt' } } as OfficeContentNode]);
+    const missingOut = await nativeText(missingAst);
+    results.push(mk('a missing attachment falls back to alt text and warns',
+        'alt text + IMAGE_PROCESSING_FAILED', `${missingOut.text.includes('Missing picture alt')}, ${JSON.stringify(missingOut.messages.map((m: any) => m.code))}`,
+        missingOut.text.includes('Missing picture alt') && missingOut.messages.some((m: any) => m.code === OfficeWarningType.IMAGE_PROCESSING_FAILED),
+        'an unresolvable attachment name is the other half of the same silent-drop path'));
+
+    return results;
+}
+
+/**
+ * Regressions for table geometry: the sparse grids a spreadsheet parser emits, and header rows.
+ *
+ * `ExcelParser` emits only the non-empty cells (each carrying its absolute `{ row, col }`) and only
+ * the non-empty rows, so a writer that places cells at a running cursor silently moves the data.
+ * Header rows have the mirror problem: they are written in a form the reader then does not read back.
+ */
+async function runTableGeometryTests(): Promise<GenFeatureTest[]> {
+    const results: GenFeatureTest[] = [];
+    const category = 'Table Geometry';
+    const mk = (destFormat: string, feature: string, exp: any, act: any, ok: boolean, details: string): GenFeatureTest => ({
+        category, feature, sourceFormat: 'synthetic', destFormat,
+        result: { status: ok ? 'PASS' : 'FAIL', expected: exp, actual: act, details, duration: 0 }
+    });
+    const roundTrip = async (ast: any, fmt: 'docx' | 'odt') => {
+        const res = await OfficeGenerator.generate(ast, fmt as any, deterministicConfigFor(fmt) as any);
+        const tmp = path.join(__dirname, 'output', `_regression_tmp.${fmt}`);
+        fs.writeFileSync(tmp, res.value as Uint8Array);
+        try {
+            return await OfficeParser.parseOffice(tmp, PARSER_CONFIG);
+        } finally {
+            if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        }
+    };
+
+    // --- A sparse sheet (values in A1 and D1, nothing in row 2) keeps its coordinates ---
+    const sparseCell = (row: number, col: number, text: string) =>
+        ({ type: 'cell', text, metadata: { row, col }, children: [{ type: 'text', text }] } as OfficeContentNode);
+    const sparseAst = () => synthAst('xlsx', [{
+        type: 'sheet', metadata: { sheetName: 'Sheet1' }, children: [
+            { type: 'row', children: [sparseCell(0, 0, 'A1VAL'), sparseCell(0, 3, 'D1VAL')] },
+            { type: 'row', children: [sparseCell(2, 0, 'A3VAL')] },
+        ],
+    } as OfficeContentNode]);
+
+    for (const fmt of ['docx', 'odt'] as const) {
+        const grid = tableGrid(firstTable((await roundTrip(sparseAst(), fmt)).content));
+        const firstRow = grid[0] || [];
+        results.push(mk(fmt, 'a value in column D stays in column D',
+            'A1VAL at index 0, D1VAL at index 3', JSON.stringify(firstRow),
+            firstRow[0] === 'A1VAL' && firstRow[3] === 'D1VAL',
+            'cells were placed at a running cursor, so a sparse row collapsed into adjacent columns'));
+        results.push(mk(fmt, 'an empty spreadsheet row is not dropped',
+            '3 rows with A3VAL last', `${grid.length} rows: ${JSON.stringify(grid.map(r => r[0]))}`,
+            grid.length === 3 && (grid[2] || [])[0] === 'A3VAL',
+            'only non-empty rows reach the AST; dropping the gap moves every row below it up'));
+    }
+
+    // --- A header row survives the library's own round trip, in both packaged formats ---
+    const headerCell = (t: string) => ({ type: 'cell', text: t, children: [{ type: 'text', text: t, formatting: { bold: true } }] } as OfficeContentNode);
+    const bodyCell = (t: string) => ({ type: 'cell', text: t, children: [{ type: 'text', text: t }] } as OfficeContentNode);
+    const headerAst = () => synthAst('docx', [{
+        type: 'table', children: [
+            { type: 'row', children: [headerCell('HeadOne'), headerCell('HeadTwo')] },
+            { type: 'row', children: [bodyCell('bodyOne'), bodyCell('bodyTwo')] },
+        ],
+    } as OfficeContentNode]);
+
+    for (const fmt of ['docx', 'odt'] as const) {
+        const table = firstTable((await roundTrip(headerAst(), fmt)).content);
+        const grid = tableGrid(table);
+        const rows = (table?.children || []).filter(r => r.type === 'row');
+        results.push(mk(fmt, 'a header row survives the round trip',
+            '2 rows, header first', JSON.stringify(grid),
+            grid.length === 2 && (grid[0] || [])[0] === 'HeadOne',
+            fmt === 'odt'
+                ? 'the generator wraps header rows in <table:table-header-rows>, which the reader skipped entirely - losing the row, including from real LibreOffice files'
+                : 'the header row must not be dropped or reordered by the <w:tblHeader/> marker'));
+        results.push(mk(fmt, 'the re-parsed header row is still recognized as a header',
+            'isHeaderRow(row 0) true, row 1 false', `${isHeaderRow(rows[0], true)}, ${isHeaderRow(rows[1], false)}`,
+            !!rows[0] && !!rows[1] && isHeaderRow(rows[0], true) && !isHeaderRow(rows[1], false),
+            'the header marker each format writes (<w:tblHeader/>, <table:table-header-rows>) has to be read back, or the header is only ever recovered when it happens to be all-bold'));
+    }
+
+    // --- onNode fires exactly once per node in HTML, including in the table shapes that
+    // re-render their rows (a bold-header table, a rowspan grid, a spreadsheet sheet) ---
+    const countOnNode = async (content: OfficeContentNode[]): Promise<Record<string, number>> => {
+        const counts: Record<string, number> = {};
+        await OfficeGenerator.generate(synthAst('docx', content) as any, 'html' as any,
+            { onNode: (n: OfficeContentNode) => { counts[n.type] = (counts[n.type] || 0) + 1; return undefined; } } as any);
+        return counts;
+    };
+    const plainCounts = await countOnNode([{ type: 'paragraph', children: [{ type: 'text', text: 'Plain' }] } as OfficeContentNode]);
+    results.push(mk('html', 'onNode fires once per node (plain paragraph)',
+        '{paragraph:1, text:1}', JSON.stringify(plainCounts),
+        plainCounts.paragraph === 1 && plainCounts.text === 1,
+        'the pre-evaluated verdict was passed down as a bare value, and "no override" IS undefined - so the hook was asked again'));
+
+    const headerCounts = await countOnNode([{
+        type: 'table', children: [
+            { type: 'row', children: [headerCell('H1'), headerCell('H2')] },
+            { type: 'row', children: [bodyCell('b1'), bodyCell('b2')] },
+        ],
+    } as OfficeContentNode]);
+    results.push(mk('html', 'onNode fires once per node (bold-header table)',
+        '{table:1, row:2, cell:4, text:4}', JSON.stringify(headerCounts),
+        headerCounts.table === 1 && headerCounts.row === 2 && headerCounts.cell === 4 && headerCounts.text === 4,
+        'the header path re-renders the rows, so the generic children pass was pure waste and fired the hook a second time for every cell'));
+
+    const rowspanCounts = await countOnNode([{
+        type: 'table', children: [
+            { type: 'row', children: [{ type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'spanning' }] } as OfficeContentNode, bodyCell('x')] },
+            { type: 'row', children: [bodyCell('y')] },
+        ],
+    } as OfficeContentNode]);
+    results.push(mk('html', 'onNode fires once per node (rowspan table)',
+        '{table:1, row:2, cell:3, text:3}', JSON.stringify(rowspanCounts),
+        rowspanCounts.table === 1 && rowspanCounts.row === 2 && rowspanCounts.cell === 3 && rowspanCounts.text === 3,
+        'the rowspan grid builds each <tr> itself, so the row nodes have to be offered to the hook there'));
+
+    const sheetCounts = await countOnNode([{
+        type: 'sheet', metadata: { sheetName: 'S' }, children: [
+            { type: 'row', children: [sparseCell(0, 0, 'A1'), sparseCell(0, 1, 'B1')] },
+        ],
+    } as OfficeContentNode]);
+    results.push(mk('html', 'onNode fires once per node (spreadsheet sheet)',
+        '{sheet:1, row:1, cell:2, text:2}', JSON.stringify(sheetCounts),
+        sheetCounts.sheet === 1 && sheetCounts.row === 1 && sheetCounts.cell === 2 && sheetCounts.text === 2,
+        'the sheet branch rebuilds the grid from the cell indices and never reads the generic children output'));
+
+    return results;
+}
+
+/**
+ * Regressions for how an image, a note and OCR text degrade when the target format cannot carry them
+ * whole: an image too large to inline, a picture the format cannot embed, a note that opens with a
+ * table, and multi-line recognized text.
+ */
+async function runDegradeFidelityTests(): Promise<GenFeatureTest[]> {
+    const results: GenFeatureTest[] = [];
+    const category = 'Degrade Fidelity';
+    const mk = (destFormat: string, feature: string, exp: any, act: any, ok: boolean, details: string): GenFeatureTest => ({
+        category, feature, sourceFormat: 'synthetic', destFormat,
+        result: { status: ok ? 'PASS' : 'FAIL', expected: exp, actual: act, details, duration: 0 }
+    });
+
+    // --- An image over maxInlineImageBytes renders its recognized text, per the documented contract ---
+    const overCapAst = (ocr: string) => synthAst('docx',
+        [{ type: 'image', text: ocr, metadata: { attachmentName: 'big.png', altText: 'Alt' } } as OfficeContentNode],
+        [{ name: 'big.png', extension: 'png', mimeType: 'image/png', data: 'A'.repeat(4000), size: 3000 }]);
+    const OCR_TEXT = 'Recognized line one\nRecognized line two';
+
+    const overCapCfg = { maxInlineImageBytes: 100 } as any;
+    const mdWithOcr = String((await OfficeGenerator.generate(overCapAst(OCR_TEXT) as any, 'md' as any, overCapCfg)).value);
+    results.push(mk('md', 'an over-cap image renders its OCR text',
+        'fenced OCR block, no ![...](big.png)', JSON.stringify(mdWithOcr),
+        mdWithOcr.includes('Recognized line one') && mdWithOcr.includes('Recognized line two') && !mdWithOcr.includes('](big.png)'),
+        'an image that cannot be inlined has no picture to show; its recognized text is the content that is left'));
+    results.push(mk('md', 'multi-line OCR text keeps its layout (fenced)',
+        'wrapped in ```', JSON.stringify(mdWithOcr.slice(0, 8)),
+        mdWithOcr.trimStart().startsWith('```'),
+        'OCR layout is column-aligned with spaces, which Markdown collapses outside a fence'));
+
+    const mdNoOcr = String((await OfficeGenerator.generate(overCapAst('') as any, 'md' as any, overCapCfg)).value);
+    results.push(mk('md', 'an over-cap image with no OCR text keeps the name reference',
+        '![Alt](big.png)', JSON.stringify(mdNoOcr),
+        mdNoOcr.includes('](big.png)'),
+        'with no recognized text the compact reference is all there is to emit'));
+
+    const capWarnings: any[] = [];
+    await OfficeGenerator.generate(overCapAst(OCR_TEXT) as any, 'md' as any, { ...overCapCfg, onWarning: (w: any) => capWarnings.push(w) } as any);
+    results.push(mk('md', 'the over-cap degrade still warns (IMAGE_NOT_INLINED)',
+        'IMAGE_NOT_INLINED', JSON.stringify(capWarnings.map(w => w.code)),
+        capWarnings.some(w => w.code === OfficeWarningType.IMAGE_NOT_INLINED),
+        'the warning is how a caller finds out the picture did not travel with the output'));
+
+    const textWithOcr = String((await OfficeGenerator.generate(overCapAst(OCR_TEXT) as any, 'text' as any, overCapCfg)).value);
+    results.push(mk('text', 'an over-cap image renders its OCR text',
+        'OCR text, no [Image: ...] placeholder', JSON.stringify(textWithOcr),
+        textWithOcr.includes('Recognized line one') && !textWithOcr.includes('[Image:'),
+        'for a scanned page the recognized text is the entire content; a placeholder line loses it'));
+    const textNoOcr = String((await OfficeGenerator.generate(overCapAst('') as any, 'text' as any, overCapCfg)).value);
+    results.push(mk('text', 'an over-cap image with no OCR text keeps the placeholder',
+        '[Image: Alt]', JSON.stringify(textNoOcr),
+        textNoOcr.includes('[Image: Alt]'),
+        'the placeholder is the fallback, not the default'));
+
+    // Under the cap nothing changes: the image still inlines (md) / is still named (text).
+    const smallAst = synthAst('docx',
+        [{ type: 'image', text: 'Small ocr', metadata: { attachmentName: 'small.png', altText: 'Alt' } } as OfficeContentNode],
+        [{ name: 'small.png', extension: 'png', mimeType: 'image/png', data: PNG_1PX, size: 70 }]);
+    const smallMd = String((await OfficeGenerator.generate(smallAst as any, 'md' as any, {} as any)).value);
+    const smallText = String((await OfficeGenerator.generate(smallAst as any, 'text' as any, {} as any)).value);
+    results.push(mk('md', 'an under-cap image still inlines as a data URI',
+        'data:image/png;base64', smallMd.slice(0, 40),
+        smallMd.includes('data:image/png;base64'),
+        'the OCR fallback must apply only past the cap'));
+    results.push(mk('text', 'an under-cap image still renders its placeholder',
+        '[Image: Alt]', JSON.stringify(smallText),
+        smallText.includes('[Image: Alt]'),
+        'the OCR fallback must apply only past the cap'));
+
+    // --- RTF: multi-line OCR text needs \line, not a raw newline ---
+    const rtfOcrAst = synthAst('docx',
+        [{ type: 'image', text: 'OCR line A\nOCR line B', metadata: { attachmentName: 'small.png' } } as OfficeContentNode],
+        [{ name: 'small.png', extension: 'png', mimeType: 'image/png', data: PNG_1PX, size: 70 }]);
+    const rtfOut = String((await OfficeGenerator.generate(rtfOcrAst as any, 'rtf' as any, { includeImages: 'image+ocr-text' } as any)).value);
+    results.push(mk('rtf', 'multi-line OCR text keeps its line breaks',
+        'OCR line A\\line OCR line B', JSON.stringify(rtfOut.slice(rtfOut.indexOf('OCR line A') - 2, rtfOut.indexOf('OCR line A') + 32)),
+        rtfOut.includes('OCR line A\\line OCR line B'),
+        'a raw newline is whitespace to an RTF reader, so a column-aligned OCR block collapsed to one run'));
+
+    // --- DOCX: a note whose body starts with a table still opens with a paragraph ---
+    const noteWithTable: OfficeContentNode = {
+        type: 'note', metadata: { noteType: 'footnote' },
+        children: [{ type: 'table', children: [{ type: 'row', children: [{ type: 'cell', children: [{ type: 'text', text: 'in-note cell' }] }] }] }],
+    } as OfficeContentNode;
+    const noteAst = synthAst('docx', [{
+        type: 'paragraph', children: [{ type: 'text', text: 'Body', notes: [noteWithTable] } as OfficeContentNode],
+    } as OfficeContentNode]);
+    const noteDocx = (await OfficeGenerator.generate(noteAst as any, 'docx' as any, deterministicConfigFor('docx') as any)).value as Uint8Array;
+    const footnotesXml = strFromU8(unzipSync(noteDocx)['word/footnotes.xml']);
+    const noteBody = /<w:footnote w:id="2">([\s\S]*?)<\/w:footnote>/.exec(footnotesXml)?.[1] || '';
+    results.push(mk('docx', 'a footnote opening with a table starts with a paragraph',
+        'starts with <w:p>', noteBody.slice(0, 48),
+        noteBody.startsWith('<w:p>'),
+        'a bare <w:r> is not valid block content under <w:footnote>; the marker needs a paragraph of its own'));
+
+    // --- DOCX: an image that is itself a link keeps the link (ODT already did) ---
+    const linkedImageAst = synthAst('docx',
+        [{ type: 'image', metadata: { attachmentName: 'small.png', link: 'https://example.com/target', altText: 'Linked' } } as OfficeContentNode],
+        [{ name: 'small.png', extension: 'png', mimeType: 'image/png', data: PNG_1PX, size: 70 }]);
+    const linkedDocx = (await OfficeGenerator.generate(linkedImageAst as any, 'docx' as any, deterministicConfigFor('docx') as any)).value as Uint8Array;
+    const linkedFiles = unzipSync(linkedDocx);
+    const documentXml = strFromU8(linkedFiles['word/document.xml']);
+    const relsXml = strFromU8(linkedFiles['word/_rels/document.xml.rels']);
+    results.push(mk('docx', 'a linked image keeps its hyperlink',
+        '<w:hyperlink> wrapping the drawing + an external rel', `${documentXml.includes('<w:hyperlink')}, ${relsXml.includes('example.com/target')}`,
+        /<w:hyperlink r:id="[^"]+"><w:r><w:drawing>/.test(documentXml) && relsXml.includes('https://example.com/target'),
+        'ODT wraps the frame in <draw:a>; DOCX dropped ImageMetadata.link entirely'));
+
+    return results;
+}
+
+// ============================================================================
 // MAIN RUNNERS
 // ============================================================================
 
@@ -1923,6 +2288,24 @@ async function runAllTests(): Promise<void> {
     const metaResults = await runMetadataOverrideTests();
     allResults.push(...metaResults);
     console.log(metaResults.filter(r => r.result.status === 'FAIL').length > 0 ? ' ✗' : ' ✓');
+
+    // Native PDF engine (pdf-lib layout path; generates and re-parses small PDFs)
+    process.stdout.write('  native pdf engine...');
+    const nativePdfResults = await runNativePdfEngineTests();
+    allResults.push(...nativePdfResults);
+    console.log(nativePdfResults.filter(r => r.result.status === 'FAIL').length > 0 ? ' ✗' : ' ✓');
+
+    // Table geometry: sparse spreadsheet grids, header rows, onNode call counts
+    process.stdout.write('  table geometry...');
+    const tableGeometryResults = await runTableGeometryTests();
+    allResults.push(...tableGeometryResults);
+    console.log(tableGeometryResults.filter(r => r.result.status === 'FAIL').length > 0 ? ' ✗' : ' ✓');
+
+    // Degrade fidelity: over-cap images, unembeddable pictures, notes, OCR line breaks
+    process.stdout.write('  degrade fidelity...');
+    const degradeResults = await runDegradeFidelityTests();
+    allResults.push(...degradeResults);
+    console.log(degradeResults.filter(r => r.result.status === 'FAIL').length > 0 ? ' ✗' : ' ✓');
 
     // EPUB reproducibility (deliberately slow: asserts across the 2s zip-timestamp quantum)
     process.stdout.write('  epub determinism...');

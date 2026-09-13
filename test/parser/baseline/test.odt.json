@@ -39,7 +39,7 @@
       "preserveIframes": false,
       "embedFolkForms": false
     },
-    "ignoreBounds": false,
+    "ignorePageGeometry": false,
     "password": "",
     "pdfParserConfig": {
       "useTags": true,

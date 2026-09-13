@@ -22,6 +22,14 @@ import { extractFiles } from '../utils/zipUtils.js';
 /** The `word/*.xml` parts that carry body text a placeholder could live in. */
 const TEXT_PART = /^word\/(document\d*|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/;
 
+/**
+ * Parts whose bytes are already compressed, so deflating them again buys nothing and only costs CPU,
+ * once per document in a batch. Everything else (the XML parts, the relationship files, an embedded
+ * uncompressed metafile or font) still deflates: those are plain text or highly redundant binary and
+ * compress several-fold, which matters more than the CPU on parts that are typically tens of KB.
+ */
+const STORED_PART = /\.(png|jpe?g|jfif|gif|webp|avif|heic|heif|emz|wmz|woff2?|mp[34]|m4[av]|aac|ogg|oga|ogv|opus|flac|mov|avi|wmv|webm|zip|gz|docx|xlsx|pptx|odt|ods|odp)$/i;
+
 /** Escapes a regex metacharacter run so custom delimiters can be used literally. */
 function escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -56,10 +64,29 @@ function valueToRunXml(value: TemplateValue): string {
 function replaceInChunk(chunk: string, phRe: RegExp, resolve: (key: string) => string | null): string {
     // A `<w:t>` is either self-closing (`<w:t/>`, emitted by the OpenXML SDK / POI / docx4j for an
     // empty run) or a normal `<w:t ...>text</w:t>`; capture the inner text of the latter.
-    const WT = /<w:t\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:t>)/g;
+    //
+    // This is a forward-only scan rather than a `<w:t\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:t>)/g` exec loop:
+    // the template input is arbitrary caller bytes, and that pattern rescans to the end of the part
+    // from every `<w:t` token, so a run of unclosed tokens costs O(n^2) (80k tokens: ~6s). Here every
+    // byte is looked at once. Well-formed XML, where `<w:t>` never nests, parses identically.
     const segs: { start: number; end: number; inner: string }[] = [];
-    let m: RegExpExecArray | null;
-    while ((m = WT.exec(chunk))) segs.push({ start: m.index, end: m.index + m[0].length, inner: m[1] ?? '' });
+    for (let pos = 0; pos < chunk.length;) {
+        const s = chunk.indexOf('<w:t', pos);
+        if (s < 0) break;
+        // The `\b` after the tag name: `<w:tab` and `<w:tabs` are not `<w:t` elements.
+        if (/\w/.test(chunk[s + 4] ?? '')) { pos = s + 4; continue; }
+        const tagEnd = chunk.indexOf('>', s + 4);
+        if (tagEnd < 0) break;                       // unterminated tag: nothing further can match
+        if (chunk.charCodeAt(tagEnd - 1) === 0x2f) { // `<w:t/>`
+            segs.push({ start: s, end: tagEnd + 1, inner: '' });
+            pos = tagEnd + 1;
+            continue;
+        }
+        const close = chunk.indexOf('</w:t>', tagEnd + 1);
+        if (close < 0) break;                        // no closing tag left in this chunk
+        segs.push({ start: s, end: close + 6, inner: chunk.slice(tagEnd + 1, close) });
+        pos = close + 6;
+    }
     if (!segs.length) return chunk;
 
     const joined = segs.map(s => s.inner).join('');
@@ -73,6 +100,7 @@ function replaceInChunk(chunk: string, phRe: RegExp, resolve: (key: string) => s
 
     phRe.lastIndex = 0;
     const matches: { start: number; end: number; key: string }[] = [];
+    let m: RegExpExecArray | null;
     while ((m = phRe.exec(joined))) matches.push({ start: m.index, end: m.index + m[0].length, key: m[1] });
 
     // Rebuild each segment's inner text. Ordinary characters stay in their own segment; a resolved
@@ -162,11 +190,16 @@ export function renderDocxTemplate(
             out[name] = rewritten === xml
                 ? [bytes, { mtime: opts.mtime }]
                 : [Buffer.from(rewritten, 'utf8'), { mtime: opts.mtime }];
-        } else {
-            // Non-text parts are overwhelmingly already-compressed media (PNG/JPEG images, embedded
-            // fonts) where deflate yields next to nothing. Store them (`level: 0`) instead of paying to
-            // re-deflate the same bytes on every document in a batch: much less CPU, negligible size.
+        } else if (STORED_PART.test(name)) {
+            // Already-compressed media (PNG/JPEG images, audio/video, WOFF fonts): deflate yields next
+            // to nothing, so store them (`level: 0`) instead of paying to re-deflate the same bytes on
+            // every document in a batch. Much less CPU, negligible size.
             out[name] = [bytes, { mtime: opts.mtime, level: 0 }];
+        } else {
+            // Everything else (styles.xml, numbering.xml, settings.xml, theme/*.xml, the .rels parts:
+            // ~86 KB of plain XML in a plain document) deflates normally; storing it would inflate the
+            // rendered file several-fold for a saving that only matters on media.
+            out[name] = [bytes, { mtime: opts.mtime }];
         }
     }
     return zipSync(out);

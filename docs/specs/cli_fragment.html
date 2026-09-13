@@ -179,10 +179,64 @@
                 <td>Render metadata block as visible content in the generated output.</td>
             </tr>
             <tr>
+                <td><code>--includeImages</code></td>
+                <td><code>image-only | image+ocr-text | ocr-text-only | none</code></td>
+                <td><code>image-only</code></td>
+                <td>How an image node renders. Accepts both <code>--includeImages=image+ocr-text</code> and the
+                    space form <code>--includeImages image+ocr-text</code>; a bare <code>--includeImages</code> still
+                    means <code>image-only</code>, and <code>--no-includeImages</code> means <code>none</code>.</td>
+            </tr>
+            <tr>
+                <td><code>--maxInlineImageBytes</code></td>
+                <td>number</td>
+                <td><code>1500000</code></td>
+                <td>Largest decoded image HTML/Markdown inlines as a <code>data:</code> URI. Over the cap, the image
+                    renders its recognized/OCR text when it has any, otherwise a name reference. <code>0</code> never
+                    inlines; standalone HTML always does.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.mergeHyphenatedWords</code></td>
+                <td>boolean</td>
+                <td><code>true</code></td>
+                <td>Rejoin words hyphenated across a line break.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.normalizeText</code></td>
+                <td>boolean</td>
+                <td><code>true</code></td>
+                <td>Unicode and ligature normalization of extracted PDF text.</td>
+            </tr>
+            <tr>
+                <td><code>--pdfParserConfig.extractTextColor</code></td>
+                <td>boolean</td>
+                <td><code>false</code></td>
+                <td>Record each PDF run's fill colour in <code>formatting.color</code>. Roughly doubles parse time,
+                    hence opt-in.</td>
+            </tr>
+            <tr>
+                <td><code>--ocrConfig.preserveLayout</code></td>
+                <td>boolean</td>
+                <td><code>true</code></td>
+                <td>Keep the 2-D line layout of recognized text; <code>false</code> gives flat reading-order text.</td>
+            </tr>
+            <tr>
                 <td><code>--htmlConfig.containerWidth</code></td>
                 <td>string | number</td>
                 <td><code>auto</code></td>
                 <td>HTML output container width (e.g. <code>900px</code>, <code>100%</code>, <code>auto</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--textConfig.pageSeparator</code></td>
+                <td>string</td>
+                <td><code>\n</code></td>
+                <td>Separator written between rendered pages in text output (<code>\f</code> for pdftotext-style form
+                    feeds).</td>
+            </tr>
+            <tr>
+                <td><code>--pdfConfig.engine</code></td>
+                <td><code>html | native</code></td>
+                <td><code>html</code></td>
+                <td>PDF engine: Puppeteer through generated HTML, or <code>native</code> (pdf-lib, no browser).</td>
             </tr>
             <tr>
                 <td><code><del>--format</del></code></td>
@@ -216,6 +270,11 @@
             </tr>
         </tbody>
     </table>
+
+    <p>Each removed flag above exits with status 1 and prints its replacement, rather than being accepted and
+        ignored. An unrecognized or renamed <em>config</em> key (say <code>--ignoreBounds</code>) is not fatal, but the
+        CLI always prints the <code>UNRECOGNIZED_CONFIG_OPTION</code> warning naming its replacement, with or without
+        <code>--verbose</code>.</p>
 
     <br>
     <h2>Examples</h2>

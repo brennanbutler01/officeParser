@@ -155,13 +155,21 @@ export class OfficeParser {
             actualConfig = configOrCallback || {};
         }
 
-        const internalConfig = resolveParserConfig(actualConfig);
+        // The collector that fills `ast.warnings` is installed on the caller's config *before* it is
+        // resolved, not on the resolved object afterwards. Resolution itself reports issues (an
+        // unrecognized or renamed config key, for one), and every default config carries a no-op
+        // `onWarning`, so a collector attached after the fact would miss exactly the warnings that
+        // tell an upgrading caller their option did nothing. Passing a copy keeps the caller's own
+        // object free of our per-call state, the same reason resolveParserConfig copies.
         const parsingWarnings: OfficeIssue[] = [];
-        const originalOnWarning = internalConfig.onWarning;
-        internalConfig.onWarning = (issue: OfficeIssue) => {
-            parsingWarnings.push(issue);
-            if (originalOnWarning) originalOnWarning(issue);
-        };
+        const originalOnWarning = actualConfig.onWarning;
+        const internalConfig = resolveParserConfig({
+            ...actualConfig,
+            onWarning: (issue: OfficeIssue) => {
+                parsingWarnings.push(issue);
+                if (originalOnWarning) originalOnWarning(issue);
+            },
+        });
 
         let buffer: Buffer = Buffer.alloc(0);
         let ext: string = internalConfig.fileType ?? '';

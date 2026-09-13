@@ -59,6 +59,10 @@ export class CfbContainer {
         // v3 files use 512-byte sectors and ignore anything past the 512-byte header; v4 use 4096.
         if (majorVersion !== 3 && majorVersion !== 4) throw new DecryptionError(`unsupported CFB major version ${majorVersion}`);
         if (this.sectorSize < 512 || this.sectorSize > 1 << 20) throw new DecryptionError('unsupported CFB sector size');
+        // [MS-CFB] fixes the mini sector at 64 bytes. Accept anything that at least fits inside a
+        // sector: the shift is attacker-controlled and `1 << 31` is negative in JS, which would index
+        // the mini-stream backwards instead of failing.
+        if (this.miniSectorSize < 1 || this.miniSectorSize > this.sectorSize) throw new DecryptionError('unsupported CFB mini sector size');
         this.maxSectors = Math.ceil(buf.length / this.sectorSize) + 1;
 
         this.readFat();

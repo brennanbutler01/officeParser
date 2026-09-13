@@ -15,7 +15,7 @@ body:
         - Word Parser (DOCX)
         - PowerPoint Parser (PPTX)
         - Excel Parser (XLSX)
-        - OpenOffice Parser (ODT, ODS, ODP)
+        - OpenOffice Parser (ODT, ODS, ODP, ODG)
         - PDF Parser
         - RTF Parser
         - CSV Parser
