@@ -163,7 +163,7 @@ npx officeparser my_document --fileType=docx --to=json
 | `--pdfParserConfig.headingDetection` | `auto\|font-size\|off` | `auto` | How headings are inferred on the geometry path |
 | `--pdfParserConfig.mergeHyphenatedWords` | boolean | `true` | Rejoin words hyphenated across line breaks |
 | `--pdfParserConfig.normalizeText` | boolean | `true` | Unicode/ligature normalization of extracted text |
-| `--pdfParserConfig.extractTextColor` | boolean | `false` | Record each run's fill colour in `formatting.color` |
+| `--pdfParserConfig.extractTextColor` | boolean | `true` | Record each run's fill colour in `formatting.color` (set `false` to skip for speed) |
 | `--verbose` | boolean | `false` | Show full error stack traces and warning logs |
 | `--includeFormatting` | boolean | `true` | Include formatting style map matching |
 | `--renderMetadata` | boolean | `false` | Render metadata as visible content in the generated output |
@@ -1096,7 +1096,7 @@ PDF-specific options, passed as `pdfParserConfig` on the parser config.
 | `headingDetection` | `'auto' \| 'font-size' \| 'off'` | `'auto'` | How heading levels are decided. `'auto'`: from tags when tagged, else a size/weight heuristic. `'font-size'`: re-level headings by the heuristic even on a tagged PDF (tables/lists stay tagged; a tagged heading is re-leveled by size and may be demoted). `'off'`: never emit headings |
 | `pageRange` | `string` | `''` (all) | Restrict to given pages, e.g. `'1-3,7'`. Output keeps original page numbers |
 | `normalizeText` | `boolean` | `true` | Unicode-normalize extracted text (expand ligatures, compose combining marks, regularize whitespace). Set `false` to preserve the raw source glyphs verbatim |
-| `extractTextColor` | `boolean` | `false` | Extract each run's fill color into `formatting.color`. Recovered from the operator list (fetched per page), so it roughly doubles parse time; pure black is left unset. Highlight annotations set `formatting.backgroundColor` regardless of this flag |
+| `extractTextColor` | `boolean` | `true` | Extract each run's fill color into `formatting.color`. Recovered from the operator list; on by default (color is content like bold/font). Costs about 1.6x parse time on a text-heavy PDF, near-free when `extractAttachments`/`ocr` already fetch the operator list; set `false` to skip it. Pure black is left unset. Highlight annotations set `formatting.backgroundColor` regardless of this flag |
 
 ---
 
@@ -1570,7 +1570,7 @@ For a full debugging guide, visit the [Live Documentation](https://harshankur.gi
 1. **ODT/ODS Charts**: May show inaccurate data when the chart references external cell ranges or uses complex layout-based data.
 2. **PDF Images**: Extracted and re-encoded as PNG (`pdf_image_p<page>_<n>.png`, `image/png`) on both Node and the browser, since a PDF stores image data in formats no viewer opens directly. v7 emitted BMP; code that filters attachments by `.bmp` must be updated.
 3. **PDF structure without tags**: Tables, lists and headings come from the PDF's tag tree when present. For untagged PDFs they are recovered geometrically, which is best-effort: complex float-beside-text layouts and tables without a tag tree may not separate perfectly. Column reading order, paragraphs and word spacing are handled on both paths.
-4. **PDF text decoration and spans**: text colour is opt-in via `pdfParserConfig.extractTextColor` (off by default, since reading the fill colour per run costs an extra pass over the page operators). Underline and strikethrough are still not extracted: they are drawn as separate graphics operators rather than carried as text properties. Vertical (top-to-bottom) writing is read but not laid out spatially. Table cell `colSpan`/`rowSpan` are recovered best-effort on the tagged path, from the geometry of the empty placeholder cells the tag tree pads a merge with; untagged PDFs expose no spans.
+4. **PDF text decoration and spans**: text colour is extracted by default (`pdfParserConfig.extractTextColor`); set it `false` to skip the extra operator-list pass on a throughput-focused text path. Underline and strikethrough are still not extracted: they are drawn as separate graphics operators rather than carried as text properties. Vertical (top-to-bottom) writing is read but not laid out spatially. Table cell `colSpan`/`rowSpan` are recovered best-effort on the tagged path, from the geometry of the empty placeholder cells the tag tree pads a merge with; untagged PDFs expose no spans.
 
 ---
 

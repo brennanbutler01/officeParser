@@ -59,7 +59,7 @@ const DEFAULT_PDF_PARSER_CONFIG: DeepRequired<PdfParserConfig> = {
     headingDetection: 'auto',
     pageRange: '',
     normalizeText: true,
-    extractTextColor: false,
+    extractTextColor: true,
 };
 
 /**

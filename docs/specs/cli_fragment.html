@@ -209,9 +209,9 @@
             <tr>
                 <td><code>--pdfParserConfig.extractTextColor</code></td>
                 <td>boolean</td>
-                <td><code>false</code></td>
-                <td>Record each PDF run's fill colour in <code>formatting.color</code>. Roughly doubles parse time,
-                    hence opt-in.</td>
+                <td><code>true</code></td>
+                <td>Record each PDF run's fill colour in <code>formatting.color</code>. On by default; set
+                    <code>false</code> to skip the per-page operator-list fetch on a throughput-focused text path.</td>
             </tr>
             <tr>
                 <td><code>--ocrConfig.preserveLayout</code></td>
