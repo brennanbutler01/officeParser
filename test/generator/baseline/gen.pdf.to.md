@@ -116,81 +116,15 @@ We end with a fancy calendar, note how much of the original formatting is preser
 
 December 2007
 
-Su n
 
-Mon
-
-Tu e
-
-We d
-
-Th u
-
-Fri
-
-Sat
-
-1
-
-2
-
-3
-
-4
-
-5
-
-6
-
-7
-
-8
-
-9
-
-10
-
-1 1
-
-1 2
-
-1 3
-
-1 4
-
-1 5
-
-1 6
-
-17
-
-1 8
-
-1 9
-
-2 0
-
-2 1
-
-2 2
-
-2 3
-
-24
-
-2 5
-
-2 6
-
-2 7
-
-2 8
-
-2 9
-
-3 0
-
-31
+| Sun | Mon | Tue | Wed | Thu | Fri | Sat |
+| --- | --- | --- | --- | --- | --- | --- |
+|   |   |   |   |   |   | 1 |
+| 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+| 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+| 16 | 17 | 18 | 19 | 20 | 21 | 22 |
+| 23 | 24 | 25 | 26 | 27 | 28 | 29 |
+| 30 | 31 |   |   |   |   |   |
 
 
 
@@ -274,7 +208,7 @@ Centered images like this are useful for large pictures that should be a focus o
 
 ---
 
-![image](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAgElEQVR4nI3QURGAIBBFUUpoCAyhIbQEhIAQUoIS0Oy5IDAwgrrfZ+4uMPyYgBjDPIMv2FYcB6SA0jgNrIVzNZrAeYUUzBNNsbRuAQkB3UWhlNcJCa27pbgulQipfJNvSwuV3tdR6UZ7Lg3XpZIcfEFA5XWE6KZzgJqbIvIFfc4FZZ8x2FO5GE0AAAAASUVORK5CYII=)[^i]: Endnotes are typically used for longer notes, they remain endnotes when converted into ebook form, except that they have an additional backlink to make it easy to return to the current position after reading the note.
+![image](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAgElEQVR4nI3QURGAIBBFUUpoCAyhIbQEhIAQUoIS0Oy5IDAwgrrfZ+4uMPyYgBjDPIMv2FYcB6SA0jgNrIVzNZrAeYUUzBNNsbRuAQkB3UWhlNcJCa27pbgulQipfJNvSwuV3tdR6UZ7Lg3XpZIcfEFA5XWE6KZzgJqbIvIFfc4FZZ8x2FO5GE0AAAAASUVORK5CYII=)[^2]: i Endnotes are typically used for longer notes, they remain endnotes when converted into ebook form, except that they have an additional backlink to make it easy to return to the current position after reading the note.
 
 # Lists {#lists}
 

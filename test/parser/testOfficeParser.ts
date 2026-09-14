@@ -3279,13 +3279,14 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('Calendar recovered as a grid table on page 4', p4Tables.length === 2 && !!calendar && calCols >= 6 && calCols <= 8 && /Mon/.test(calText) && /Sat/.test(calText) && /31/.test(calText),
             'page 4 has 2 tables incl. a ~7-col calendar', `${p4Tables.length} tables, calendar cols=${calCols}`);
         // The calendar draws two-digit days and some weekday names as glyphs stacked vertically in a
-        // narrow cell ("11" as two "1"s, "Sun" as "Su" over "n"). The line join must read those as one
-        // token, not split them with a space ("1 1", "Su n"). Assert the joined forms are present and
-        // the split forms are gone.
-        const calJoined = /\bSun\b/.test(calText) && /\bWed\b/.test(calText) && /\b11\b/.test(calText) && /\b19\b/.test(calText) && /\b30\b/.test(calText);
-        const calSplit = /Su n|We d|Th u|1 1|1 9|3 0/.test(calText);
-        add('Calendar stacked-glyph cells are not space-split', calJoined && !calSplit,
-            'stacked days/weekdays read as one token (Sun, 11, 19, 30)', calSplit ? 'still split (e.g. "1 1"/"Su n")' : (calJoined ? 'joined' : 'joined forms missing'));
+        // narrow cell ("11" as two "1"s, "Sun" as "Su" over "n"). The line join must read each as one
+        // token, not split it with a space ("1 1", "Su n"). Check the individual cell texts, not the
+        // table's space-joined text (where adjacent cells "11" "12" would themselves read as "11 12").
+        const calCells = (calendar?.children || []).flatMap((r: any) => (r.children || []).map((c: any) => String(c.text || '').trim()));
+        const calJoined = ['Sun', 'Wed', '11', '19', '30'].every(t => calCells.includes(t));
+        const calSplit = calCells.filter((t: string) => /^\d \d$/.test(t) || /^(Su|Tu|We|Th) \w$/.test(t));
+        add('Calendar stacked-glyph cells are not space-split', calJoined && calSplit.length === 0,
+            'stacked days/weekdays read as one token (Sun, 11, 19, 30)', calSplit.length ? `still split: ${calSplit.slice(0, 3).join(', ')}` : (calJoined ? 'joined' : 'joined forms missing'));
         add('Calendar title stays a paragraph', (page4?.children || []).some((n: any) => n.type === 'paragraph' && String(n.text || '').trim() === 'December 2007'),
             '"December 2007" left as a paragraph', (page4?.children || []).some((n: any) => n.type === 'paragraph' && String(n.text || '').trim() === 'December 2007') ? 'paragraph' : 'missing/absorbed');
     } catch (e: any) {

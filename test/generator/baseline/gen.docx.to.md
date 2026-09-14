@@ -98,7 +98,7 @@ Next, we have something a little more complex, a nested table, i.e. a table insi
   <tr>
     <td><table>
   <tr>
-    <td rowspan="2"><p>One</p><p>Three</p><p></p></td>
+    <td rowspan="2"><p>One</p><p>Three</p></td>
     <td><p>Two</p></td>
   </tr>
   <tr>

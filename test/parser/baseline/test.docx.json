@@ -3724,7 +3724,7 @@
                       "children": [
                         {
                           "type": "cell",
-                          "text": "OneThree ",
+                          "text": "OneThree",
                           "children": [
                             {
                               "type": "paragraph",
@@ -3767,17 +3767,6 @@
                                 }
                               },
                               "rawContent": "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:rsidR=\"00272A32\" w:rsidP=\"00272A32\" w:rsidRDefault=\"00272A32\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" w14:paraId=\"52762B19\" xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordml\" wp14:textId=\"77777777\"><w:pPr><w:spacing w:before=\"240\"/><w:ind w:firstLine=\"0\"/></w:pPr><w:r><w:t>Three</w:t></w:r></w:p>"
-                            },
-                            {
-                              "type": "paragraph",
-                              "text": "",
-                              "children": [],
-                              "metadata": {
-                                "paragraphIndentation": {
-                                  "firstLine": 0
-                                }
-                              },
-                              "rawContent": "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:rsidR=\"00272A32\" w:rsidP=\"009A211E\" w:rsidRDefault=\"00272A32\" xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" w14:paraId=\"62486C05\" xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordml\" wp14:textId=\"77777777\"><w:pPr><w:spacing w:before=\"240\"/><w:ind w:firstLine=\"0\"/></w:pPr></w:p>"
                             }
                           ],
                           "metadata": {
