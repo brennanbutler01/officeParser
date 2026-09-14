@@ -1131,12 +1131,24 @@ function paragraphNode(group: ParaGroup, page: PageContext, doc: DocContext, for
             const softHyphen = /­$/.test(prevText);
             const hardHyphen = /-$/.test(prevText);
             const nextStartsLower = /^[\p{Ll}]/u.test(line.fragments[0]?.text ?? '');
+            // A vertical stack of short glyphs at the same x is one token wrapped inside a narrow cell
+            // (a "fancy" calendar draws "11" as two stacked "1"s, and "Sun" as "Su" over "n"), not two
+            // words: joining with a space would give "1 1" / "Su n". Detect it: both this line and the
+            // previous one are very short AND their x-spans overlap (stacked), rather than the previous
+            // line filling a width and this one returning to a left margin the way a real wrap does.
+            // Normal prose never trips this, since a wrapped line's predecessor fills most of the width.
+            const fs = group.fontSize || 12;
+            const shortPrev = prevText.trim().length <= 3 || prev.width <= 2 * fs;
+            const shortCur = lineTextOf(line).trim().length <= 3 || line.width <= 2 * fs;
+            const overlap = Math.min(prev.x + prev.width, line.x + line.width) - Math.max(prev.x, line.x);
+            const stacked = overlap > 0.5 * (Math.min(prev.width, line.width) || 1);
+            const glyphStack = shortPrev && shortCur && stacked;
             if (cfg.mergeHyphenatedWords && (softHyphen || (hardHyphen && nextStartsLower))) {
                 // drop the trailing hyphen from the last emitted child and join with no space
                 const lastChild = children[children.length - 1];
                 if (lastChild?.text) { lastChild.text = lastChild.text.replace(/[-­]$/, ''); }
                 text = text.replace(/[-­]$/, '');
-            } else {
+            } else if (!glyphStack) {
                 const lastChild = children[children.length - 1];
                 if (lastChild?.text && !lastChild.text.endsWith(' ')) lastChild.text += ' ';
                 text += ' ';
