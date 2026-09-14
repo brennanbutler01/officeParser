@@ -2837,31 +2837,36 @@
 
         window.CONFIG_SCHEMAS = {
             parser: [
+                // `formats` scopes an item to specific INPUT file types (matched against the
+                // resolved parser format: the file-type hint if set, else the loaded file's
+                // extension). An item with no `formats` is GENERAL and always shown. All items
+                // are still rendered into the DOM so their values persist and the parse-config
+                // read sites can read them; only visibility is toggled. See applyParserFormatFilter.
                 { id: 'cfg_fileType', label: 'File Type Hint', type: 'select', options: ['', 'docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'odg', 'epub'], names: ['Auto', 'DOCX', 'XLSX', 'PPTX', 'PDF', 'RTF', 'CSV', 'Markdown', 'HTML', 'ODT', 'ODS', 'ODP', 'ODG', 'EPUB'], width: '100px' },
                 { id: 'cfg_extractAttachments', label: 'Extract Attachments', type: 'switch', default: true },
-                { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false },
-                { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true },
-                { id: 'cfg_ignoreInternalLinks_parser', label: 'Ignore Internal Links', type: 'switch', default: false },
-                { id: 'cfg_ignorePageGeometry', label: 'Ignore Page Geometry', type: 'switch', default: false },
-                { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true },
-                { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true },
-                { id: 'cfg_password', label: 'Password (PDF/OOXML/ODF)', type: 'text', default: '', width: '160px' },
-                { id: 'cfg_pdfPageRange', label: 'PDF Page Range', type: 'text', default: '', width: '80px' },
-                { id: 'cfg_pdfExtractTextColor', label: 'PDF Extract Text Color', type: 'switch', default: true },
-                { id: 'cfg_includeRawContent', label: 'Include Raw Source', type: 'switch', default: false },
-                { id: 'cfg_serializeRawContent', label: 'Serialize Raw XML', type: 'switch', default: true },
-                { id: 'cfg_preserveXmlWhitespace', label: 'Preserve XML Space', type: 'switch', default: false },
-                { id: 'cfg_ignoreNotes', label: 'Ignore Notes', type: 'switch', default: false },
-                { id: 'cfg_includeBreakNodes', label: 'Include Break Nodes', type: 'switch', default: true },
-                { id: 'cfg_preserveAttributes', label: 'Preserve HTML Attributes', type: 'switch', default: false },
-                { id: 'cfg_preserveIframes', label: 'Preserve Iframes', type: 'switch', default: false },
-                { id: 'cfg_csvDelimiter', label: 'CSV Delimiter', type: 'text', default: ',', width: '60px' },
-                { id: 'cfg_ocrAutoTerminate', label: 'OCR Auto Terminate (s)', type: 'number', default: 10, width: '70px', min: 0 },
-                { id: 'cfg_ocrWorkerLoad', label: 'OCR Worker Load (s)', type: 'number', default: 60, width: '70px', min: 0 },
-                { id: 'cfg_ocrRecognition', label: 'OCR Recog (s)', type: 'number', default: 30, width: '70px', min: 0 },
-                { id: 'cfg_maxUncompressedBytes', label: 'Max Uncompressed Size (MB)', type: 'number', default: 512, width: '80px', min: 0 },
-                { id: 'cfg_maxZipEntries', label: 'Max ZIP Entries', type: 'number', default: 10000, width: '80px', min: 0 },
-                { id: 'cfg_pdfWorkerSrc', label: 'PDF Worker URL', type: 'text', default: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs', fullWidth: true }
+                { id: 'cfg_ocr', label: 'Enable OCR', type: 'switch', default: false, formats: ['pdf', 'docx', 'xlsx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_ocrPreserveLayout', label: 'OCR Preserve Layout', type: 'switch', default: true, formats: ['pdf', 'docx', 'xlsx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_ignoreInternalLinks_parser', label: 'Ignore Internal Links', type: 'switch', default: false, formats: ['pdf', 'docx', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_ignorePageGeometry', label: 'Ignore Page Geometry', type: 'switch', default: false, formats: ['pdf'] },
+                { id: 'cfg_pdfUseTags', label: 'PDF Use Tags', type: 'switch', default: true, formats: ['pdf'] },
+                { id: 'cfg_pdfDetectColumns', label: 'PDF Detect Columns', type: 'switch', default: true, formats: ['pdf'] },
+                { id: 'cfg_password', label: 'Password (PDF/OOXML/ODF)', type: 'text', default: '', width: '160px', formats: ['pdf', 'docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_pdfPageRange', label: 'PDF Page Range', type: 'text', default: '', width: '80px', formats: ['pdf'] },
+                { id: 'cfg_pdfExtractTextColor', label: 'PDF Extract Text Color', type: 'switch', default: true, formats: ['pdf'] },
+                { id: 'cfg_includeRawContent', label: 'Include Raw Source', type: 'switch', default: false, formats: ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'html', 'rtf', 'csv'] },
+                { id: 'cfg_serializeRawContent', label: 'Serialize Raw XML', type: 'switch', default: true, formats: ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'html'] },
+                { id: 'cfg_preserveXmlWhitespace', label: 'Preserve XML Space', type: 'switch', default: false, formats: ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'epub', 'html'] },
+                { id: 'cfg_ignoreNotes', label: 'Ignore Notes', type: 'switch', default: false, formats: ['pdf', 'docx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_includeBreakNodes', label: 'Include Break Nodes', type: 'switch', default: true, formats: ['docx', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_preserveAttributes', label: 'Preserve HTML Attributes', type: 'switch', default: false, formats: ['html', 'md'] },
+                { id: 'cfg_preserveIframes', label: 'Preserve Iframes', type: 'switch', default: false, formats: ['html', 'md'] },
+                { id: 'cfg_csvDelimiter', label: 'CSV Delimiter', type: 'text', default: ',', width: '60px', formats: ['csv'] },
+                { id: 'cfg_ocrAutoTerminate', label: 'OCR Auto Terminate (s)', type: 'number', default: 10, width: '70px', min: 0, formats: ['pdf', 'docx', 'xlsx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_ocrWorkerLoad', label: 'OCR Worker Load (s)', type: 'number', default: 60, width: '70px', min: 0, formats: ['pdf', 'docx', 'xlsx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_ocrRecognition', label: 'OCR Recog (s)', type: 'number', default: 30, width: '70px', min: 0, formats: ['pdf', 'docx', 'xlsx', 'pptx', 'rtf', 'odt', 'ods', 'odp', 'odg'] },
+                { id: 'cfg_maxUncompressedBytes', label: 'Max Uncompressed Size (MB)', type: 'number', default: 512, width: '80px', min: 0, formats: ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'epub'] },
+                { id: 'cfg_maxZipEntries', label: 'Max ZIP Entries', type: 'number', default: 10000, width: '80px', min: 0, formats: ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'odg', 'epub'] },
+                { id: 'cfg_pdfWorkerSrc', label: 'PDF Worker URL', type: 'text', default: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs', fullWidth: true, formats: ['pdf'] }
             ],
             generator: [
                 { id: 'cfg_includeFormatting', label: 'Include Formatting', type: 'switch', default: true },
@@ -2915,10 +2920,13 @@
                 const saved = localStorage.getItem(item.id);
                 const value = saved !== null ? (item.type.includes('switch') ? saved === 'true' : saved) : item.default;
                 const isInline = item.type.startsWith('inline-');
+                // Tag every wrapper so applyParserFormatFilter can show/hide it by input format.
+                // Items without `formats` carry no data-cfg-formats and are treated as general.
+                const cfgAttr = `data-cfg-id="${item.id}"${item.formats ? ` data-cfg-formats="${item.formats.join(',')}"` : ''}`;
 
                 if (item.type.includes('switch')) {
                     html += `
-                        <div class="${isInline ? 'window-config-item' : 'config-item'}">
+                        <div ${cfgAttr} class="${isInline ? 'window-config-item' : 'config-item'}">
                             <span class="config-label">${item.label}</span>
                             <label class="switch">
                                 <input type="checkbox" id="${item.id}" ${value ? 'checked' : ''}>
@@ -2928,7 +2936,7 @@
                     `;
                 } else if (item.type.includes('select')) {
                     html += `
-                        <div class="${isInline ? 'window-config-item' : 'config-item'}">
+                        <div ${cfgAttr} class="${isInline ? 'window-config-item' : 'config-item'}">
                             <span class="config-label">${item.label}</span>
                             <select id="${item.id}" class="btn btn-outline" style="padding: ${isInline ? '0.2rem' : '0.4rem'}; font-size: 0.8rem; width: ${item.width || 'auto'};">
                                 ${item.options.map((opt, i) => `<option value="${opt}" ${opt === value ? 'selected' : ''} ${item.disabledOptions && item.disabledOptions.includes(opt) ? 'disabled' : ''}>${item.names[i]}</option>`).join('')}
@@ -2941,7 +2949,7 @@
                     // MarkdownDialectConfig / FallbackToHtmlConfig object forms) and a single
                     // control cannot represent it. Mirrors the existing `standalone` popover.
                     html += `
-                        <div class="${item.inline ? 'window-config-item' : 'config-item'}">
+                        <div ${cfgAttr} class="${item.inline ? 'window-config-item' : 'config-item'}">
                             <button class="btn btn-outline" style="padding: ${item.inline ? '0.2rem 0.5rem' : '0.4rem 0.8rem'}; font-size: ${item.inline ? '0.75rem' : '0.8rem'}; display: flex; align-items: center; gap: 0.25rem; border-color: var(--border);" onclick="window.toggleConfigPopover('${item.panelId}', this)">
                                 ${item.label}
                                 <svg style="width:10px;height:10px;opacity:0.7;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
@@ -2950,7 +2958,7 @@
                     `;
                 } else if (item.type.includes('popover-textarea')) {
                     html += `
-                        <div class="${isInline ? 'window-config-item' : 'config-item'}">
+                        <div ${cfgAttr} class="${isInline ? 'window-config-item' : 'config-item'}">
                             <button class="btn btn-outline" style="padding: ${isInline ? '0.2rem 0.5rem' : '0.4rem 0.8rem'}; font-size: ${isInline ? '0.75rem' : '0.8rem'}; display: flex; align-items: center; gap: 0.25rem; border-color: var(--border);" onclick="window.toggleConfigPopover('${item.id}_popover', this)">
                                 ${item.label}
                                 <svg style="width:10px;height:10px;opacity:0.7;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
@@ -2968,7 +2976,7 @@
                     `;
                 } else if (item.type.includes('textarea')) {
                     html += `
-                        <div class="${isInline ? 'window-config-item' : (item.fullWidth ? 'config-item full-width' : 'config-item')}" style="align-items: flex-start;">
+                        <div ${cfgAttr} class="${isInline ? 'window-config-item' : (item.fullWidth ? 'config-item full-width' : 'config-item')}" style="align-items: flex-start;">
                             <span class="config-label">${item.label}</span>
                             <textarea id="${item.id}" class="btn btn-outline" 
                                 style="padding: ${isInline ? '0.2rem 0.5rem' : '0.4rem 0.8rem'}; width: ${item.width || '100%'}; min-height: ${item.height || '60px'}; font-size: ${isInline ? '0.75rem' : '0.8rem'}; font-family: monospace; resize: vertical;" 
@@ -2977,7 +2985,7 @@
                     `;
                 } else {
                     html += `
-                        <div class="${isInline ? 'window-config-item' : (item.fullWidth ? 'config-item full-width' : 'config-item')}">
+                        <div ${cfgAttr} class="${isInline ? 'window-config-item' : (item.fullWidth ? 'config-item full-width' : 'config-item')}">
                             <span class="config-label">${item.label}</span>
                             <input type="${item.type.replace('inline-', '')}" id="${item.id}" class="btn btn-outline" 
                                 style="padding: ${isInline ? '0.2rem 0.5rem' : '0.4rem 0.8rem'}; width: ${item.width || '100%'}; font-size: ${isInline ? '0.75rem' : '0.8rem'};" 
@@ -3510,7 +3518,7 @@
                     <!-- Parser Section -->
                     <div class="config-group">
                         <div class="config-group-title">Parser Configuration</div>
-                        <div class="config-items-container">
+                        <div class="config-items-container" id="parser-config-container">
                             <script>renderConfigItems('parser');</script>
                         </div>
                     </div>
@@ -4926,6 +4934,45 @@
                 };
             }
 
+            // Normalize a file extension / hint value to the canonical parser format used in the
+            // schema `formats` arrays. Template extensions collapse onto their ODF base type;
+            // anything unrecognized returns null so the filter falls back to showing everything.
+            function normalizeParserFormat(ext) {
+                if (!ext) return null;
+                ext = String(ext).toLowerCase();
+                const map = { ott: 'odt', ots: 'ods', otp: 'odp', otg: 'odg', htm: 'html', markdown: 'md' };
+                if (map[ext]) return map[ext];
+                const known = ['docx', 'xlsx', 'pptx', 'pdf', 'rtf', 'csv', 'md', 'html', 'odt', 'ods', 'odp', 'odg', 'epub'];
+                return known.includes(ext) ? ext : null;
+            }
+
+            // The active INPUT format the parser knobs should be scoped to. An explicit file-type
+            // hint wins (it also overrides detection during the parse itself, so the visible knobs
+            // match what actually runs); otherwise the loaded file's extension; otherwise null.
+            function getActiveParserFormat() {
+                const hintEl = document.getElementById('cfg_fileType');
+                const hint = hintEl ? hintEl.value : '';
+                if (hint) return normalizeParserFormat(hint);
+                if (lastFileName) return normalizeParserFormat(lastFileName.split('.').pop());
+                return null;
+            }
+
+            // Show only the parser items relevant to `fmt` (defaults to the resolved active format).
+            // General items (no data-cfg-formats) always show; when fmt is null everything shows.
+            // Nodes are only hidden, never removed, so every input stays in the DOM and the
+            // parse-config read sites keep working and values persist across switches.
+            function applyParserFormatFilter(fmt) {
+                if (fmt === undefined) fmt = getActiveParserFormat();
+                const container = document.getElementById('parser-config-container');
+                if (!container) return;
+                container.querySelectorAll('[data-cfg-id]').forEach(el => {
+                    const scoped = el.getAttribute('data-cfg-formats');
+                    const show = !fmt || !scoped || scoped.split(',').includes(fmt);
+                    el.classList.toggle('hidden', !show);
+                });
+            }
+            window.applyParserFormatFilter = applyParserFormatFilter;
+
             function updateReparseButtonState() {
                 if (!lastFileBuffer) {
                     reparseBtn.disabled = true;
@@ -4971,6 +5018,14 @@
                     el.addEventListener('change', updateReparseButtonState);
                 }
             });
+
+            // Re-scope the parser knobs whenever the user overrides the file-type hint, and once
+            // on load so the panel starts in the correct state (nothing loaded => show all).
+            const fileTypeHintEl = document.getElementById('cfg_fileType');
+            if (fileTypeHintEl) {
+                fileTypeHintEl.addEventListener('change', () => applyParserFormatFilter());
+            }
+            applyParserFormatFilter();
 
             // Instant re-render for generator and format-specific settings
             ['generator', 'html', 'md', 'chunks', 'csv', 'text'].forEach(key => {
@@ -5235,6 +5290,9 @@
                 displayFileIcon.innerHTML = getFormatIcon(file.name);
                 fileInfo.classList.remove('hidden');
                 dropZonePrompt.classList.add('hidden');
+
+                // A file (upload, drag-drop, or sample) is now loaded: scope the parser knobs to it.
+                applyParserFormatFilter();
 
                 processFileBuffer(buffer, file.name);
             }

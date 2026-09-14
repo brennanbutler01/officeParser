@@ -3268,6 +3268,20 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         add('Lists extracted from tags', listItems.length >= 5, '>=5 list items', listItems.length);
         add('List types classified', listItems.some((l: any) => l.metadata?.listType === 'ordered') && listItems.some((l: any) => l.metadata?.listType === 'unordered'), 'both ordered and unordered', `ordered:${listItems.filter((l: any) => l.metadata?.listType === 'ordered').length} unordered:${listItems.filter((l: any) => l.metadata?.listType === 'unordered').length}`);
         add('Notes extracted from tags', notes.length >= 1, '>=1 note', notes.length);
+        // Hybrid grid recovery: page 4's "December 2007" calendar is tagged as loose paragraphs (one
+        // per day), not as a Table. The tagged path must additionally recover it as a table with ~7
+        // columns, taking page 4 from 1 table to 2, without disturbing the 5 tagged tables elsewhere.
+        const page4 = ast.content.find((p: any) => p.metadata?.pageNumber === 4) as any;
+        const p4Tables = (page4?.children || []).filter((n: any) => n.type === 'table');
+        const calendar = p4Tables.find((t: any) => Math.max(0, ...(t.children || []).map((r: any) => (r.children || []).length)) >= 6);
+        const calCols = calendar ? Math.max(0, ...(calendar.children || []).map((r: any) => (r.children || []).length)) : 0;
+        const calText = (calendar?.text || '');
+        // Assert on cells the wide-tracking space heuristic does not split ("Mon", "Sat", "31"); the
+        // split ones ("3 0" for 30) are the known tracking artifact, not part of this deliverable.
+        add('Calendar recovered as a grid table on page 4', p4Tables.length === 2 && !!calendar && calCols >= 6 && calCols <= 8 && /Mon/.test(calText) && /Sat/.test(calText) && /31/.test(calText),
+            'page 4 has 2 tables incl. a ~7-col calendar', `${p4Tables.length} tables, calendar cols=${calCols}`);
+        add('Calendar title stays a paragraph', (page4?.children || []).some((n: any) => n.type === 'paragraph' && String(n.text || '').trim() === 'December 2007'),
+            '"December 2007" left as a paragraph', (page4?.children || []).some((n: any) => n.type === 'paragraph' && String(n.text || '').trim() === 'December 2007') ? 'paragraph' : 'missing/absorbed');
     } catch (e: any) {
         add('test.pdf parse', false, 'parsed', e?.message || String(e));
     }
@@ -3370,6 +3384,10 @@ async function testPdfSmoke(): Promise<FeatureTest[]> {
         const leftLast = text.indexOf('LEFT COLUMN OMEGA');
         const rightFirst = text.indexOf('RIGHT COLUMN ONE');
         add('Columns read left-then-right', leftLast >= 0 && rightFirst >= 0 && leftLast < rightFirst, 'left before right', `${leftLast} < ${rightFirst}`);
+        // The two-column article must never be mistaken for a grid table by any path.
+        let colTables = 0;
+        ast.content.forEach((p: any) => walk(p, (n: any) => { if (n.type === 'table') colTables++; }));
+        add('Multi-column article yields no table', colTables === 0, 0, colTables);
     } catch (e: any) {
         add('columns_untagged parse', false, 'parsed', e?.message || String(e));
     }

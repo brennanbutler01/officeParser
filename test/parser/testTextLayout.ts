@@ -11,7 +11,7 @@
  * Registered from `testOfficeParser.ts`, so it reports through the same table as everything else.
  */
 
-import { blockToNodes, buildLines, computeDocContext, detectTables, PageContext, segmentIntoBlocks } from '../../src/parsers/pdf/textLayout';
+import { blockToNodes, buildLines, computeDocContext, detectTables, PageContext, recoverTaggedGrids, segmentIntoBlocks } from '../../src/parsers/pdf/textLayout';
 import { PdfLayoutConfig, RawRun } from '../../src/parsers/pdf/pdfTypes';
 import { layoutOcrText, sniffImageMime } from '../../src/utils/ocrUtils';
 import { OfficeContentNode } from '../../src/types';
@@ -57,6 +57,12 @@ function run(text: string, x: number, yBaseline: number, fontSize = 12, opts: Ru
         inArtifact: false,
         formatting: opts.bold ? { bold: true } : {},
     };
+}
+
+/** Builds a paragraph NODE with authored-space bounds, as the tagged path emits before finalizeBounds. */
+function paraNode(text: string, x: number, y: number, width: number, height: number): OfficeContentNode {
+    const bounds = { x, y, width, height };
+    return { type: 'paragraph', text, children: [{ type: 'text', text, bounds }], bounds };
 }
 
 /** Runs the whole geometric path over a page's runs and returns the emitted nodes. */
@@ -231,6 +237,46 @@ export async function testTextLayout(): Promise<LayoutTest[]> {
         const tables = tablesOf(runs);
         const rows = tables[0]?.node.children?.length ?? 0;
         add('Genuine grid is still a table', tables.length === 1 && rows === 4, '1 table of 4 rows', `${tables.length} table(s), ${rows} rows`);
+    }
+
+    // ── M5: hybrid grid recovery over tag-derived paragraphs ────────────────
+    // Builds paragraph NODES (what the tagged path emits), one per grid cell, and asserts
+    // recoverTaggedGrids folds the calendar into a table while leaving the title paragraph, and never
+    // invents a table on prose or on a too-narrow layout.
+    {
+        // Seven columns centred at 100..460 (calendar day/number cells are centred over the column),
+        // a header row and three week rows, plus a wide title whose centre falls off every column.
+        const centers = [100, 160, 220, 280, 340, 400, 460];
+        const nodes: OfficeContentNode[] = [];
+        nodes.push(paraNode('December 2007', 250, 60, 120, 16)); // title: centre 310, off-grid
+        const gridRow = (yTop: number, texts: string[]) => texts.forEach((t, c) => {
+            const w = 8; nodes.push(paraNode(t, centers[c] - w / 2, yTop, w, 12));
+        });
+        gridRow(100, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+        gridRow(140, ['1', '2', '3', '4', '5', '6', '7']);
+        gridRow(180, ['8', '9', '10', '11', '12', '13', '14']);
+        gridRow(220, ['15', '16', '17', '18', '19', '20', '21']);
+        const out = recoverTaggedGrids(nodes);
+        const table = out.find(n => n.type === 'table');
+        const cols = table?.children?.[0]?.children?.length ?? 0;
+        const rows = table?.children?.length ?? 0;
+        const titleKept = out.some(n => n.type === 'paragraph' && (n.text || '').trim() === 'December 2007');
+        add('Calendar paragraphs fold into a table', out.length === 2 && rows === 4 && cols === 7 && titleKept,
+            'title paragraph + 4x7 table', `${out.length} nodes, ${rows}x${cols} table, titleKept=${titleKept}`);
+    }
+    {
+        // Prose paragraphs (each far longer than a cell) must never become a table.
+        const nodes: OfficeContentNode[] = [];
+        for (let i = 0; i < 6; i++) nodes.push(paraNode('This is an ordinary sentence of prose that fills the line ' + i, 72, 100 + i * 16, 400, 12));
+        const out = recoverTaggedGrids(nodes);
+        add('Prose paragraphs are not a table', !out.some(n => n.type === 'table') && out.length === 6, 'no table, 6 paragraphs', `${out.filter(n => n.type === 'table').length} table(s), ${out.length} nodes`);
+    }
+    {
+        // A two-column stack of short paragraphs is not a grid: fewer than three columns.
+        const nodes: OfficeContentNode[] = [];
+        for (let i = 0; i < 5; i++) { nodes.push(paraNode('L' + i, 100, 100 + i * 20, 8, 12), paraNode('R' + i, 300, 100 + i * 20, 8, 12)); }
+        const out = recoverTaggedGrids(nodes);
+        add('Two-column short paragraphs are not a table', !out.some(n => n.type === 'table'), 'no table', `${out.filter(n => n.type === 'table').length} table(s)`);
     }
 
     // ── L-SS: super/subscript merging vs a caption ──────────────────────────

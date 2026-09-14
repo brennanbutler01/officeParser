@@ -783,6 +783,207 @@ export function detectTables(lines: PdfLine[], page: PageContext, doc: DocContex
     return { tables, consumed };
 }
 
+// ── hybrid grid recovery over tag-derived paragraphs ───────────────────────────
+
+/**
+ * Per-cell text cap: a paragraph longer than this is prose, never a grid cell, and it also breaks a
+ * candidate run (the vertical-adjacency guard). Mirrors {@link detectTables}'s 40-character line cap.
+ */
+const GRID_CELL_TEXT_CAP = 40;
+/** Median-cell-length guard, so a run of short-but-prose paragraphs never becomes a table. */
+const GRID_MEDIAN_CELL_CAP = 25;
+/** Horizontal cluster gap (points): centres more than this apart start a new column. */
+const GRID_COL_GAP = 12;
+/** A real column must carry a cell in at least this many rows; a lone stray never is one. */
+const GRID_COL_MIN_SUPPORT = 2;
+const GRID_MIN_COLS = 3;
+const GRID_MIN_ROWS = 3;
+/** At least this many grid rows must carry two or more cells, so a single stacked column is rejected. */
+const GRID_MIN_MULTICELL_ROWS = 3;
+
+interface GridCell {
+    node: OfficeContentNode;
+    /** Index of the node in the sibling array it came from (for the contiguity check). */
+    index: number;
+    /** Horizontal centre, used for column clustering: calendar day names and digits are centred over
+     *  their column, so a left-edge that jitters by more than {@link GRID_COL_GAP} would split them. */
+    cx: number;
+    top: number;
+    bottom: number;
+    len: number;
+}
+
+interface GridRow {
+    cells: GridCell[];
+    top: number;
+    bottom: number;
+    center: number;
+}
+
+/** Clusters sorted values into groups, breaking where a consecutive gap exceeds `gap`; returns each
+ *  group's first value as its representative. Shared shape with {@link detectTables}'s column clustering
+ *  and {@link indentLevels}, kept local so the reference is the cluster centre chosen per call. */
+function clusterStarts(values: number[], gap: number): number[] {
+    const starts: number[] = [];
+    for (const v of [...values].sort((a, b) => a - b)) {
+        if (!starts.length || v - starts[starts.length - 1] > gap) starts.push(v);
+    }
+    return starts;
+}
+
+/** Nearest cluster index for a value. */
+function nearestCluster(x: number, starts: number[]): number {
+    let best = 0, bd = Infinity;
+    for (let k = 0; k < starts.length; k++) { const d = Math.abs(x - starts[k]); if (d < bd) { bd = d; best = k; } }
+    return best;
+}
+
+/**
+ * Groups cells into rows by vertical overlap (single-linkage on the box's own extent), not by a point
+ * baseline. A calendar's cells jitter vertically: the space-inference sometimes tags a split glyph as
+ * super/subscript, which grows the box up (the "Sun" row) or down (the "11" cells) while the visual
+ * row is unchanged. Overlapping extents survive that; a shared baseline does not.
+ */
+function groupRowsByOverlap(cells: GridCell[]): GridRow[] {
+    const rows: GridRow[] = [];
+    let cur: GridRow | null = null;
+    for (const c of [...cells].sort((a, b) => a.top - b.top)) {
+        // Require a real (>=2pt) overlap with the current band, so two rows that merely graze do not merge.
+        if (cur && c.top <= cur.bottom - 2) {
+            cur.cells.push(c);
+            cur.bottom = Math.max(cur.bottom, c.bottom);
+            cur.top = Math.min(cur.top, c.top);
+        } else {
+            cur = { cells: [c], top: c.top, bottom: c.bottom, center: 0 };
+            rows.push(cur);
+        }
+    }
+    for (const r of rows) { r.center = (r.top + r.bottom) / 2; r.cells.sort((a, b) => a.cx - b.cx); }
+    return rows;
+}
+
+/** Builds a table/row/cell subtree from grid rows, reusing each paragraph's own runs as the cell body. */
+function gridToTable(rows: GridRow[], colStarts: number[], keep: boolean[]): OfficeContentNode {
+    const reindex = new Map<number, number>();
+    colStarts.forEach((_, k) => { if (keep[k]) reindex.set(k, reindex.size); });
+    const rowNodes: OfficeContentNode[] = rows.map((r, ri) => {
+        let lastCol = -1;
+        const cellNodes = r.cells
+            .filter(c => keep[nearestCluster(c.cx, colStarts)])
+            .map(c => {
+                // Strictly-increasing columns, as detectTables does, so two cells never collide on one.
+                const col = Math.max(reindex.get(nearestCluster(c.cx, colStarts))!, lastCol + 1);
+                lastCol = col;
+                const cell: OfficeContentNode = {
+                    type: 'cell',
+                    text: (c.node.text || '').trim(),
+                    children: c.node.children || [],
+                    metadata: { row: ri, col },
+                };
+                if (c.node.bounds) cell.bounds = c.node.bounds;
+                return cell;
+            });
+        const rowNode: OfficeContentNode = { type: 'row', children: cellNodes, text: cellNodes.map(c => c.text || '').join(' ').trim() };
+        const rb = unionAll(cellNodes.map(c => c.bounds)); if (rb) rowNode.bounds = rb;
+        return rowNode;
+    });
+    const table: OfficeContentNode = { type: 'table', children: rowNodes, text: rowNodes.map(r => r.text || '').join('\n') };
+    const tb = unionAll(rowNodes.map(r => r.bounds)); if (tb) table.bounds = tb;
+    return table;
+}
+
+/**
+ * Tries to recover one grid table from a contiguous run of short sibling paragraphs (their `index` in
+ * the sibling array preserved). Returns the table plus the exact node-index range it consumes, or null
+ * when the run is not a genuine grid. Reuses {@link detectTables}'s guards: short cells, at least
+ * {@link GRID_MIN_COLS} columns and {@link GRID_MIN_ROWS} rows, a stable column set, and a
+ * vertical-pitch/adjacency check. Only leading/trailing sparse rows are trimmed, so the consumed range
+ * is always a clean block and surrounding paragraphs (a "December 2007" title, an intro line) are left
+ * in place.
+ */
+function recoverGridFromRun(run: GridCell[]): { table: OfficeContentNode; from: number; to: number } | null {
+    if (run.length < GRID_MIN_ROWS) return null;
+    const rows = groupRowsByOverlap(run);
+
+    // Columns from horizontal centres; a column counts only when it appears in >=2 rows.
+    const colStarts = clusterStarts(run.map(c => c.cx), GRID_COL_GAP);
+    const support = new Array(colStarts.length).fill(0);
+    for (const r of rows) {
+        const seen = new Set<number>();
+        for (const c of r.cells) seen.add(nearestCluster(c.cx, colStarts));
+        for (const k of seen) support[k]++;
+    }
+    const keep = colStarts.map((_, k) => support[k] >= GRID_COL_MIN_SUPPORT);
+    if (keep.filter(Boolean).length < GRID_MIN_COLS) return null;
+
+    // Count each row's cells that land in a kept column, then trim only leading/trailing sparse rows so
+    // a lone title above the grid, or a stray line below it, is not swept in.
+    const keptCount = (r: GridRow) => r.cells.filter(c => keep[nearestCluster(c.cx, colStarts)]).length;
+    let lo = 0, hi = rows.length - 1;
+    while (lo <= hi && keptCount(rows[lo]) < 2) lo++;
+    while (hi >= lo && keptCount(rows[hi]) < 2) hi--;
+    const grid = rows.slice(lo, hi + 1);
+    if (grid.length < GRID_MIN_ROWS) return null;
+    if (grid.filter(r => keptCount(r) >= 2).length < GRID_MIN_MULTICELL_ROWS) return null;
+
+    const gridCells = grid.flatMap(r => r.cells.filter(c => keep[nearestCluster(c.cx, colStarts)]));
+    if (gridCells.length < GRID_MIN_COLS * GRID_MIN_ROWS) return null;
+    if (median(gridCells.map(c => c.len)) > GRID_MEDIAN_CELL_CAP) return null;
+
+    // Vertical adjacency: a genuine grid has an even row pitch; a big jump between two rows means a
+    // paragraph break was folded in, so bail rather than glue unrelated blocks together.
+    const centers = grid.map(r => r.center);
+    const pitches: number[] = [];
+    for (let k = 1; k < centers.length; k++) pitches.push(centers[k] - centers[k - 1]);
+    const pitch = median(pitches.filter(p => p > 0));
+    if (pitch > 0 && pitches.some(p => p > 2 * pitch)) return null;
+
+    // The kept cells must occupy a contiguous block of sibling indices, so replacing them in place
+    // leaves reading order intact and never straddles a non-grid node.
+    const idxs = gridCells.map(c => c.index).sort((a, b) => a - b);
+    const from = idxs[0], to = idxs[idxs.length - 1];
+    if (to - from + 1 !== idxs.length) return null;
+
+    return { table: gridToTable(grid, colStarts, keep), from, to };
+}
+
+/**
+ * Hybrid recovery for the tagged path: keeps every node the tags produced and, in addition, folds a
+ * contiguous run of loose sibling `paragraph` nodes whose geometry forms a clean grid (a calendar
+ * tagged as one paragraph per day, rather than as a Table) into a standard `table`/`row`/`cell`
+ * subtree. Tagged tables, lists, headings and notes are never touched: only paragraph siblings that
+ * are not already inside a table are candidates, and the guards in {@link recoverGridFromRun} keep
+ * ordinary prose and multi-column articles from being mistaken for a table. Operates on the parser's
+ * internal authored-space geometry, so it runs identically under `ignorePageGeometry` (which only
+ * strips the emitted bounds later). Returns a new sibling array with grids spliced in place.
+ */
+export function recoverTaggedGrids(nodes: OfficeContentNode[]): OfficeContentNode[] {
+    const isCandidate = (n: OfficeContentNode) =>
+        n.type === 'paragraph' && !!n.bounds && (n.text || '').trim().length > 0 && (n.text || '').trim().length <= GRID_CELL_TEXT_CAP;
+
+    const out: OfficeContentNode[] = [];
+    let i = 0;
+    while (i < nodes.length) {
+        if (!isCandidate(nodes[i])) { out.push(nodes[i]); i++; continue; }
+        // Gather a maximal run of consecutive short paragraphs; a non-paragraph or a long/prose
+        // paragraph ends it.
+        let j = i;
+        const run: GridCell[] = [];
+        while (j < nodes.length && isCandidate(nodes[j])) {
+            const b = nodes[j].bounds!;
+            run.push({ node: nodes[j], index: j, cx: b.x + b.width / 2, top: b.y, bottom: b.y + b.height, len: (nodes[j].text || '').trim().length });
+            j++;
+        }
+        const found = recoverGridFromRun(run);
+        if (!found) { out.push(nodes[i]); i++; continue; }
+        // Emit the paragraphs before the grid untouched, then the table, then continue after the grid.
+        for (let k = i; k < found.from; k++) out.push(nodes[k]);
+        out.push(found.table);
+        i = found.to + 1;
+    }
+    return out;
+}
+
 // ── geometric list detection ─────────────────────────────────────────────────
 
 /** A marker that stands alone as its own atom (e.g. "1.1.1.", "i.", "•"), split from its item text. */

@@ -42,7 +42,7 @@ import { performOcr } from '../utils/ocrUtils.js';
 import { collectColorMarks, ColorLookup, makeColorLookup } from './pdf/pdfColor.js';
 import { computeRunBox, identityMatrix, mulMatrix, roundBounds, rotateBoundsToRendered, toMatrix6, unionAll } from './pdf/geometry.js';
 import { PageExtract, PdfImage, PdfLayoutConfig, RawRun, ResolvedFont } from './pdf/pdfTypes.js';
-import { blockToNodes, buildLines, computeDocContext, detectTables, DocContext, PageContext, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
+import { blockToNodes, buildLines, computeDocContext, detectTables, DocContext, PageContext, recoverTaggedGrids, runsToParagraph, segmentIntoBlocks } from './pdf/textLayout.js';
 import { buildTaggedNodes } from './pdf/structTree.js';
 
 /** Type guard for a pdf.js TextItem (marked-content items lack `str`/`transform`). */
@@ -1155,6 +1155,7 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
         const bodyRuns = extract.runs.filter(r => !r.inArtifact || midSet.has(r));
 
         let pageContent: OfficeContentNode[] | null = null;
+        let fromTags = false;
 
         // Tagged path: use the structure tree when trusted and it covers most of the page's text.
         if (pdfCfg.useTags && docTrusted && extract.structTree) {
@@ -1173,6 +1174,7 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
             const coverage = textMcids.size ? coveredText / textMcids.size : 1;
             if (coverage >= 0.7) {
                 pageContent = nodes;
+                fromTags = true;
                 // Stitch in any runs the tags did not cover, via the geometric path, splicing each
                 // recovered node into reading order by its y instead of dumping them at the page end.
                 const leftover = bodyRuns.filter(r => r.text.trim() && (!r.mcid || !coveredMcids.has(r.mcid)));
@@ -1193,6 +1195,14 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
 
         // Geometric fallback (untagged, distrusted, or low coverage).
         if (!pageContent) pageContent = geometricNodes(bodyRuns, layoutCtx, docCtx, layoutCfg);
+
+        // Hybrid recovery: on the tagged path, additionally fold a contiguous run of loose sibling
+        // paragraphs whose geometry forms a clean grid (a calendar tagged as one paragraph per day,
+        // rather than as a Table) into a standard table, without disturbing the tagged tables. The
+        // geometric path already recovers grid tables via detectTables; this brings the tagged path to
+        // parity. Runs on authored boxes here, before finalizeBounds, so it works under
+        // ignorePageGeometry too.
+        if (fromTags) pageContent = recoverTaggedGrids(pageContent);
 
         // Images: emit as attachments/OCR, then splice each into the flow before the first text node
         // that sits lower on the page, so reading order is preserved without reordering text.
