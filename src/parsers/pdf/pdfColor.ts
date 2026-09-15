@@ -148,7 +148,12 @@ export function makeColorLookup(marks: ColorMark[]): ColorLookup {
         if (bucket) bucket.push(mk); else rows.set(k, [mk]);
     }
     return (vx: number, vy: number, fontSize: number, width: number): string | undefined => {
-        const yTol = Math.max(2, fontSize * 0.5);
+        // Cap the vertical window independent of font size: a colour mark on the run's baseline sits
+        // within about half the font size, but the loop below steps one integer y per row, so an
+        // unclamped `fontSize` (from a hostile text matrix) would iterate billions of empty rows and
+        // hang. A colour on a real line is always within 64pt; capping here bounds the loop to ~129
+        // iterations with no effect on any genuine document.
+        const yTol = Math.min(Math.max(2, fontSize * 0.5), 64);
         const pad = Math.max(1, fontSize * 0.5);
         const lo = vx - pad, hi = vx + width + pad;
         let found: string | undefined;

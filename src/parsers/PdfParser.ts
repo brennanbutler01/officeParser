@@ -166,13 +166,21 @@ function encodePng(width: number, height: number, data: Uint8Array | Uint8Clampe
 function convertToRgbaBuffer(data: Uint8Array | Uint8ClampedArray, width: number, height: number, kind?: number): Buffer {
     let rgbaData: Uint8ClampedArray;
     if (kind === 1) {
+        // GRAYSCALE_1BPP: one BIT per pixel, most-significant bit first, each row padded to a whole
+        // byte (stride = ceil(width/8)). The old code read one byte per pixel, so a CCITT/JBIG2 fax
+        // scan came out as noise for the first 1/8 and black after. pdf.js has already applied any
+        // Decode array, so a set bit is white (255) and a clear bit is black (0). (The RGBA allocation
+        // is bounded because getDocument caps decodable images via `maxImageSize`.)
+        const rowBytes = (width + 7) >> 3;
         rgbaData = new Uint8ClampedArray(width * height * 4);
-        for (let i = 0; i < width * height; i++) {
-            const gray = data[i];
-            rgbaData[i * 4] = gray;
-            rgbaData[i * 4 + 1] = gray;
-            rgbaData[i * 4 + 2] = gray;
-            rgbaData[i * 4 + 3] = 255;
+        for (let y = 0; y < height; y++) {
+            const rowStart = y * rowBytes;
+            for (let x = 0; x < width; x++) {
+                const byte = data[rowStart + (x >> 3)] ?? 0;
+                const gray = ((byte >> (7 - (x & 7))) & 1) ? 255 : 0;
+                const o = (y * width + x) * 4;
+                rgbaData[o] = gray; rgbaData[o + 1] = gray; rgbaData[o + 2] = gray; rgbaData[o + 3] = 255;
+            }
         }
     } else if (kind === 2 || data.length === width * height * 3) {
         rgbaData = new Uint8ClampedArray(width * height * 4);
@@ -813,10 +821,16 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
             if (fn === pdfjs.OPS.dependency) {
                 for (const dep of argsArray[j]) {
                     try {
-                        if (page.objs.has(dep)) continue;
+                        // Route each dependency to the pool that actually holds it, as pdf.js does:
+                        // global objects (fonts, graphics state) are `g_`-prefixed and live in
+                        // `commonObjs`; everything else is page-local in `objs`. Waiting on the wrong
+                        // pool means the callback never fires and the 500 ms timeout always elapses,
+                        // which on a multi-font document adds up to many seconds of pure sleep per page.
+                        const pool = typeof dep === 'string' && dep.startsWith('g_') ? page.commonObjs : page.objs;
+                        if (pool.has(dep)) continue;
                         await new Promise<void>((resolve) => {
                             const timeout = setTimeout(resolve, 500);
-                            page.objs.get(dep, () => { clearTimeout(timeout); resolve(); });
+                            pool.get(dep, () => { clearTimeout(timeout); resolve(); });
                         });
                     } catch (e) {
                         logWarning(OfficeWarningType.DEPENDENCY_LOAD_FAILED, config, dep, e);
@@ -923,6 +937,14 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
     let password: string | undefined = config.password || undefined;
     let passwordAttempts = 0;
 
+    // Bound how many pixels pdf.js will decode per image. When we never read image bytes (a text-only
+    // or colour-only parse, i.e. no attachments and no OCR), set 1 so image XObjects are skipped
+    // entirely: colour marks come from the operator list, not the decoded bitmap, and getOperatorList
+    // otherwise decodes every image on every page for nothing. When we do need pixels, cap at a
+    // generous 40 megapixels so a decompression-bomb image (a few bytes of headers declaring enormous
+    // dimensions) cannot drive a multi-GB, uncatchable allocation; a real scan is far below this.
+    const maxImageSize = (config.extractAttachments || config.ocr) ? 40_000_000 : 1;
+
     // Open the document, retrying with an onPassword-supplied password when the PDF is encrypted.
     while (true) {
         checkAbortSignal(config.abortSignal);
@@ -932,6 +954,7 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
             data: new Uint8Array(buffer),
             verbosity: 0,
             isEvalSupported: false,
+            maxImageSize,
             password,
         });
 
@@ -1165,7 +1188,12 @@ async function buildAst(pdfjs: any, pdfDocument: any, config: FullOfficeParserCo
                 const list = runsByMcid.get(r.mcid);
                 if (list) list.push(r); else runsByMcid.set(r.mcid, [r]);
             }
-            const { nodes, coveredMcids } = buildTaggedNodes(extract.structTree, runsByMcid, layoutCtx, docCtx, { ignoreNotes: config.ignoreNotes, listCounter: taggedListCounter });
+            // buildTaggedNodes guards against a hostile deep/cyclic tree internally, but wrap the call
+            // too: any unexpected failure here must degrade to the geometry path, never fail the parse.
+            let nodes: OfficeContentNode[] = [], coveredMcids = new Set<string>();
+            try {
+                ({ nodes, coveredMcids } = buildTaggedNodes(extract.structTree, runsByMcid, layoutCtx, docCtx, { ignoreNotes: config.ignoreNotes, listCounter: taggedListCounter }));
+            } catch { warnStruct('the tag tree could not be processed'); }
             // Coverage measures the tag tree against the page's *tagged* text, so artifact runs
             // (which by definition live outside the structure) never drag the trust signal down.
             const textMcids = new Set(bodyRuns.filter(r => !r.inArtifact && r.text.trim() && r.mcid).map(r => r.mcid as string));

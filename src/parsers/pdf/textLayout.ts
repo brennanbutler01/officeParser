@@ -1137,9 +1137,12 @@ function paragraphNode(group: ParaGroup, page: PageContext, doc: DocContext, for
             // previous one are very short AND their x-spans overlap (stacked), rather than the previous
             // line filling a width and this one returning to a left margin the way a real wrap does.
             // Normal prose never trips this, since a wrapped line's predecessor fills most of the width.
-            const fs = group.fontSize || 12;
-            const shortPrev = prevText.trim().length <= 3 || prev.width <= 2 * fs;
-            const shortCur = lineTextOf(line).trim().length <= 3 || line.width <= 2 * fs;
+            // Only fold when BOTH pieces are 1-2 characters (a two-digit day "1"/"1", or "Su"/"n"): a
+            // longer stacked line such as "12"/"Jan" or "Yes"/"No" is two real tokens and must keep its
+            // space. Requiring <=2 chars (not a width test that a 3-letter word also passes) is what
+            // keeps ordinary short stacked lines from being glued together.
+            const shortPrev = prevText.trim().length <= 2;
+            const shortCur = lineTextOf(line).trim().length <= 2;
             const overlap = Math.min(prev.x + prev.width, line.x + line.width) - Math.max(prev.x, line.x);
             const stacked = overlap > 0.5 * (Math.min(prev.width, line.width) || 1);
             const glyphStack = shortPrev && shortCur && stacked;

@@ -8,6 +8,9 @@
 import { NodeBounds } from '../../types.js';
 import { RunAngle } from './pdfTypes.js';
 
+/** Upper bound on a run's font size in points. Guards against a hostile text matrix (see computeRunBox). */
+const MAX_FONT_SIZE_PT = 10000;
+
 /** The identity affine matrix, as a fresh array the caller may mutate. */
 export function identityMatrix(): number[] {
     return [1, 0, 0, 1, 0, 0];
@@ -92,7 +95,11 @@ export interface RunBox {
  * @param descent - font descent as a fraction of font size (negative)
  */
 export function computeRunBox(m: number[], itemWidth: number, ascent: number, descent: number): RunBox {
-    const fontSize = Math.hypot(m[2], m[3]) || Math.abs(m[3]) || 12;
+    // Clamp to a sane maximum: the size comes from the document's own (untrusted) text matrix, and a
+    // pathological `Tf`/scale can make `hypot(m2,m3)` astronomically large, which would then drive a
+    // huge box height and, via the color lookup's y-window, an unbounded loop. No real font is anywhere
+    // near this cap, so clamping never affects a genuine document.
+    const fontSize = Math.min(Math.hypot(m[2], m[3]) || Math.abs(m[3]) || 12, MAX_FONT_SIZE_PT);
     const angle = snapAngle(Math.atan2(m[1], m[0]));
     const originX = m[4];
     const yBaseline = m[5];

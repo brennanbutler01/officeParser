@@ -355,7 +355,7 @@ if (fileArg && !showHelp) {
     console.log('  --pdfParserConfig.headingDetection=off      Heading detection: auto | font-size | off (default: auto)');
     console.log('  --pdfParserConfig.mergeHyphenatedWords=false Keep words hyphenated across line breaks (default: true)');
     console.log('  --pdfParserConfig.normalizeText=false       Skip Unicode/ligature normalization of PDF text (default: true)');
-    console.log('  --pdfParserConfig.extractTextColor          Record each PDF run\'s fill colour in formatting.color (default: false)');
+    console.log('  --pdfParserConfig.extractTextColor          Record each PDF run\'s fill colour in formatting.color (default: true; set false to skip)');
     console.log('');
     console.log('High-Value Generator Options:');
     console.log('  --includeFormatting                         Include font formatting like bold/italic (default: true)');

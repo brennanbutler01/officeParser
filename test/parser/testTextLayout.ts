@@ -12,6 +12,7 @@
  */
 
 import { blockToNodes, buildLines, computeDocContext, detectTables, PageContext, recoverTaggedGrids, segmentIntoBlocks } from '../../src/parsers/pdf/textLayout';
+import { makeColorLookup } from '../../src/parsers/pdf/pdfColor';
 import { PdfLayoutConfig, RawRun } from '../../src/parsers/pdf/pdfTypes';
 import { layoutOcrText, sniffImageMime } from '../../src/utils/ocrUtils';
 import { OfficeContentNode } from '../../src/types';
@@ -150,6 +151,27 @@ export async function testTextLayout(): Promise<LayoutTest[]> {
         const ok = shape.length === 3 && shape.every(s => s.startsWith('list:'))
             && shape[0] === 'list:Step one wraps onto a second line and continues on this line.';
         add('Tight numbered list is recovered', ok, '3 ordered items, item 1 carries its wrap', shape.join(' | '));
+    }
+    {
+        // Vertically stacked glyphs in a narrow cell: "Su" over "n" is one token ("Sun"), but "12"
+        // over "Jan" is two ("12 Jan"). Fold only when BOTH pieces are 1-2 chars (the a475ec5 fix must
+        // not glue longer stacked lines together).
+        const sun = shapeOf(nodesOf([run('Su', 100, 100, 12, { width: 12 }), run('n', 100, 112, 12, { width: 6 })]));
+        const janY = shapeOf(nodesOf([run('12', 100, 100, 12, { width: 12 }), run('Jan', 100, 112, 12, { width: 18 })]));
+        add('Stacked short glyphs join, longer stacks stay split',
+            sun.length === 1 && sun[0] === 'paragraph:Sun' && janY.length === 1 && janY[0] === 'paragraph:12 Jan',
+            'Su/n -> "Sun", 12/Jan -> "12 Jan"', `${sun.join('|')} ;; ${janY.join('|')}`);
+    }
+    {
+        // A hostile PDF can put a run under an enormous text matrix; the colour lookup must stay bounded
+        // regardless of the reported font size (its y-window is capped independent of fontSize).
+        const lk = makeColorLookup([{ x: 105, y: 500, color: '#ff0000' }]);
+        const t0 = performance.now();
+        for (let i = 0; i < 2000; i++) lk(100, 500, 1e9, 50);
+        const ms = performance.now() - t0;
+        const normal = lk(100, 500, 12, 50);
+        add('Colour lookup is bounded under a hostile font size', ms < 100 && normal === '#ff0000',
+            'fast at fontSize 1e9 and still matches at 12pt', `${ms.toFixed(1)}ms, normal=${normal}`);
     }
     {
         // Two bibliography entries, each wrapping under a hanging indent.

@@ -18,7 +18,14 @@
 
 import { FullGeneratorConfig, ImageMode, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
 import { getAbortError, getOfficeError } from '../../utils/errorUtils.js';
-import { isHeaderRow, paperSizePt, resolveImageMode } from '../../utils/officeGenUtils.js';
+import { isHeaderRow, paperSizePt, resolveImageMode, sniffImageSize } from '../../utils/officeGenUtils.js';
+
+/**
+ * Megapixel ceiling for an embedded image. `embedPng`/`embedJpg` decode the full bitmap, so a
+ * decompression-bomb image (a few header bytes declaring enormous dimensions) would force a multi-GB,
+ * uncatchable allocation. A real image is far below this; a larger one degrades to its alt text.
+ */
+const MAX_IMAGE_PIXELS = 40_000_000;
 
 /**
  * Code points WinAnsi (CP1252) encodes beyond Latin-1, which the Standard-14 fonts accept (smart
@@ -120,9 +127,14 @@ class NativeLayout {
         this.y = this.margin.top;
     }
 
-    /** Ensures `h` points of vertical space remain, starting a new page if not. */
+    /**
+     * Ensures `h` points of vertical space remain, starting a new page if not. Never starts a page
+     * when the cursor is already at the top margin: the block does not fit a whole page, so a blank
+     * page in front of it would not help and would just pad the output. Callers that must not lose
+     * content taller than a page (tables) split it across pages themselves.
+     */
     private ensureSpace(h: number): void {
-        if (this.y + h > this.bottom) this.newPage();
+        if (this.y + h > this.bottom && this.y > this.margin.top) this.newPage();
     }
 
     /** Picks the font matching a run's formatting (mono for code, bold/italic variants otherwise). */
@@ -451,6 +463,14 @@ class NativeLayout {
         }
         try {
             const bytes = base64ToBytes(attachment.data);
+            // Reject an image whose declared dimensions are absurd BEFORE decoding it: embedPng/embedJpg
+            // allocate the full bitmap, so a decompression bomb would OOM the process uncatchably.
+            const dim = sniffImageSize(bytes);
+            if (dim && dim.w * dim.h > MAX_IMAGE_PIXELS) {
+                this.reportWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name, reason: `image is too large to embed (${dim.w}x${dim.h} pixels)` });
+                fallback();
+                return;
+            }
             const isJpg = /jpe?g/i.test(attachment.extension || '') || attachment.mimeType === 'image/jpeg';
             const img = isJpg ? await this.pdf.embedJpg(bytes) : await this.pdf.embedPng(bytes);
             // Resolve the draw size in points, by priority: an explicit ImageMetadata.width/height
@@ -563,16 +583,31 @@ class NativeLayout {
                 placed.push({ col, span, rowSpan: Math.max(1, meta?.rowSpan || 1), lines: wrap(text, span), header: rowIsHeader || meta?.style === 'header' });
                 cursor = col + span;
             }
-            const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * size * 1.35)) + 2 * pad;
-            this.ensureSpace(rowH);
-            const topY = this.pageH - this.y;
+            const lineH = size * 1.35;
+            const rowH = Math.max(size * 1.4, ...placed.map(p => p.lines.length * lineH)) + 2 * pad;
+            // Draw the row in vertical bands so a row taller than a whole page is split across pages
+            // rather than drawn off the bottom (which silently lost the overflowing text). A normal row
+            // is a single band. Each band redraws every cell's border and its slice of the wrapped
+            // lines, so the cell continues cleanly on the next page.
+            const linesPerBand = Math.max(1, Math.floor((this.bottom - this.margin.top - 2 * pad) / lineH));
+            const maxLines = Math.max(1, ...placed.map(p => p.lines.length));
             const newCarry = new Map<number, number>();
-            for (const p of placed) {
-                const x = this.margin.left + p.col * colW;
-                this.page.drawRectangle({ x, y: topY - rowH, width: colW * p.span, height: rowH, borderColor: border, borderWidth: 0.5, color: undefined });
-                const font = p.header ? this.fonts.bold : this.fonts.regular;
-                let ty = topY - pad - size;
-                for (const line of p.lines) { this.page.drawText(line, { x: x + pad, y: ty, size, font, color: this.lib.rgb(0.12, 0.12, 0.12) }); ty -= size * 1.35; }
+            for (let lineOffset = 0; lineOffset < maxLines; lineOffset += linesPerBand) {
+                const whole = lineOffset === 0 && maxLines <= linesPerBand;
+                const bandLines = Math.min(maxLines - lineOffset, linesPerBand);
+                const bandH = whole ? rowH : bandLines * lineH + 2 * pad;
+                if (this.y + bandH > this.bottom && this.y > this.margin.top) this.newPage();
+                const topY = this.pageH - this.y;
+                for (const p of placed) {
+                    const x = this.margin.left + p.col * colW;
+                    this.page.drawRectangle({ x, y: topY - bandH, width: colW * p.span, height: bandH, borderColor: border, borderWidth: 0.5, color: undefined });
+                    const font = p.header ? this.fonts.bold : this.fonts.regular;
+                    let ty = topY - pad - size;
+                    for (let li = lineOffset; li < lineOffset + bandLines && li < p.lines.length; li++) {
+                        this.page.drawText(p.lines[li], { x: x + pad, y: ty, size, font, color: this.lib.rgb(0.12, 0.12, 0.12) }); ty -= lineH;
+                    }
+                }
+                this.y += bandH;
             }
             // Record this row's rowspans, then age the carries by one row.
             for (const p of placed) {
@@ -580,7 +615,6 @@ class NativeLayout {
             }
             for (const [c, v] of [...carry]) { if (v > 1) carry.set(c, v - 1); else carry.delete(c); }
             for (const [c, v] of newCarry) carry.set(c, v);
-            this.y += rowH;
         }
         this.y += 6;
     }

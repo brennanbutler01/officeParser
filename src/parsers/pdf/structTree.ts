@@ -69,12 +69,38 @@ function taggedHeadingLevel(cfg: DocContext['cfg'], tagLevel: number): number | 
 }
 
 /** Walks a page's struct tree into ordered AST nodes. */
+/**
+ * Maximum struct-tree depth the recursive walkers below will descend. The tree comes straight from an
+ * untrusted PDF's `/StructTreeRoot`, so a pathologically deep (or cyclic) `/K` chain would overflow the
+ * stack in `walkNode`/`collectRuns`/`buildList`/etc. A real document is only a handful of levels deep;
+ * anything past this cap is treated as an unusable tag tree and the page falls back to geometry.
+ */
+const MAX_STRUCT_DEPTH = 256;
+
+/**
+ * Iterative depth probe: returns true if any path in the tree is deeper than {@link MAX_STRUCT_DEPTH}
+ * (a cycle qualifies, since depth grows without bound along it). Recursing here would itself overflow,
+ * so it walks with an explicit stack and short-circuits at the cap, costing O(cap) along the first
+ * over-deep path rather than O(nodes).
+ */
+function structTooDeep(root: StructNode): boolean {
+    const stack: Array<{ n: StructNode; d: number }> = [{ n: root, d: 0 }];
+    while (stack.length) {
+        const { n, d } = stack.pop()!;
+        if (d > MAX_STRUCT_DEPTH) return true;
+        if (n.children) for (const c of n.children) stack.push({ n: c, d: d + 1 });
+    }
+    return false;
+}
+
 export function buildTaggedNodes(
     structTree: any, runsByMcid: Map<string, RawRun[]>, page: PageContext, doc: DocContext, opts: TaggedOptions,
 ): TaggedResult {
     const covered = new Set<string>();
     const ctx: WalkCtx = { runsByMcid, page, doc, covered, opts, listCounter: opts.listCounter };
-    const nodes = structTree ? walkChildren(structTree as StructNode, ctx, 0) : [];
+    // Guard the recursive walk against a hostile deep/cyclic tree: too deep -> no tagged nodes, which
+    // drives the page onto the geometry fallback rather than overflowing the stack.
+    const nodes = (structTree && !structTooDeep(structTree as StructNode)) ? walkChildren(structTree as StructNode, ctx, 0) : [];
     return { nodes, coveredMcids: covered };
 }
 
@@ -237,6 +263,14 @@ function isEmptyCell(cell: OfficeContentNode): boolean {
  * span. Positional `col` indices are left untouched so the generator rebuilds the grid from
  * `col` + `colSpan`. No-op without geometry (cells then have no bounds to reason from).
  */
+/**
+ * Cell-count ceiling for merged-cell inference. Both passes are worst-case O(cells^2) (a hostile tall
+ * single-column table of empty placeholders makes every row scan to the bottom), and the tagged-PDF
+ * path has no `maxTableCells`-style budget of its own, so cap the input: past this the table still
+ * renders, just without colSpan/rowSpan recovery. A genuine merged-cell table is far smaller.
+ */
+const MAX_SPAN_INFERENCE_CELLS = 5000;
+
 function inferColSpans(rows: OfficeContentNode[]): void {
     // Representative left edge per grid column, from the non-empty cells that occupy it.
     const colLefts: number[][] = [];
@@ -375,7 +409,8 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     // Recover merged cells the tags padded with empty placeholders (needs geometry). Column spans
     // run first, on the still-rectangular grid (they use positional indices); row spans run after,
     // keyed by the geometry-stable `col`, so they tolerate the placeholders columns already dropped.
-    if (ctx.doc.cfg.includeBounds) { inferColSpans(rows); inferRowSpans(rows); }
+    const totalCells = rows.reduce((s, r) => s + (r.children?.length || 0), 0);
+    if (ctx.doc.cfg.includeBounds && totalCells <= MAX_SPAN_INFERENCE_CELLS) { inferColSpans(rows); inferRowSpans(rows); }
     const table: OfficeContentNode = { type: 'table', children: rows, text: rows.map(r => r.text || '').join('\n') };
     const tb = unionAll(rows.map(r => r.bounds));
     if (tb) table.bounds = tb;

@@ -1932,6 +1932,18 @@ async function runNativePdfEngineTests(): Promise<GenFeatureTest[]> {
         /CellLineA[\s\S]*\n[\s\S]*CellLineB/.test(multiOut.text),
         'block children of a cell each own a line; joining them would run the words together'));
 
+    // --- A row taller than a page is split across pages, not drawn off the bottom (data loss) ---
+    // A cell of 120 short paragraphs is far taller than one page. The engine used to draw the whole
+    // row from the top down with no bottom check, so every line past the margin was silently lost.
+    const tallRows = Array.from({ length: 120 }, (_, i) => ({ type: 'paragraph', children: [{ type: 'text', text: `ROWLINE${i}` }] }));
+    const tallTable = synthAst('docx', [{ type: 'table', children: [{ type: 'row', children: [{ type: 'cell', children: tallRows }] }] } as OfficeContentNode]);
+    const tallOut = await nativeText(tallTable);
+    const survived = Array.from({ length: 120 }, (_, i) => `ROWLINE${i}`).filter(l => tallOut.text.includes(l)).length;
+    results.push(mk('an over-tall table row is paginated, not truncated',
+        'all 120 cell lines survive', `${survived}/120 survived`,
+        survived === 120,
+        'a row taller than the page was drawn off the bottom, silently losing the overflow text'));
+
     // --- onNode reaches text runs, which is where nearly all the text lives ---
     let runCalls = 0;
     const hookAst = synthAst('md', [{ type: 'paragraph', children: [{ type: 'text', text: 'Original words' }] } as OfficeContentNode]);
