@@ -280,7 +280,8 @@ setTimeout(() => controller.abort(), 5000);
 try {
     const ast = await officeParser.parseOffice('large_scanned_file.pdf', {
         abortSignal: controller.signal,
-        ocr: true
+        ocr: true,
+        extractAttachments: true // page-image OCR needs this; ocr alone does nothing
     });
 } catch (err) {
     if (err.name === 'AbortError') {
@@ -1475,7 +1476,7 @@ In **short-lived scripts** (CLI tools, one-off automation), call `terminateOcr()
 ```js
 const officeParser = require('officeparser');
 
-const ast = await officeParser.parseOffice('file.pdf', { ocr: true });
+const ast = await officeParser.parseOffice('file.pdf', { ocr: true, extractAttachments: true });
 // ... process results ...
 await officeParser.terminateOcr(); // immediate exit
 ```

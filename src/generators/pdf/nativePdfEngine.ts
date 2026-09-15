@@ -66,10 +66,10 @@ async function loadPdfLib(config: OfficeParserAST['config']): Promise<any> {
 function toPoints(v: string | number | undefined, fallback: number): number {
     if (typeof v === 'number' && Number.isFinite(v)) return v * 0.75; // css px -> pt
     if (typeof v === 'string') {
-        const m = /^([\d.]+)\s*(pt|px|in|cm|mm)?$/.exec(v.trim());
+        const m = /^([\d.]+)\s*(pt|px|in|cm|mm)?$/i.exec(v.trim());
         if (m) {
             const n = parseFloat(m[1]);
-            switch (m[2]) {
+            switch (m[2]?.toLowerCase()) {
                 case 'in': return n * 72;
                 case 'cm': return n * 28.3465;
                 case 'mm': return n * 2.83465;
@@ -348,8 +348,14 @@ class NativeLayout {
                 this.y += 4;
                 return;
             // A spreadsheet is a grid: its rows/cells carry `col`, so lay it out as a table rather than
-            // letting each cell fall through to `default` and render as its own stacked paragraph.
-            case 'sheet': return this.table(node);
+            // letting each cell fall through to `default` and render as its own stacked paragraph. Its
+            // drawing images/charts sit as non-row children after the rows; render them after the grid
+            // (as the HTML/DOCX/ODT generators do) rather than dropping them.
+            case 'sheet': {
+                await this.table(node);
+                for (const c of (node.children || [])) if (c.type !== 'row') await this.render(c);
+                return;
+            }
             case 'heading': return this.heading(node);
             case 'paragraph': return this.paragraph(node);
             case 'list': return this.listItem(node);
@@ -373,7 +379,9 @@ class NativeLayout {
         // text it titles (the HTML engine expresses the same intent with `page-break-after: avoid`).
         // ensureSpace is a no-op at the top margin, so this never inserts a blank page before a heading.
         this.ensureSpace(size * 1.35 + 11 * 1.35 * 2);
-        this.y += size * 0.6;
+        // Space-before, but not when the heading is already at the very top of a page (including one it
+        // was just pushed onto by the reservation above): a gap there would float it below the margin.
+        if (this.y > this.margin.top) this.y += size * 0.6;
         const runs = (await this.collectRuns(node)).map(r => ({ ...r, fmt: { ...r.fmt, bold: true, size: `${size}pt` } }));
         this.drawRuns(runs.length ? runs : [{ text: node.text || '', fmt: { bold: true, size: `${size}pt` }, link: false }], this.margin.left, this.contentWidth);
         this.y += size * 0.35;
@@ -413,7 +421,9 @@ class NativeLayout {
         const markerX = this.margin.left + indent - 14;
         const baseline = this.pageH - this.y - size;
         this.page.drawText(this.enc(marker), { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
-        if (bodyRuns.length) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
+        // Advance for the marker line unless the body has real text to draw: a whitespace-only body
+        // makes drawRuns place nothing and never advance `this.y`, so the next item would overprint.
+        if (bodyRuns.some(r => r.text && r.text.trim())) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
         else this.y += size * 1.35;
         for (const c of (node.children || []).filter(c => c.type === 'list')) await this.listItem(c);
     }

@@ -124,6 +124,8 @@ export enum OfficeWarningType {
     PDF_NO_TEXT_EXTRACTED = 'PDF_NO_TEXT_EXTRACTED',
     /** A PDF's bookmark outline was cut short by the depth/size cap or could not be read; `ast.auxiliary.outline` holds only what was recovered */
     PDF_OUTLINE_TRUNCATED = 'PDF_OUTLINE_TRUNCATED',
+    /** `ocr: true` was set for a PDF without `extractAttachments: true`; page-image OCR needs both, so no OCR was performed */
+    OCR_REQUIRES_ATTACHMENTS = 'OCR_REQUIRES_ATTACHMENTS',
     /** A config option was passed that this version does not recognize (e.g. a key renamed in a major release); it had no effect */
     UNRECOGNIZED_CONFIG_OPTION = 'UNRECOGNIZED_CONFIG_OPTION'
 }

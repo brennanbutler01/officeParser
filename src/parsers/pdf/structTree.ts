@@ -80,8 +80,8 @@ const MAX_STRUCT_DEPTH = 256;
 /**
  * Iterative depth probe: returns true if any path in the tree is deeper than {@link MAX_STRUCT_DEPTH}
  * (a cycle qualifies, since depth grows without bound along it). Recursing here would itself overflow,
- * so it walks with an explicit stack and short-circuits at the cap, costing O(cap) along the first
- * over-deep path rather than O(nodes).
+ * so it walks with an explicit stack. A well-formed tree is visited fully (O(nodes)); a malformed one
+ * short-circuits as soon as any path passes the cap, so a cycle costs O(cap), not an infinite walk.
  */
 function structTooDeep(root: StructNode): boolean {
     const stack: Array<{ n: StructNode; d: number }> = [{ n: root, d: 0 }];
@@ -512,8 +512,13 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
             const pr = role(part);
             if (pr === 'Lbl') {
                 label = collectRuns(part, ctx).map(r => r.text).join('').trim();
-            } else if (pr === 'LBody') {
-                // Direct text runs of the body (excluding nested lists/tables).
+            } else if (pr === 'L') {
+                nested.push(...buildList(part, ctx, indent + 1));
+            } else {
+                // The item body: an LBody wrapper, OR the body placed directly under LI (a P/Span with
+                // no LBody, which some producers emit). Treat any non-Lbl/non-L child as body so its
+                // runs are covered and the item is never dropped as empty (which left the marker looking
+                // like stray text outside the tag tree and fired a spurious PDF_STRUCT_TREE_UNRELIABLE).
                 const directRuns = collectRuns(part, ctx, NESTED_IN_LBODY);
                 if (directRuns.length) { const p = runsToParagraph(directRuns, ctx.page, ctx.doc, 0); if (p) bodyNodes.push(p); }
                 // Footnotes hanging off the item text, collected exactly as a paragraph's are. Without
@@ -530,8 +535,6 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
                     if (br === 'L') nested.push(...buildList(b, ctx, indent + 1));
                     else if (br === 'Table') { const t = buildTable(b, ctx); if (t) bodyNodes.push(t); }
                 }
-            } else if (pr === 'L') {
-                nested.push(...buildList(part, ctx, indent + 1));
             }
         }
         const listType = classifyListType(label);

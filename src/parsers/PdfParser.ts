@@ -286,7 +286,9 @@ function toViewportRect(viewport: any, rect: number[]): [number, number, number,
 /** True for a color at or extremely close to black (the default text fill), so it is not reported. */
 function isNearBlack(hex: string): boolean {
     const h = hex.replace(/^#/, '');
-    if (h.length !== 6) return hex === '#000000';
+    // Colours arrive as full `#rrggbb`; anything else is not a near-black colour we recognise (the old
+    // `hex === '#000000'` fallback here could never be true, since that input is 6 digits long).
+    if (h.length !== 6) return false;
     return parseInt(h.slice(0, 2), 16) <= 8 && parseInt(h.slice(2, 4), 16) <= 8 && parseInt(h.slice(4, 6), 16) <= 8;
 }
 
@@ -689,7 +691,9 @@ async function collectPage(
     for (const item of textContent.items) if (isTextItem(item) && item.fontName) seen.add(item.fontName);
     const needFonts = [...seen].some(k => !fontCache.has(k));
     let ops: any = null;
-    if (needFonts || config.extractAttachments || config.ocr || pdfCfg.extractTextColor) {
+    // Not `config.ocr`: page-image OCR runs over collected images, which require extractAttachments, so
+    // ocr alone needs no operator list (and must not fetch one just to discard it).
+    if (needFonts || config.extractAttachments || pdfCfg.extractTextColor) {
         try { ops = await page.getOperatorList(); } catch { ops = null; }
     }
     for (const key of seen) if (!fontCache.has(key)) fontCache.set(key, await resolveFont(key, page.commonObjs, styles));
@@ -776,7 +780,7 @@ async function collectPage(
 
     // OCR of page images is emitted through the attachment path (`emitImage` requires
     // extractAttachments), so collecting images for `ocr` alone would decode and then drop them.
-    // Gate on extractAttachments only; the PDF_NO_TEXT_EXTRACTED warning tells OCR users to set it.
+    // Gate on extractAttachments only; `ocr` without it raised OCR_REQUIRES_ATTACHMENTS above.
     const images = config.extractAttachments
         ? await collectImages(pdfjs, page, layoutViewport, config, pageNumber, ops)
         : [];
@@ -937,13 +941,20 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
     let password: string | undefined = config.password || undefined;
     let passwordAttempts = 0;
 
-    // Bound how many pixels pdf.js will decode per image. When we never read image bytes (a text-only
-    // or colour-only parse, i.e. no attachments and no OCR), set 1 so image XObjects are skipped
-    // entirely: colour marks come from the operator list, not the decoded bitmap, and getOperatorList
-    // otherwise decodes every image on every page for nothing. When we do need pixels, cap at a
-    // generous 40 megapixels so a decompression-bomb image (a few bytes of headers declaring enormous
-    // dimensions) cannot drive a multi-GB, uncatchable allocation; a real scan is far below this.
-    const maxImageSize = (config.extractAttachments || config.ocr) ? 40_000_000 : 1;
+    // Bound how many pixels pdf.js will decode per image. When we never read image bytes, set 1 so
+    // image XObjects are skipped entirely: colour marks come from the operator list, not the decoded
+    // bitmap, and getOperatorList otherwise decodes every image on every page for nothing. We read
+    // image bytes only when collecting attachments (page-image OCR runs over collected images too, so
+    // `ocr` alone - without extractAttachments - collects nothing and must NOT raise this). When we do
+    // need pixels, cap at a generous 40 megapixels so a decompression-bomb image (a few bytes of
+    // headers declaring enormous dimensions) cannot drive a multi-GB, uncatchable allocation.
+    const maxImageSize = config.extractAttachments ? 40_000_000 : 1;
+
+    // `ocr: true` without `extractAttachments: true` collects no images, so no OCR can run: warn once
+    // rather than silently doing nothing (and now doing it without decoding every page image for it).
+    if (config.ocr && !config.extractAttachments) {
+        logWarning(OfficeWarningType.OCR_REQUIRES_ATTACHMENTS, config);
+    }
 
     // Open the document, retrying with an onPassword-supplied password when the PDF is encrypted.
     while (true) {

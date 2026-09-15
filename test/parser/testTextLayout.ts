@@ -174,6 +174,25 @@ export async function testTextLayout(): Promise<LayoutTest[]> {
             'fast at fontSize 1e9 and still matches at 12pt', `${ms.toFixed(1)}ms, normal=${normal}`);
     }
     {
+        // A crafted page can crowd N colour marks and N runs on one baseline. The lookup must stay near
+        // linear (binary-searched bucket), not O(N x marks). Correctness: a uniform-colour window returns
+        // that colour, a mixed one returns undefined, and over the mark cap it degrades to no colour.
+        const N = 200_000;
+        const marks = [];
+        for (let i = 0; i < N; i++) marks.push({ x: i % 1000, y: 100, color: '#ff0000' });
+        const t0 = performance.now();
+        const lk = makeColorLookup(marks);
+        let hits = 0;
+        for (let i = 0; i < N; i++) if (lk(0, 100, 12, 1000)) hits++;
+        const ms = performance.now() - t0;
+        const mixed = makeColorLookup([{ x: 10, y: 50, color: '#00ff00' }, { x: 20, y: 50, color: '#0000ff' }])(5, 50, 12, 30);
+        const overCap = makeColorLookup(new Array(300_001).fill({ x: 1, y: 1, color: '#111111' }))(0, 1, 12, 5);
+        add('Colour lookup stays near-linear with many marks on one baseline',
+            ms < 2000 && hits === N && mixed === undefined && overCap === undefined,
+            'build + N queries over N marks is fast; uniform hit, mixed undefined, over-cap undefined',
+            `${ms.toFixed(0)}ms, hits=${hits}, mixed=${mixed}, overCap=${overCap}`);
+    }
+    {
         // Two bibliography entries, each wrapping under a hanging indent.
         const F = 10, L = 12;
         const runs: RawRun[] = [];

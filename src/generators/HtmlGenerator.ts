@@ -1134,17 +1134,34 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 } else if (rows.length > 0 && rows[0].type === 'row') {
                     const firstRow = rows[0];
                     if (firstRowIsHeader) {
-                        // Re-process the first row as header cells, wrapped in a <tr>. Without the
-                        // <tr>, the header cells sit directly under <thead> (`<thead><th>…`), which
-                        // is invalid HTML that HtmlParser does not read back as a table row - so a
-                        // md -> HTML -> md round trip lost the header content. `<thead><tr><th>…` is
-                        // valid and self-idempotent.
-                        const headOutput = await this.processNodeRecursive(firstRow, async (n, children) => {
-                            return `<tr>${children.replace(/<td/g, '<th').replace(/<\/td>/g, '</th>')}</tr>`;
-                        });
-                        const bodyRows = rows.slice(1);
-                        const bodyOutput = await this.processNodeArray(bodyRows);
-                        finalChildren = `<thead>${headOutput}</thead><tbody>${bodyOutput}</tbody>`;
+                        // Promote the first row to header cells wrapped in a <tr>. The <tr> is required:
+                        // header cells directly under <thead> (`<thead><th>…`) are invalid HTML that
+                        // HtmlParser does not read back as a row, so a md -> HTML -> md round trip lost
+                        // the header. onNode is asked once for the row and once per cell (matching the
+                        // default path); a dropped/overridden row is honoured.
+                        const rowVerdict = await this.handleOnNode(firstRow);
+                        if (rowVerdict === false) {
+                            // Header row dropped by the hook: render every row as a plain body, no <thead>.
+                            finalChildren = await this.processNodeArray(rows.filter(r => r.type === 'row'));
+                        } else {
+                            let headInner: string;
+                            if (typeof rowVerdict === 'string') {
+                                headInner = rowVerdict;
+                            } else {
+                                // Promote each TOP-LEVEL cell's own <td> to <th> with the anchored replace
+                                // the rowspan path uses (first `<td`, last `</td>`), so a table nested
+                                // inside a header cell keeps its own <td> body cells as <td>.
+                                let tr = '';
+                                for (const cell of (firstRow.children || []).filter(c => c.type === 'cell')) {
+                                    let cellHtml = await this.processNodeRecursive(cell, this.boundNodeProcessor);
+                                    cellHtml = cellHtml.replace(/<td/, '<th').replace(/<\/td>$/, '</th>');
+                                    tr += cellHtml;
+                                }
+                                headInner = `<tr>${tr}</tr>`;
+                            }
+                            const bodyOutput = await this.processNodeArray(rows.slice(1));
+                            finalChildren = `<thead>${headInner}</thead><tbody>${bodyOutput}</tbody>`;
+                        }
                     }
                 }
                 // Match CustomTable's exact data-align + margin style contract so a loaded

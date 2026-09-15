@@ -202,11 +202,12 @@ export const ADMONITION_COLOR: Record<string, string> = {
 export function lengthToPt(value: string | number | undefined): number | null {
     if (value == null) return null;
     if (typeof value === 'number') return Number.isFinite(value) ? value * 0.75 : null; // px -> pt
-    const m = /^\s*(-?[\d.]+)\s*(pt|in|cm|mm|px|%)?\s*$/.exec(value);
+    // Case-insensitive: CSS units are, and callers pass raw source values like "12PT"/"16PX".
+    const m = /^\s*(-?[\d.]+)\s*(pt|in|cm|mm|px|%)?\s*$/i.exec(value);
     if (!m) return null;
     const n = parseFloat(m[1]);
     if (!Number.isFinite(n)) return null;
-    switch (m[2]) {
+    switch (m[2]?.toLowerCase()) {
         case 'pt': return n;
         case 'in': return n * 72;
         case 'cm': return n * 28.3465;

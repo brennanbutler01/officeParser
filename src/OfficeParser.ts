@@ -220,7 +220,7 @@ export class OfficeParser {
             // detection and the format parsers) only ever sees the plaintext document. PDF encryption
             // is handled inside pdf.js by the PDF parser, which reads the same password/onPassword.
             if (buffer.length > 0) {
-                buffer = await decryptIfNeeded(buffer, internalConfig);
+                buffer = await decryptIfNeeded(buffer, internalConfig, ext);
             }
 
             // Attempt to detect file type from buffer only if extension is unknown.

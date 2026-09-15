@@ -15,14 +15,14 @@ export const MAX_PASSWORD_ATTEMPTS = 3;
  * Shared by the parser and the template renderer so both honour `password` and `onPassword`
  * identically, and neither drifts from the other's retry/limit semantics.
  */
-export const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig): Promise<Buffer> => {
+export const decryptIfNeeded = async (buffer: Buffer, config: OfficeParserConfig, extHint?: string): Promise<Buffer> => {
     const limits = config.decompressionLimits;
     let decrypt: ((buf: Uint8Array, password: string) => Uint8Array | Promise<Uint8Array>) | null = null;
     if (isCfb(buffer)) {
         // A CFB container is either an encrypted OOXML file or a legacy binary (.doc/.xls/.ppt).
         // Only the former carries the encryption streams; the latter falls through as unsupported.
         if (isEncryptedOoxml(buffer)) decrypt = decryptOoxml;
-    } else if (await isEncryptedOdf(buffer, limits)) {
+    } else if (await isEncryptedOdf(buffer, limits, extHint)) {
         // The ODF detection and decryption reuse the caller's decompression limits, so a zip-bomb
         // in a would-be encrypted ODF is bounded exactly as an ordinary document is. The PBKDF2 budget
         // is created here, outside the retry loop below, so the whole password dance shares one

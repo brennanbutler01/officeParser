@@ -79,28 +79,50 @@ function isZip(buf: Uint8Array): boolean {
     return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
 }
 
+/** ODF package extensions (document + template), used as a "this might be ODF" hint from the caller. */
+const ODF_EXTS = new Set(['odt', 'ods', 'odp', 'odg', 'ott', 'ots', 'otp', 'otg', 'odf', 'odm']);
+function isOdfExt(ext?: string): boolean {
+    return !!ext && ODF_EXTS.has(ext.toLowerCase().replace(/^\./, ''));
+}
+
 /**
- * Cheap ODF-package discriminator read straight from the first local file header, so a docx/xlsx/pptx
- * or epub does not pay a full streaming zip walk just to discover it has no ODF manifest. A conformant
- * ODF package (encrypted or not) stores an unencrypted `mimetype` entry FIRST, uncompressed, whose
- * bytes are an `application/vnd.oasis.opendocument.*` media type (ODF 1.2 §3.3). OOXML starts with
- * `[Content_Types].xml`/`_rels`, and an EPUB's first `mimetype` reads `application/epub+zip`, so both
- * are ruled out here without touching the rest of the archive.
+ * Reads the first local file header when it is a `mimetype` entry, so a docx/xlsx/pptx (which start
+ * with `[Content_Types].xml`/`_rels`) never pays a full zip walk. Returns `{ stored, content }`, where
+ * `stored` is true for an uncompressed entry (method 0) and `content` is the media-type prefix (only
+ * read when stored). Returns null when the archive does not start with a `mimetype` entry at all.
  */
-function firstEntryIsOdfMimetype(buf: Uint8Array): boolean {
-    // Local file header: sig(4) ver(2) flags(2) method(2) time(2) date(2) crc(4) csize(4) usize(4)
+function firstMimetypeEntry(buf: Uint8Array): { stored: boolean; content: string } | null {
+    // Local file header: sig(4) ver(2) flags(2) method(2)@8 time(2) date(2) crc(4) csize(4) usize(4)
     // namelen(2)@26 extralen(2)@28 name@30.
-    if (!isZip(buf) || buf.length < 30) return false;
+    if (!isZip(buf) || buf.length < 30) return null;
     const method = buf[8] | (buf[9] << 8);
-    if (method !== 0) return false; // the mimetype entry is always stored (never deflated)
     const nameLen = buf[26] | (buf[27] << 8);
     const extraLen = buf[28] | (buf[29] << 8);
-    if (nameLen !== 8) return false; // "mimetype".length
-    if (Buffer.from(buf.subarray(30, 38)).toString('latin1') !== 'mimetype') return false;
+    if (nameLen !== 8) return null; // "mimetype".length
+    if (Buffer.from(buf.subarray(30, 38)).toString('latin1') !== 'mimetype') return null;
     const dataStart = 30 + nameLen + extraLen;
-    // Only the media-type prefix is needed; subarray clamps to the buffer so a bogus offset is safe.
-    return Buffer.from(buf.subarray(dataStart, dataStart + 64)).toString('latin1')
-        .startsWith('application/vnd.oasis.opendocument');
+    // Only the media-type prefix is needed, and only a stored entry can be read without inflating;
+    // subarray clamps to the buffer so a bogus offset is safe.
+    const content = method === 0 ? Buffer.from(buf.subarray(dataStart, dataStart + 64)).toString('latin1') : '';
+    return { stored: method === 0, content };
+}
+
+/**
+ * True when a buffer is worth the (bounded) ODF encryption-manifest sniff. A conformant ODF package
+ * (encrypted or not) stores an `application/vnd.oasis.opendocument.*` `mimetype` FIRST, uncompressed
+ * (ODF 1.2 §3.3), so that is the fast yes. Two fallbacks keep a NON-conformant encrypted ODF
+ * decryptable rather than failing later as unreadable ciphertext: a *deflated* `mimetype` first entry
+ * (an EPUB's is always stored per OCF, so a compressed one is not an EPUB), and a caller
+ * extension/fileType hint that names an ODF type. OOXML and EPUB take neither branch, so both are still
+ * ruled out without walking the archive.
+ */
+function looksLikeOdfPackage(buf: Uint8Array, extHint?: string): boolean {
+    const mt = firstMimetypeEntry(buf);
+    if (mt) {
+        if (mt.stored) return mt.content.startsWith('application/vnd.oasis.opendocument');
+        return true; // deflated mimetype: not an EPUB, treat as a possible non-conformant ODF
+    }
+    return isOdfExt(extHint);
 }
 
 function maxBytesOf(limits?: DecompressionLimits): number {
@@ -128,11 +150,12 @@ async function readManifest(buf: Uint8Array, limits?: DecompressionLimits, confi
  * True when the buffer is a zip whose `META-INF/manifest.xml` marks at least one entry encrypted.
  * A plain ODF (or any other zip, e.g. a docx) has no `<manifest:encryption-data>` and returns false.
  */
-export async function isEncryptedOdf(buf: Uint8Array, limits?: DecompressionLimits): Promise<boolean> {
+export async function isEncryptedOdf(buf: Uint8Array, limits?: DecompressionLimits, extHint?: string): Promise<boolean> {
     // Fast reject: every zip-backed format (docx/xlsx/pptx/epub) reaches this on every parse, but only
-    // an ODF package can be an encrypted ODF. Read the first entry's stored `mimetype` instead of
-    // streaming the whole archive to look for a manifest that only ODF has.
-    if (!firstEntryIsOdfMimetype(buf)) return false;
+    // an ODF package can be an encrypted ODF. Decide from the first entry's `mimetype` (plus a deflated-
+    // mimetype / ODF-extension fallback) instead of streaming the whole archive for a manifest only ODF
+    // has, so a non-conformant encrypted ODF still decrypts rather than failing later as ciphertext.
+    if (!looksLikeOdfPackage(buf, extHint)) return false;
     try {
         // Sniffing is capped (the manifest is tiny in any real file) and silent (a failed guess is not
         // the caller's fault), exactly like detectOfficeTypeFromZip. The real decrypt below re-reads the
