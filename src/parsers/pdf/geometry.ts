@@ -112,7 +112,10 @@ export function computeRunBox(m: number[], itemWidth: number, ascent: number, de
     // The horizontal line builder skips these; PdfParser's rotatedTextNodes recovers 90/180/270 runs
     // as trailing paragraphs so their text is not lost.
     if (angle === 180) {
-        return { x: originX - itemWidth, yTop: yBaseline - ascent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
+        // A 180-degree run is upside down: its glyph body extends BELOW the baseline in viewport space,
+        // so the box spans [yBaseline + descent*fs, yBaseline + ascent*fs] (descent is negative), not the
+        // upright [yBaseline - ascent*fs, ...]. Height is unchanged.
+        return { x: originX - itemWidth, yTop: yBaseline + descent * fontSize, yBaseline, width: itemWidth, height, fontSize, angle };
     }
     if (angle === 90 || angle === 270) {
         // Advance is vertical; approximate a box tall by itemWidth and wide by height.

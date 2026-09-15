@@ -233,12 +233,36 @@ function paragraphFrom(node: StructNode, ctx: WalkCtx, level: number | undefined
     return runsToParagraph(runs, ctx.page, ctx.doc, level);
 }
 
-function collectRows(node: StructNode): StructNode[] {
+/**
+ * Structure roles that group content without carrying table semantics. A producer may wrap a table's
+ * row groups (or an individual row's cells) in one of these; descend through them so the row/cell is
+ * still found, but never through a nested `Table`/`TR` (that would pull a sub-table's rows up into this
+ * one).
+ */
+const TRANSPARENT_GROUP = new Set(['Div', 'NonStruct', 'Part', 'Sect', 'Art', 'Document', 'Group']);
+
+/** Bounds the wrapper descent in {@link collectRows}/{@link collectCells} against a hostile tag tree. */
+const MAX_TABLE_WRAPPER_DEPTH = 32;
+
+function collectRows(node: StructNode, depth = 0): StructNode[] {
     const out: StructNode[] = [];
+    if (depth > MAX_TABLE_WRAPPER_DEPTH) return out;
     for (const c of node.children || []) {
         const r = role(c);
         if (r === 'TR') out.push(c);
-        else if (r === 'THead' || r === 'TBody' || r === 'TFoot') out.push(...collectRows(c));
+        else if (r === 'THead' || r === 'TBody' || r === 'TFoot' || TRANSPARENT_GROUP.has(r)) out.push(...collectRows(c, depth + 1));
+    }
+    return out;
+}
+
+/** Cells of a row: TH/TD directly under the TR, or under a transparent wrapper the producer inserted. */
+function collectCells(tr: StructNode, depth = 0): StructNode[] {
+    const out: StructNode[] = [];
+    if (depth > MAX_TABLE_WRAPPER_DEPTH) return out;
+    for (const c of tr.children || []) {
+        const r = role(c);
+        if (r === 'TH' || r === 'TD') out.push(c);
+        else if (TRANSPARENT_GROUP.has(r)) out.push(...collectCells(c, depth + 1));
     }
     return out;
 }
@@ -381,9 +405,8 @@ function buildTable(node: StructNode, ctx: WalkCtx): OfficeContentNode | null {
     for (const tr of collectRows(node)) {
         const cells: OfficeContentNode[] = [];
         let colIdx = 0;
-        for (const cellNode of (tr.children || [])) {
+        for (const cellNode of collectCells(tr)) {
             const cr = role(cellNode);
-            if (cr !== 'TH' && cr !== 'TD') continue;
             const cellChildren = walkChildren(cellNode, ctx, 0);
             const meta: CellMetadata = { row: rowIdx, col: colIdx };
             if (cr === 'TH') meta.style = 'header';

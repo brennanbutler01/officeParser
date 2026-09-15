@@ -1561,7 +1561,7 @@ const ast = await officeParser.parseOffice(pdfArrayBuffer, {
 | Out of memory on large Excel files | Call `await ast.to('text')` early and discard the AST object to allow garbage collection |
 | `md`/`html`/`csv` buffer not detected | Add `fileType: 'md'` (or `'html'`, `'csv'`) to config (these formats have no magic bytes) |
 | `IMPROPER_BUFFERS` error | Usually means no file extension and no `fileType` hint was provided for a buffer input |
-| PDF generation fails | Install the optional peer dependency: `npm install puppeteer` |
+| PDF generation fails | The default engine needs the optional peer dependency (`npm install puppeteer`); or switch to the dependency-free native engine with `pdfConfig: { engine: 'native' }` (bundled `pdf-lib`, lighter output, no Chromium) |
 
 For a full debugging guide, visit the [Live Documentation](https://harshankur.github.io/officeParser/#spec/debugging).
 

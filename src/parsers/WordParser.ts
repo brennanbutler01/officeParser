@@ -1013,11 +1013,20 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
                             // A continuation cell must still contain a block child, so a generated
                             // document carries an empty <w:p/> here; only real content is worth
                             // folding into the merged cell, otherwise the round-trip gains an empty
-                            // paragraph and a stray space.
-                            if (cellChildren.length > 0 && cellText.trim()) {
+                            // paragraph and a stray space. `cellText` is built from `w:p` runs only, so
+                            // guarding on it alone drops a continuation whose sole content is an
+                            // image-only paragraph or a nested table (both have empty text) - guard on
+                            // "has a renderable child" instead, and only extend the text when there is
+                            // some.
+                            const hasFoldableContent = cellChildren.some(c =>
+                                c.type !== 'paragraph'
+                                || (c.text?.trim().length ?? 0) > 0
+                                || (c.children?.length ?? 0) > 0
+                            );
+                            if (hasFoldableContent) {
                                 if (!mergeInfo.node.children) mergeInfo.node.children = [];
                                 mergeInfo.node.children.push(...cellChildren);
-                                mergeInfo.node.text += " " + cellText;
+                                if (cellText.trim()) mergeInfo.node.text += " " + cellText;
                             }
                         } else {
                             // Fallback: if we found a continue but no restart, treat as normal cell

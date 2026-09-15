@@ -79,6 +79,30 @@ function isZip(buf: Uint8Array): boolean {
     return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
 }
 
+/**
+ * Cheap ODF-package discriminator read straight from the first local file header, so a docx/xlsx/pptx
+ * or epub does not pay a full streaming zip walk just to discover it has no ODF manifest. A conformant
+ * ODF package (encrypted or not) stores an unencrypted `mimetype` entry FIRST, uncompressed, whose
+ * bytes are an `application/vnd.oasis.opendocument.*` media type (ODF 1.2 §3.3). OOXML starts with
+ * `[Content_Types].xml`/`_rels`, and an EPUB's first `mimetype` reads `application/epub+zip`, so both
+ * are ruled out here without touching the rest of the archive.
+ */
+function firstEntryIsOdfMimetype(buf: Uint8Array): boolean {
+    // Local file header: sig(4) ver(2) flags(2) method(2) time(2) date(2) crc(4) csize(4) usize(4)
+    // namelen(2)@26 extralen(2)@28 name@30.
+    if (!isZip(buf) || buf.length < 30) return false;
+    const method = buf[8] | (buf[9] << 8);
+    if (method !== 0) return false; // the mimetype entry is always stored (never deflated)
+    const nameLen = buf[26] | (buf[27] << 8);
+    const extraLen = buf[28] | (buf[29] << 8);
+    if (nameLen !== 8) return false; // "mimetype".length
+    if (Buffer.from(buf.subarray(30, 38)).toString('latin1') !== 'mimetype') return false;
+    const dataStart = 30 + nameLen + extraLen;
+    // Only the media-type prefix is needed; subarray clamps to the buffer so a bogus offset is safe.
+    return Buffer.from(buf.subarray(dataStart, dataStart + 64)).toString('latin1')
+        .startsWith('application/vnd.oasis.opendocument');
+}
+
 function maxBytesOf(limits?: DecompressionLimits): number {
     const v = limits?.maxUncompressedBytes;
     return v !== undefined && Number.isFinite(v) && v >= 0 ? v : DEFAULT_MAX_BYTES;
@@ -105,6 +129,10 @@ async function readManifest(buf: Uint8Array, limits?: DecompressionLimits, confi
  * A plain ODF (or any other zip, e.g. a docx) has no `<manifest:encryption-data>` and returns false.
  */
 export async function isEncryptedOdf(buf: Uint8Array, limits?: DecompressionLimits): Promise<boolean> {
+    // Fast reject: every zip-backed format (docx/xlsx/pptx/epub) reaches this on every parse, but only
+    // an ODF package can be an encrypted ODF. Read the first entry's stored `mimetype` instead of
+    // streaming the whole archive to look for a manifest that only ODF has.
+    if (!firstEntryIsOdfMimetype(buf)) return false;
     try {
         // Sniffing is capped (the manifest is tiny in any real file) and silent (a failed guess is not
         // the caller's fault), exactly like detectOfficeTypeFromZip. The real decrypt below re-reads the

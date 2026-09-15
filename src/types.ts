@@ -1936,7 +1936,12 @@ export interface TemplateConfig {
      * Retries are capped so a callback that keeps returning a wrong password cannot loop forever.
      */
     onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
-    /** Optional hint for the template's format. Only DOCX is supported today; detected from bytes otherwise. */
+    /**
+     * Optional hint for the template's format. DOCX is the only supported template format today, and the
+     * format is always detected from the bytes, so this hint does not influence detection: it only
+     * refines the `TEMPLATE_UNSUPPORTED_FORMAT` message when an unsupported file is passed. It is kept as
+     * the extension point for a second template format.
+     */
     fileType?: 'docx';
     /**
      * Limits on decompressing the (untrusted) template zip, same shape and defaults as the parser's.
