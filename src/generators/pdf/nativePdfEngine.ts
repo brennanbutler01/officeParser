@@ -18,7 +18,7 @@
 
 import { FullGeneratorConfig, ImageMode, OfficeContentNode, OfficeErrorType, OfficeMetadata, OfficeParserAST, OfficeWarningType, TextFormatting } from '../../types.js';
 import { getAbortError, getOfficeError } from '../../utils/errorUtils.js';
-import { isHeaderRow, paperSizePt, resolveImageMode, sniffImageSize } from '../../utils/officeGenUtils.js';
+import { isHeaderRow, lengthToPt, paperSizePt, resolveImageMode, sniffImageSize } from '../../utils/officeGenUtils.js';
 
 /**
  * Megapixel ceiling for an embedded image. `embedPng`/`embedJpg` decode the full bitmap, so a
@@ -42,6 +42,9 @@ function toWinAnsi(text: string): { text: string; changed: boolean } {
         if ((cp >= 0x20 && cp <= 0x7E) || (cp >= 0xA0 && cp <= 0xFF) || CP1252_EXTRA.has(cp)) out += ch;
         else if (cp === 0x09) out += '    ';                          // tab -> spaces
         else if (cp === 0x0A || cp === 0x0D) out += ' ';             // stray newline in a single line
+        // Zero-width and formatting characters (ZWSP/ZWNJ/ZWJ/word-joiner/BOM) carry no glyph; drop them
+        // silently rather than drawing a visible "?" mid-word and flagging a spurious loss.
+        else if (cp === 0x200B || cp === 0x200C || cp === 0x200D || cp === 0x2060 || cp === 0xFEFF) { /* drop */ }
         else { out += '?'; changed = true; }
     }
     return { text: out, changed };
@@ -338,12 +341,14 @@ class NativeLayout {
         switch (node.type) {
             case 'page':
             case 'slide':
-            case 'sheet':
             case 'header':
             case 'footer':
                 for (const c of node.children || []) await this.render(c);
                 this.y += 4;
                 return;
+            // A spreadsheet is a grid: its rows/cells carry `col`, so lay it out as a table rather than
+            // letting each cell fall through to `default` and render as its own stacked paragraph.
+            case 'sheet': return this.table(node);
             case 'heading': return this.heading(node);
             case 'paragraph': return this.paragraph(node);
             case 'list': return this.listItem(node);
@@ -402,13 +407,20 @@ class NativeLayout {
     }
 
     private code(node: OfficeContentNode): void {
-        const size = 10, lh = size * 1.35;
         this.y += 2;
-        // Draw each source line verbatim in a monospace font so leading indentation is preserved
-        // (word-splitting would trim it); over-wide lines wrap at character boundaries. Split BEFORE
-        // encoding: `enc` maps every newline to a space (there are no line breaks inside a drawn
-        // string), so encoding first would collapse the whole block onto one line.
-        for (const raw of String(node.text || '').split(/\r\n|\r|\n/)) {
+        this.drawMonospace(String(node.text || ''));
+        this.y += 6;
+    }
+
+    /**
+     * Draws text line-by-line in a monospace font, preserving leading indentation and column alignment
+     * (word wrapping would collapse both). Used for code blocks and for OCR text, whose 2-D page layout
+     * a flowing paragraph would destroy. Split BEFORE encoding: `enc` maps every newline to a space
+     * (a drawn string cannot contain one), so encoding first would collapse the block onto one line.
+     */
+    private drawMonospace(text: string): void {
+        const size = 10, lh = size * 1.35;
+        for (const raw of text.split(/\r\n|\r|\n/)) {
             const expanded = this.enc(raw.replace(/\t/g, '    '));
             const chunks = splitToWidth(expanded || ' ', this.fonts.mono, size, this.contentWidth - 12);
             for (const chunk of (chunks.length ? chunks : [' '])) {
@@ -417,7 +429,12 @@ class NativeLayout {
                 this.y += lh;
             }
         }
-        this.y += 6;
+    }
+
+    /** Draws OCR text: multi-line keeps its 2-D layout in monospace, a single line flows as prose. */
+    private async drawOcrText(text: string): Promise<void> {
+        if (/[\r\n]/.test(text)) { this.y += 2; this.drawMonospace(text); this.y += 4; }
+        else await this.plainParagraph(text);
     }
 
     private async note(node: OfficeContentNode): Promise<void> {
@@ -447,7 +464,7 @@ class NativeLayout {
         const mode = this.imageMode;
         if (mode === 'none') return;
         const ocr = (node.text || '').trim();
-        if (mode === 'ocr-text-only') { if (ocr) await this.paragraph(node); return; }
+        if (mode === 'ocr-text-only') { if (ocr) await this.drawOcrText(ocr); return; }
 
         const meta = node.metadata as any;
         const name = meta?.attachmentName;
@@ -505,7 +522,7 @@ class NativeLayout {
             return;
         }
         // 'image+ocr-text': draw the recognized text just below the successfully embedded image.
-        if (mode === 'image+ocr-text' && ocr) await this.paragraph(node);
+        if (mode === 'image+ocr-text' && ocr) await this.drawOcrText(ocr);
     }
 
     /**
@@ -631,10 +648,23 @@ const BLOCK_CELL_TYPES = new Set<string>(['paragraph', 'heading', 'list', 'code'
 
 /** Parses a `TextFormatting.size` ("12pt", "14") into points, or null. */
 function parseFontSize(size: string | undefined): number | null {
-    if (!size) return null;
-    const m = /^([\d.]+)/.exec(String(size));
-    if (!m) return null;
-    const n = parseFloat(m[1]);
+    if (size == null) return null;
+    const s = String(size).trim();
+    // Relative units resolve against the engine's 11pt default body size (HTML/Markdown sources store a
+    // raw CSS `font-size`, so `1.2em` or `120%` must not be read as 1.2pt / 120pt).
+    const rel = /^([\d.]+)\s*(em|rem|%)$/i.exec(s);
+    if (rel) {
+        const n = parseFloat(rel[1]);
+        const pt = (rel[2].toLowerCase() === '%' ? n / 100 : n) * 11;
+        return Number.isFinite(pt) && pt > 0 ? pt : null;
+    }
+    // An explicit absolute unit goes through the shared converter (px->pt at 96dpi, in/cm/mm too); a
+    // bare number stays points, matching what the parsers write into `formatting.size`.
+    if (/(pt|px|in|cm|mm)\s*$/i.test(s)) {
+        const pt = lengthToPt(s);
+        return pt != null && pt > 0 ? pt : null;
+    }
+    const n = parseFloat(s);
     return Number.isFinite(n) && n > 0 ? n : null;
 }
 
@@ -669,9 +699,14 @@ function wrapPlain(text: string, font: any, size: number, width: number, enc: (s
         const words = para.split(/\s+/).filter(Boolean);
         let line = '';
         for (const w of words) {
-            const cand = line ? line + ' ' + w : w;
-            if (line && font.widthOfTextAtSize(cand, size) > width) { out.push(line); line = w; }
-            else line = cand;
+            // A single word wider than the whole column (a URL, hash, long identifier) is broken at
+            // character boundaries so it wraps instead of overflowing into the next cell or off the page.
+            const pieces = width > 0 && font.widthOfTextAtSize(w, size) > width ? splitToWidth(w, font, size, width) : [w];
+            for (const piece of pieces) {
+                const cand = line ? line + ' ' + piece : piece;
+                if (line && font.widthOfTextAtSize(cand, size) > width) { out.push(line); line = piece; }
+                else line = cand;
+            }
         }
         out.push(line);
     }
@@ -715,7 +750,10 @@ function applyMetadata(pdf: any, m: OfficeMetadata): void {
  */
 export async function renderNativePdf(ast: OfficeParserAST, config: FullGeneratorConfig, metadata: OfficeMetadata, reportWarning: (type: OfficeWarningType, info?: any) => void): Promise<Uint8Array> {
     const lib = await loadPdfLib(ast.config);
-    const pdf = await lib.PDFDocument.create();
+    // updateMetadata:false stops pdf-lib stamping CreationDate/ModDate with the current time: dates
+    // come only from the document's own metadata (via applyMetadata), so a source with no dates
+    // produces byte-identical output on every run, matching the reproducible DOCX/ODT/EPUB generators.
+    const pdf = await lib.PDFDocument.create({ updateMetadata: false });
     applyMetadata(pdf, metadata);
 
     const fonts: Fonts = {
