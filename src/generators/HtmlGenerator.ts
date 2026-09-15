@@ -1378,9 +1378,10 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const pageNum = this.escape(String(meta?.pageNumber || ''));
                 // Emit an id of `page=N` so internal links from parsed PDFs (`href="#page=N"`) resolve
                 // in the generated HTML and printed PDF. If the section already has an id, add a
-                // separate leading anchor instead of overwriting it.
-                const pageAnchor = idAttr ? `<a id="page=${pageNum}"></a>` : '';
-                const pageIdAttr = idAttr || ` id="page=${pageNum}"`;
+                // separate leading anchor instead of overwriting it. Only when there is a real page
+                // number: an empty `page=` id on every unnumbered page would be a duplicate (invalid HTML).
+                const pageAnchor = (pageNum && idAttr) ? `<a id="page=${pageNum}"></a>` : '';
+                const pageIdAttr = idAttr || (pageNum ? ` id="page=${pageNum}"` : '');
                 return `${extraAnchors}${pageAnchor}<section class="page" data-page-num="${pageNum}"${pageIdAttr}${className}${mappedAttrs}${styleAttr}>${childrenOutput}</section>`;
             }
             case 'note': {
