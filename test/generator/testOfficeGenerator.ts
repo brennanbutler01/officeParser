@@ -2086,6 +2086,31 @@ async function runTableGeometryTests(): Promise<GenFeatureTest[]> {
         rowspanCounts.table === 1 && rowspanCounts.row === 2 && rowspanCounts.cell === 3 && rowspanCounts.text === 3,
         'the rowspan grid builds each <tr> itself, so the row nodes have to be offered to the hook there'));
 
+    // --- A header row dropped by onNode must not leave a body row wrapped in <thead> ---
+    // A rowspan in a later row forces the grid-occupancy path; the all-bold first row would normally
+    // split off as <thead>. When onNode drops that header row, trs[0] shifts to a body row, which must
+    // land in <tbody>, not <thead>.
+    const dropHeaderAst = synthAst('docx', [{
+        type: 'table', children: [
+            { type: 'row', metadata: { drop: true } as any, children: [headerCell('DROPHEAD'), headerCell('H2')] },
+            { type: 'row', children: [{ type: 'cell', metadata: { rowSpan: 2 }, children: [{ type: 'text', text: 'span' }] } as OfficeContentNode, bodyCell('bodyX')] },
+            { type: 'row', children: [bodyCell('bodyY')] },
+        ],
+    } as OfficeContentNode]);
+    const keepRes = await OfficeGenerator.generate(dropHeaderAst as any, 'html' as any, {} as any);
+    const keepHtml = typeof keepRes.value === 'string' ? keepRes.value : '';
+    const headerInThead = /<thead>[\s\S]*DROPHEAD[\s\S]*<\/thead>/.test(keepHtml);
+    const dropRes = await OfficeGenerator.generate(dropHeaderAst as any, 'html' as any,
+        { onNode: (n: OfficeContentNode) => (n.type === 'row' && (n.metadata as any)?.drop) ? false : undefined } as any);
+    const dropHtml = typeof dropRes.value === 'string' ? dropRes.value : '';
+    const headerDropped = !dropHtml.includes('DROPHEAD');
+    const noThead = !dropHtml.includes('<thead>');
+    results.push(mk('html', 'onNode-dropped header row does not wrap a body row in <thead>',
+        'kept: header in <thead>; dropped: header gone, no <thead>',
+        `headerInThead=${headerInThead}, headerDropped=${headerDropped}, noThead=${noThead}`,
+        headerInThead && headerDropped && noThead,
+        'renderRowsWithRowspans skips a dropped row, so trs[0] shifts to a body row; wrapping it in <thead> put a <td> body row in the header'));
+
     const sheetCounts = await countOnNode([{
         type: 'sheet', metadata: { sheetName: 'S' }, children: [
             { type: 'row', children: [sparseCell(0, 0, 'A1'), sparseCell(0, 1, 'B1')] },
