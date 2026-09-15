@@ -1,7 +1,7 @@
 import { AdmonitionMetadata, CellMetadata, CodeMetadata, ConversionResult, EmbedMetadata, GeneratorConfig, HeadingMetadata, ImageMetadata, ListMetadata, NoteMetadata, OfficeContentNode, OfficeParserAST, OfficeWarningType, PageMetadata, SlideMetadata, StandaloneConfig, TableMetadata, TextMetadata } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
-import { base64ByteLength } from '../utils/officeGenUtils.js';
+import { base64ByteLength, isHeaderRow } from '../utils/officeGenUtils.js';
 import { escapeHtml, isSafeHtmlAttributeName, isSafeStyleMapTag, sanitizeCssValue, sanitizeUrl, sanitizeImageUrl, serializeForInlineScript } from '../utils/sanitize.js';
 
 type ResolvedStandalone = Required<StandaloneConfig>;
@@ -174,7 +174,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             if (footnotes.length > 0) {
                 let footnotesHtml = '';
                 for (const note of footnotes) {
-                    footnotesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor);
+                    footnotesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor, this.collectedNoteOverrides.get(note));
                 }
                 // data-footnotes carries an explicit empty value (not a bare attribute) so
                 // the markup is valid XHTML too - EpubGenerator embeds this verbatim, and
@@ -185,7 +185,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             if (otherNotes.length > 0) {
                 let notesHtml = '';
                 for (const note of otherNotes) {
-                    notesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor);
+                    notesHtml += await this.processNodeRecursive(note, this.boundNodeProcessor, this.collectedNoteOverrides.get(note));
                 }
                 bodyContent += `\n<div class="document-notes-section">\n<hr class="page-break">\n${notesHtml}\n</div>\n`;
             }
@@ -588,6 +588,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 // anchor - the exact dangling link the orphan handling removes. MarkdownGenerator's
                 // equivalent routing is top-level only, so gating on the flag matches it.
                 this.collectedNotes.push(node);
+                // Remember the hook's verdict (already asked above) so the footnotes-section render
+                // reuses it instead of firing onNode a second time for this note.
+                this.collectedNoteOverrides.set(node, { value: override });
                 continue;
             }
 
@@ -656,13 +659,11 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
     private firstRowIsHeader(node: OfficeContentNode): boolean {
         const rows = node.children || [];
         if (!rows.length || rows[0].type !== 'row') return false;
-        const firstRow = rows[0];
-        const firstRowCells = firstRow.children || [];
-        const isHeaderStyle = (firstRow.metadata as any)?.style?.toLowerCase().includes('header');
-        const allBold = firstRowCells.length > 0 && firstRowCells.every(c =>
-            c.children?.every(child => child.formatting?.bold === true)
-        );
-        return !!(isHeaderStyle || allBold);
+        // Use the heuristic every other generator shares, so a header row survives into <thead> the
+        // same way it does in DOCX/ODT/native-PDF output. It adds the cell-level `style: 'header'` /
+        // `isHeader` convention that the Word, ODF and tagged-PDF parsers write (a repeating header row
+        // that is not bold), on top of the row-level style and all-bold-first-row cases this had.
+        return isHeaderRow(rows[0], true);
     }
 
     /** True when any cell of the table spans more than one row. */
@@ -694,6 +695,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
 
     /** Nodes whose `onNode` verdict was `false`, so a later pass can honour it without re-asking. */
     private readonly onNodeSkipped = new WeakSet<OfficeContentNode>();
+    /** Verdicts for orphan notes hoisted into the footnotes section, so onNode is not asked again when
+     *  they are rendered there (it was already asked in processNodeArray, firing the hook twice). */
+    private readonly collectedNoteOverrides = new Map<OfficeContentNode, OnNodeVerdict>();
 
     /**
      * The default node processor, bound once so a recursion can tell it apart from a caller-supplied

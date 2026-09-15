@@ -543,9 +543,12 @@ function buildList(node: StructNode, ctx: WalkCtx, indent: number): OfficeConten
             if (anchor) anchor.notes = [...(anchor.notes || []), ...itemNotes];
             else item.children = [...(item.children || []), ...itemNotes];
         }
-        items.push(item);
+        // Skip an LI that carried no body text and no notes (a producer that wrapped only a nested
+        // list in an LI, or an empty LI): emitting an empty list node just adds a blank bullet and
+        // leaves its (uncovered) marker looking like text outside the tag tree. Any nested sublist is
+        // still emitted.
+        if (bodyNodes.length || itemNotes.length) { items.push(item); idx++; }
         items.push(...nested);
-        idx++;
     }
     return items;
 }

@@ -1198,8 +1198,8 @@ export interface PdfGeneratorConfig {
      *   only hand back HTML rather than PDF bytes.
      * - `'native'`: lay the AST out directly with `pdf-lib` (an optional peer dependency) - no
      *   browser required, works identically in Node and the browser (so it can produce real PDF bytes
-     *   client-side), and is much lighter. The trade-off is fidelity: it uses the Standard-14 fonts
-     *   (Helvetica/Times/Courier) rather than the document's own and performs a clean reflow rather
+     *   client-side), and is much lighter. The trade-off is fidelity: it draws in the Standard-14
+     *   Helvetica and Courier fonts rather than the document's own and performs a clean reflow rather
      *   than matching the HTML renderer pixel for pixel. `tagged`/`outline` do not apply to it.
      *
      * Defaults to `'html'`.
@@ -2914,9 +2914,10 @@ export interface OfficeAuxiliaryContent {
     slideMasters?: OfficeContentNode[];
     /**
      * The document outline (bookmarks / table of contents), as a tree of `list` nodes. Each item's
-     * text is the bookmark title and its `metadata.link` points to the destination (`#page=N` when
-     * resolvable, else `#internal`); nested bookmarks are the item's `children`. Populated for PDFs
-     * that declare an outline, unless `ignoreInternalLinks` is set. Absent otherwise.
+     * text is the bookmark title and its `metadata.link` points to the destination: the anchor of the
+     * nearest heading on the target page when one is close, else the page anchor `#page=N`, else
+     * `#internal`. Nested bookmarks are the item's `children`. Populated for PDFs that declare an
+     * outline, unless `ignoreInternalLinks` is set. Absent otherwise.
      */
     outline?: OfficeContentNode[];
 }

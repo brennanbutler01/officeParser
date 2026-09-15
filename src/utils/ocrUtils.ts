@@ -87,16 +87,32 @@ export function layoutOcrText(page: any): string {
     lines.sort((a, b) => a.y0 - b.y0);
     const pitches: number[] = [];
     for (let i = 1; i < lines.length; i++) pitches.push(lines[i].y0 - lines[i - 1].y0);
-    const linePitch = median(pitches.filter(v => v > 0)) || charWidth * 2;
+    // Line pitch is the typical row advance: exclude near-zero gaps (two lines Tesseract split across
+    // columns at the same y), which would otherwise drag the median down on a multi-column scan.
+    const linePitch = median(pitches.filter(v => v > charWidth)) || charWidth * 2;
+
+    // Merge lines that sit at (nearly) the same y into one visual row. A multi-column or table scan
+    // puts each column's line in its own Tesseract block at the same vertical position; placing each on
+    // its own output line staircases the columns down the page. The band is a tight fraction of the row
+    // pitch, so single-column lines (a full pitch apart) are never merged. Words are then placed by x.
+    interface OcrRow { words: OcrWord[]; y0: number; }
+    const rowBand = 0.4 * linePitch;
+    const rows: OcrRow[] = [];
+    for (const l of lines) {
+        const last = rows[rows.length - 1];
+        if (last && l.y0 - last.y0 <= rowBand) last.words.push(...l.words);
+        else rows.push({ words: [...l.words], y0: l.y0 });
+    }
 
     const out: string[] = [];
     let prevY: number | null = null;
-    for (const l of lines) {
-        if (prevY !== null && l.y0 - prevY > 1.8 * linePitch) out.push(''); // blank line for a big vertical gap
-        prevY = l.y0;
+    for (const r of rows) {
+        if (prevY !== null && r.y0 - prevY > 1.8 * linePitch) out.push(''); // blank line for a big vertical gap
+        prevY = r.y0;
         let s = '';
         let col = 0;
-        for (const w of l.words) {
+        // Left-to-right across every column merged into this row.
+        for (const w of [...r.words].sort((a, b) => a.x0 - b.x0)) {
             // The column comes from Tesseract's own box coordinates, so it is clamped: a bogus x0
             // (or a degenerate glyph width) must not turn into a line of hundreds of thousands of
             // spaces, which would be a memory spike driven straight by the input image.

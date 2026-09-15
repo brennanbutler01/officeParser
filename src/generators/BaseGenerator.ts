@@ -128,11 +128,19 @@ export abstract class BaseGenerator<D extends UniversalGeneratorFormat = Univers
      * - `false`: Skip this node and its subtree.
      * - `void`: Proceed with default processing.
      */
-    protected async handleOnNode(node: OfficeContentNode): Promise<string | false | void> {
-        const result = await this.config.onNode(node);
+    /**
+     * When set, memoizes each node's onNode verdict, so a generator that visits a node more than once
+     * in a single pass (e.g. TextGenerator's spatial-layout collect followed by a flow fallback) still
+     * asks the hook exactly once per node, per the documented contract. Left null by default.
+     */
+    protected onNodeMemo: WeakMap<OfficeContentNode, string | false | undefined> | null = null;
 
-        if (result === false) return false;
-        if (typeof result === 'string') return result;
+    protected async handleOnNode(node: OfficeContentNode): Promise<string | false | void> {
+        if (this.onNodeMemo?.has(node)) return this.onNodeMemo.get(node);
+        const result = await this.config.onNode(node);
+        const verdict: string | false | undefined = result === false ? false : (typeof result === 'string' ? result : undefined);
+        this.onNodeMemo?.set(node, verdict);
+        return verdict;
     }
 
     /**

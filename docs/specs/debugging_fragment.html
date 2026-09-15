@@ -47,7 +47,7 @@
     </ul>
     <pre><code>import { parseOffice, terminateOcr } from 'officeparser';
 
-const ast = await parseOffice('scanned.pdf', { ocr: true });
+const ast = await parseOffice('scanned.pdf', { ocr: true, extractAttachments: true });
 // Process finishes...
 await terminateOcr(); // Snappy exit</code></pre>
 

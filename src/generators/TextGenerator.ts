@@ -237,6 +237,17 @@ export class TextGenerator extends BaseGenerator<'text'> {
      * Falls back to flowing the page's children when the geometry is too degenerate to grid.
      */
     private async renderPageLayout(page: OfficeContentNode, processor: any, newline: string): Promise<string> {
+        // Memoize onNode verdicts for this page: `collect` visits every descendant, and a flow fallback
+        // re-walks the same nodes, so without this the hook would fire twice per node on a fallback page.
+        this.onNodeMemo = new WeakMap();
+        try {
+            return await this.renderPageLayoutInner(page, processor, newline);
+        } finally {
+            this.onNodeMemo = null;
+        }
+    }
+
+    private async renderPageLayoutInner(page: OfficeContentNode, processor: any, newline: string): Promise<string> {
         const override = await this.handleOnNode(page);
         if (override === false) return '';
         if (typeof override === 'string') return override + (override.endsWith(newline) ? '' : newline);

@@ -357,6 +357,22 @@ export async function testTextLayout(): Promise<LayoutTest[]> {
             '<= 1100 chars, A ... B', `${out.length} chars`, 'word box 10M px from the left');
     }
     {
+        // Two columns whose lines Tesseract splits into separate blocks at the same y must merge onto
+        // one visual row (placed by x), not stair-step down the page; a single column stays line-per-line.
+        const w = (t: string, x0: number, y0: number) => ({ text: t, bbox: { x0, x1: x0 + t.length * 10, y0 } });
+        const ln = (words: any[], y0: number) => ({ bbox: { y0 }, words });
+        const multi = { text: '', blocks: [
+            { paragraphs: [{ lines: [ln([w('LEFT1', 0, 100)], 100), ln([w('LEFT2', 0, 130)], 130)] }] },
+            { paragraphs: [{ lines: [ln([w('RIGHT1', 400, 100)], 100), ln([w('RIGHT2', 400, 130)], 130)] }] },
+        ] };
+        const rows = layoutOcrText(multi).split('\n');
+        const single = { text: '', blocks: [{ paragraphs: [{ lines: [ln([w('one', 0, 100)], 100), ln([w('two', 0, 130)], 130), ln([w('three', 0, 160)], 160)] }] }] };
+        const singleRows = layoutOcrText(single).split('\n');
+        add('OCR merges same-row columns, keeps single-column lines',
+            rows.length === 2 && /LEFT1/.test(rows[0]) && /RIGHT1/.test(rows[0]) && singleRows.length === 3,
+            '2 merged rows; 3 single-column lines', `${rows.length} rows / ${singleRows.length} single`);
+    }
+    {
         const png = sniffImageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
         const jpeg = sniffImageMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
         const bmp = sniffImageMime(Buffer.from([0x42, 0x4d, 0, 0, 0, 0, 0, 0]));

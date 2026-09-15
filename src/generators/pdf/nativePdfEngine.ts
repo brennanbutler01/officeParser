@@ -7,8 +7,9 @@
  * breaks and horizontal rules - handling word wrapping and pagination as it goes. It needs no browser
  * and runs unchanged in Node and the browser, so it is the way to produce a real PDF client-side (the
  * browser Puppeteer path can only hand back HTML). Its trade-off is fidelity: it uses the Standard-14
- * fonts (Helvetica / Times / Courier families) rather than the document's own, and its layout is a
- * clean reflow, not a pixel match of the HTML renderer. Choose it with `pdfConfig.engine: 'native'`.
+ * Standard-14 fonts (the Helvetica and Courier faces; Times is not embedded) rather than the
+ * document's own, and its layout is a clean reflow, not a pixel match of the HTML renderer. Choose it
+ * with `pdfConfig.engine: 'native'`.
  *
  * `pdf-lib` is an optional peer dependency, imported lazily so it is only required when this engine
  * is selected.

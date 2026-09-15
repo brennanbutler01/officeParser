@@ -307,6 +307,7 @@ To prevent the parser from hanging indefinitely due to slow network connections 
 ```js
 const ast = await officeParser.parseOffice('scanned_document.pdf', {
     ocr: true,
+    extractAttachments: true, // required: OCR of a PDF's page images runs through the attachment path
     ocrConfig: {
         timeout: {
             workerLoad: 30000,    // 30s max to load worker & download language training files
@@ -328,6 +329,7 @@ By default (`ocrConfig.preserveLayout: true`) the recognized text keeps its two-
 ```js
 const ast = await officeParser.parseOffice('scanned_invoice.pdf', {
     ocr: true,
+    extractAttachments: true, // required: OCR of a PDF's page images runs through the attachment path
     ocrConfig: { preserveLayout: true } // default; false = flat reading-order text
 });
 ```
