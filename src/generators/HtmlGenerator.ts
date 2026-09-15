@@ -495,8 +495,11 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
      * sit under it. Returns one `<tr>…</tr>` string per row (row 0's `<td>`s are promoted to `<th>`
      * when `headerFirst`). Only invoked for tables that actually contain a rowSpan.
      */
-    private async renderRowsWithRowspans(rows: OfficeContentNode[], headerFirst: boolean): Promise<string[]> {
+    private async renderRowsWithRowspans(rows: OfficeContentNode[], headerFirst: boolean): Promise<{ trs: string[]; headerRowEmitted: boolean }> {
         const out: string[] = [];
+        // Whether the first (header) row actually survived to `out[0]`: if `onNode` drops it, `out[0]`
+        // is a body row and the caller must not wrap it in <thead>.
+        let headerRowEmitted = false;
         // grid column -> number of rows it stays occupied by a rowspan started above this row.
         const carry = new Map<number, number>();
         for (let r = 0; r < rows.length; r++) {
@@ -505,7 +508,7 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             // in a rowspan table: `false` drops the row, a string replaces its markup outright.
             const rowOverride = await this.handleOnNode(rows[r]);
             if (rowOverride === false) continue;
-            if (typeof rowOverride === 'string') { out.push(rowOverride); continue; }
+            if (typeof rowOverride === 'string') { out.push(rowOverride); if (r === 0) headerRowEmitted = true; continue; }
             const cells = (rows[r].children || []).filter(c => c.type === 'cell');
             const newCarry = new Map<number, number>();
             let col = 0;
@@ -537,8 +540,9 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
             for (const [c, v] of [...carry.entries()]) { if (v > 1) carry.set(c, v - 1); else carry.delete(c); }
             for (const [c, v] of newCarry) carry.set(c, v);
             out.push(`<tr>${tr}</tr>`);
+            if (r === 0) headerRowEmitted = true;
         }
-        return out;
+        return { trs: out, headerRowEmitted };
     }
 
     private async processNodeArray(nodes: OfficeContentNode[]): Promise<string> {
@@ -896,8 +900,15 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const ocr = (node.text || '').trim();
 
                 // ocr-text-only: emit the recognized text as a visible block, no <img>. A <pre>
-                // preserves the 2-D column layout the OCR reconstruction encodes with spaces.
-                if (mode === 'ocr-text-only') return ocr ? `${extraAnchors}<pre class="ocr-text"${idAttr}>${this.escape(ocr)}</pre>` : '';
+                // preserves the 2-D column layout the OCR reconstruction encodes with spaces. Carry the
+                // node's mapped classes (merged with the intrinsic `ocr-text` class), preserved
+                // attributes and inline style through too, so this mode is not the one image emission
+                // site that silently drops them.
+                if (mode === 'ocr-text-only') {
+                    if (!ocr) return '';
+                    const preClass = ` class="${this.escape(['ocr-text', ...classes].join(' '))}"`;
+                    return `${extraAnchors}<pre${preClass}${mappedAttrs}${idAttr}${styleAttr}>${this.escape(ocr)}</pre>`;
+                }
 
                 let src = meta?.url || attachmentName || '';
                 if (!meta?.url && attachmentName && this.ast) {
@@ -1111,11 +1122,13 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                 const hasRowSpan = this.tableHasRowSpan(node);
                 if (hasRowSpan) {
                     const rowNodes = rows.filter(r => r.type === 'row');
-                    const trs = await this.renderRowsWithRowspans(rowNodes, firstRowIsHeader);
+                    const { trs, headerRowEmitted } = await this.renderRowsWithRowspans(rowNodes, firstRowIsHeader);
                     // A rowspan started in the header row cannot cross an HTML <thead>/<tbody>
                     // boundary, so only split off a <thead> when the header row has no downward span.
                     const firstRowSpansDown = (rowNodes[0]?.children || []).some(c => c.type === 'cell' && ((c.metadata as CellMetadata)?.rowSpan || 1) > 1);
-                    finalChildren = (firstRowIsHeader && !firstRowSpansDown && trs.length)
+                    // Only wrap trs[0] in <thead> when the header row actually survived onNode; if the
+                    // hook dropped it, trs[0] is a body row and belongs in <tbody>, not <thead>.
+                    finalChildren = (firstRowIsHeader && headerRowEmitted && !firstRowSpansDown && trs.length)
                         ? `<thead>${trs[0]}</thead><tbody>${trs.slice(1).join('')}</tbody>`
                         : trs.join('');
                 } else if (rows.length > 0 && rows[0].type === 'row') {

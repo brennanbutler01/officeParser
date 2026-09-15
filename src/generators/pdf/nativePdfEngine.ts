@@ -368,6 +368,11 @@ class NativeLayout {
     private async heading(node: OfficeContentNode): Promise<void> {
         const level = Math.min(6, Math.max(1, (node.metadata as any)?.level || 1));
         const size = [24, 20, 16, 14, 12, 11][level - 1];
+        // Keep-with-next: a heading should not be stranded as the last thing on a page. Reserve its own
+        // line plus a couple of body lines, so a heading near the bottom moves to the next page with the
+        // text it titles (the HTML engine expresses the same intent with `page-break-after: avoid`).
+        // ensureSpace is a no-op at the top margin, so this never inserts a blank page before a heading.
+        this.ensureSpace(size * 1.35 + 11 * 1.35 * 2);
         this.y += size * 0.6;
         const runs = (await this.collectRuns(node)).map(r => ({ ...r, fmt: { ...r.fmt, bold: true, size: `${size}pt` } }));
         this.drawRuns(runs.length ? runs : [{ text: node.text || '', fmt: { bold: true, size: `${size}pt` }, link: false }], this.margin.left, this.contentWidth);
@@ -394,14 +399,20 @@ class NativeLayout {
         const indent = 18 + level * 18;
         const ordered = meta?.listType === 'ordered';
         const marker = ordered ? `${(meta?.itemIndex ?? 0) + 1}.` : '•';
-        const size = 11;
+        // Body: the item's own text runs (its non-list children); nested list children render after.
+        const bodyRuns = await this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
+        // Size the marker to the body text so their baselines line up (a body larger than the old fixed
+        // 11pt would otherwise sit below its own marker), and reserve one line's height BEFORE drawing
+        // the marker so a body that has to break to the next page carries its marker along instead of
+        // orphaning it on this page.
+        const bodySize = bodyRuns.length ? Math.max(...bodyRuns.map(r => parseFontSize(r.fmt.size) ?? 11)) : 11;
+        const size = bodySize > 0 ? bodySize : 11;
         this.ensureSpace(size * 1.35);
-        // Draw the marker, then the item body hanging-indented past it.
+        // Draw the marker, then the item body hanging-indented past it. Space is already reserved, so
+        // drawRuns' first line stays on this page and draws at the same baseline as the marker.
         const markerX = this.margin.left + indent - 14;
         const baseline = this.pageH - this.y - size;
         this.page.drawText(this.enc(marker), { x: markerX, y: baseline, size, font: this.fonts.regular, color: this.lib.rgb(0.12, 0.12, 0.12) });
-        // Body: the item's own text runs (its non-list children); nested list children render after.
-        const bodyRuns = await this.collectRuns({ ...node, children: (node.children || []).filter(c => c.type !== 'list') });
         if (bodyRuns.length) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
         else this.y += size * 1.35;
         for (const c of (node.children || []).filter(c => c.type === 'list')) await this.listItem(c);
