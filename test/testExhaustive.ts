@@ -1336,6 +1336,19 @@ async function testOdfComments(): Promise<void> {
     assert.ok(odpBody.includes('Slide body'), 'ODP: slide body text preserved');
     assert.ok(!odpBody.includes('Slide comment here'), 'ODP: comment body does not leak into the slide text');
     assert.strictEqual(collectComments(await OfficeParser.parseOffice(pkg(odpMt, odpContent), { fileType: 'odp', ignoreComments: true })).length, 0, 'ODP: ignoreComments suppresses the comment');
+
+    // A cell carrying a comment and repeated across many columns must SHARE the comment node by
+    // reference, not deep-copy it per column (a large comment x number-columns-repeated would otherwise
+    // amplify into hundreds of MB / a RangeError). Assert sharing rather than a fragile memory bound.
+    const note = 'N'.repeat(2000);
+    const repeated = `<?xml version="1.0"?><office:document-content ${NS}><office:body><office:spreadsheet><table:table table:name="S"><table:table-row><table:table-cell table:number-columns-repeated="20000" office:value-type="string"><office:annotation><dc:creator>A</dc:creator><text:p>${note}</text:p></office:annotation><text:p>V</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>`;
+    const repAst = await OfficeParser.parseOffice(pkg(odsMt, repeated), { fileType: 'ods' });
+    const repCells: OfficeContentNode[] = [];
+    const walkCells = (n: OfficeContentNode) => { if (n.type === 'cell') repCells.push(n); (n.children || []).forEach(walkCells); };
+    repAst.content.forEach(walkCells);
+    const commented = repCells.filter(c => c.comments && c.comments.length);
+    assert.ok(commented.length >= 2, `ODS repeat: many cells carry the comment, got ${commented.length}`);
+    assert.strictEqual(commented[0].comments![0], commented[1].comments![0], 'ODS repeat: repeated cells share the comment node by reference (no per-cell duplication)');
 }
 
 // A minimal valid 1x1 PNG (sniffs to 1x1, Tesseract-independent) for image-bearing synthetic ASTs.

@@ -967,10 +967,12 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                         cellNode.rawContent = getRawContent(cell, sourceXml, config);
                     }
 
-                    // A repeated cell deep-copies its comments (like its children) so later passes
-                    // cannot mutate a shared node across columns.
+                    // Share the (read-only) comment nodes across repeated columns via a shallow array
+                    // copy, rather than deep-copying: a huge number-columns-repeated on a cell carrying a
+                    // large annotation would otherwise duplicate the whole comment per column (bytes the
+                    // cell budget does not charge), a multi-GB amplification and CPU hang.
                     if (cellComments.length) {
-                        cellNode.comments = k === 0 ? cellComments : JSON.parse(JSON.stringify(cellComments));
+                        cellNode.comments = k === 0 ? cellComments : cellComments.slice();
                     }
 
                     cells.push(cellNode);
@@ -1685,10 +1687,13 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                                     if (config.includeRawContent) {
                                         cellNode.rawContent = getRawContent(cell, xmlString, config);
                                     }
-                                    // A repeated cell deep-copies its comments (like its children) so a
-                                    // later pass cannot mutate a node shared across columns.
+                                    // Share the (read-only) comment nodes across repeated columns via a
+                                    // shallow array copy, rather than deep-copying: a huge
+                                    // number-columns-repeated on a cell carrying a large annotation would
+                                    // otherwise duplicate the whole comment per column (bytes the cell
+                                    // budget does not charge), a multi-GB amplification and CPU hang.
                                     if (cellComments.length) {
-                                        cellNode.comments = k === 0 ? cellComments : JSON.parse(JSON.stringify(cellComments));
+                                        cellNode.comments = k === 0 ? cellComments : cellComments.slice();
                                     }
                                     cells.push(cellNode);
                                     colIndex++;
@@ -1708,9 +1713,18 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                             );
                             for (let k = 0; k < allowedRows; k++) {
                                 if ((k & 255) === 0) checkAbortSignal(config.abortSignal);
+                                // First row reuses `cells`; a repeated row shallow-clones each cell (its
+                                // own object + own metadata for the row-index fix below) but SHARES the
+                                // read-only children/comments/text by reference. JSON deep-copying instead
+                                // serialized every cell's full content per row, so a row of many cells each
+                                // carrying large text or a comment built a multi-hundred-MB string (a
+                                // RangeError / OOM the cell-count budget did not bound).
+                                const rowCells = k === 0
+                                    ? cells
+                                    : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata }) as OfficeContentNode);
                                 const rowNode: OfficeContentNode = {
                                     type: 'row',
-                                    children: JSON.parse(JSON.stringify(cells)), // Deep copy for repeated rows
+                                    children: rowCells,
                                     metadata: undefined
                                 };
                                 // Fix row index in metadata for repeated rows
