@@ -1295,6 +1295,49 @@ async function testOdg(): Promise<void> {
     }
 }
 
+/**
+ * ODF comments live at three placements: inline in a text paragraph (any ODF type), on the spreadsheet
+ * cell (`.ods`), and on the slide/page (`.odp`/`.odg`). All three must land on `.comments`, none must
+ * leak the comment body into the cell/slide text, and `ignoreComments` must suppress them.
+ */
+async function testOdfComments(): Promise<void> {
+    const NS = `xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0"`;
+    const manifest = (mt: string) => `<?xml version="1.0"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"><manifest:file-entry manifest:full-path="/" manifest:media-type="${mt}"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
+    const pkg = (mt: string, content: string) => Buffer.from(zipSync({ mimetype: strToU8(mt), 'content.xml': strToU8(content), 'META-INF/manifest.xml': strToU8(manifest(mt)) }, { level: 0 }));
+
+    const collectComments = (ast: OfficeParserAST): OfficeContentNode[] => {
+        const out: OfficeContentNode[] = [];
+        const walk = (n: OfficeContentNode) => { if (n.comments) out.push(...n.comments); (n.children || []).forEach(walk); };
+        ast.content.forEach(walk);
+        return out;
+    };
+
+    // ODS: cell note on a cell that also carries a value.
+    const odsMt = 'application/vnd.oasis.opendocument.spreadsheet';
+    const odsContent = `<?xml version="1.0"?><office:document-content ${NS}><office:body><office:spreadsheet><table:table table:name="Sheet1"><table:table-row><table:table-cell office:value-type="string"><office:annotation><dc:creator>Alice</dc:creator><dc:date>2026-01-01</dc:date><text:p>Cell note here</text:p></office:annotation><text:p>CellValue</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>`;
+    const odsAst = await OfficeParser.parseOffice(pkg(odsMt, odsContent), { fileType: 'ods' });
+    const odsComments = collectComments(odsAst);
+    assert.strictEqual(odsComments.length, 1, `ODS: 1 cell note, got ${odsComments.length}`);
+    assert.strictEqual((odsComments[0].metadata as any)?.author, 'Alice', 'ODS: cell note author');
+    assert.ok((odsComments[0].text || '').includes('Cell note here'), 'ODS: cell note text');
+    const odsBody = JSON.stringify(odsAst.content.map(n => ({ ...n, comments: undefined, children: (n.children || []).map(r => ({ ...r, children: (r.children || []).map(c => ({ ...c, comments: undefined })) })) })));
+    assert.ok(odsBody.includes('CellValue'), 'ODS: cell value preserved');
+    assert.ok(!odsBody.includes('Cell note here'), 'ODS: comment body does not leak into the cell text');
+    assert.strictEqual(collectComments(await OfficeParser.parseOffice(pkg(odsMt, odsContent), { fileType: 'ods', ignoreComments: true })).length, 0, 'ODS: ignoreComments suppresses the note');
+
+    // ODP: slide-level comment as a direct child of draw:page.
+    const odpMt = 'application/vnd.oasis.opendocument.presentation';
+    const odpContent = `<?xml version="1.0"?><office:document-content ${NS}><office:body><office:presentation><draw:page draw:name="Slide1"><office:annotation><dc:creator>Bob</dc:creator><dc:date>2026-02-02</dc:date><text:p>Slide comment here</text:p></office:annotation><draw:frame><draw:text-box><text:p>Slide body</text:p></draw:text-box></draw:frame></draw:page></office:presentation></office:body></office:document-content>`;
+    const odpAst = await OfficeParser.parseOffice(pkg(odpMt, odpContent), { fileType: 'odp' });
+    const odpComments = collectComments(odpAst);
+    assert.strictEqual(odpComments.length, 1, `ODP: 1 page comment, got ${odpComments.length}`);
+    assert.strictEqual((odpComments[0].metadata as any)?.author, 'Bob', 'ODP: page comment author');
+    const odpBody = JSON.stringify(odpAst.content.map(n => ({ ...n, comments: undefined })));
+    assert.ok(odpBody.includes('Slide body'), 'ODP: slide body text preserved');
+    assert.ok(!odpBody.includes('Slide comment here'), 'ODP: comment body does not leak into the slide text');
+    assert.strictEqual(collectComments(await OfficeParser.parseOffice(pkg(odpMt, odpContent), { fileType: 'odp', ignoreComments: true })).length, 0, 'ODP: ignoreComments suppresses the comment');
+}
+
 // A minimal valid 1x1 PNG (sniffs to 1x1, Tesseract-independent) for image-bearing synthetic ASTs.
 const TINY_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
@@ -1821,6 +1864,7 @@ async function runTests(): Promise<void> {
         ['WordParagraphMark', testWordParagraphMarkFormatting],
         ['GeneratedOutput', testGeneratedOutput],
         ['ODG', testOdg],
+        ['ODFComments', testOdfComments],
         ['DOCX', testDocxGeneration],
         ['ODT', testOdtGeneration],
         ['OfficeGenUtils', testOfficeGenUtils],

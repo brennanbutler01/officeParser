@@ -93,6 +93,41 @@ interface ParagraphStyleInfo {
     breakAfter?: 'page' | 'column';
 }
 
+/** The parseParagraphContent closure's shape, passed to {@link buildAnnotationComment}. */
+type ParseParaFn = (
+    node: Element,
+    paraStyleMap: Record<string, ParagraphStyleInfo>,
+    styleMap: Record<string, TextFormatting>,
+    config: OfficeParserConfig,
+    sourceXml: string,
+) => { text: string; children: OfficeContentNode[] };
+
+/**
+ * Builds a `comment` node from an `office:annotation` element (its `dc:creator`/`dc:date` and its
+ * `text:p` body). Shared by the inline paragraph handler and the cell-/page-level handlers so a comment
+ * attached at any of the three ODF placements is built identically. `parsePara` is the caller's
+ * `parseParagraphContent` closure.
+ */
+function buildAnnotationComment(
+    element: Element,
+    parsePara: ParseParaFn,
+    paraStyleMap: Record<string, ParagraphStyleInfo>,
+    styleMap: Record<string, TextFormatting>,
+    config: OfficeParserConfig,
+    sourceXml: string,
+): OfficeContentNode {
+    const author = getFirstElementByTagName(element, "dc:creator")?.textContent || undefined;
+    const date = getFirstElementByTagName(element, "dc:date")?.textContent || undefined;
+    const children: OfficeContentNode[] = [];
+    let text = '';
+    for (const cp of getElementsByTagName(element, "text:p")) {
+        const c = parsePara(cp, paraStyleMap, styleMap, config, sourceXml);
+        text += (text ? ' ' : '') + c.text;
+        children.push({ type: 'paragraph', text: c.text, children: c.children, metadata: {} });
+    }
+    return { type: 'comment', text, children, metadata: { ...(author ? { author } : {}), ...(date ? { date } : {}) } };
+}
+
 /**
  * Merges a style's formatting over what it inherits, dropping any flag the style explicitly turns
  * off rather than carrying a `false` forward.
@@ -508,24 +543,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                 } else if (tagName === 'office:annotation' && !config.ignoreComments) {
                     // A point comment. Mirrors the note branch and WordParser's attachment convention:
                     // attach to the preceding text run's `.comments`, else a leading empty text node.
-                    const creatorEl = getFirstElementByTagName(element, "dc:creator");
-                    const dateEl = getFirstElementByTagName(element, "dc:date");
-                    const author = creatorEl?.textContent || undefined;
-                    const date = dateEl?.textContent || undefined;
-                    const commentPs = getElementsByTagName(element, "text:p");
-                    const commentChildren: OfficeContentNode[] = [];
-                    let commentText = '';
-                    for (const cp of commentPs) {
-                        const cpContent = parseParagraphContent(cp, paragraphStyleMap, styleMap, config, sourceXml);
-                        commentText += (commentText ? ' ' : '') + cpContent.text;
-                        commentChildren.push({ type: 'paragraph', text: cpContent.text, children: cpContent.children, metadata: {} });
-                    }
-                    const commentNode: OfficeContentNode = {
-                        type: 'comment',
-                        text: commentText,
-                        children: commentChildren,
-                        metadata: { ...(author ? { author } : {}), ...(date ? { date } : {}) }
-                    };
+                    const commentNode = buildAnnotationComment(element, parseParagraphContent, paragraphStyleMap, styleMap, config, sourceXml);
                     if (children.length > 0 && children[children.length - 1].type === 'text') {
                         const preceding = children[children.length - 1];
                         if (!preceding.comments) preceding.comments = [];
@@ -887,6 +905,13 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                     cellText = cellText.slice(0, -1);
                 }
 
+                // ODS cell notes are `<office:annotation>` children of the cell itself (outside any
+                // text:p, so processChildren never sees them); attach them to the cell node's comments.
+                const cellComments = config.ignoreComments
+                    ? []
+                    : getDirectChildren(cell, "office:annotation").map(a =>
+                        buildAnnotationComment(a, parseParagraphContent, paraStyleMap, styleMap, config, sourceXml));
+
                 // Add cell(s) for repeated columns
                 // Bounded by the document's cell budget, not by the attribute: the repeat count
                 // is attacker-influenced and this path materializes a node per iteration.
@@ -920,6 +945,12 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
 
                     if (config.includeRawContent) {
                         cellNode.rawContent = getRawContent(cell, sourceXml, config);
+                    }
+
+                    // A repeated cell deep-copies its comments (like its children) so later passes
+                    // cannot mutate a shared node across columns.
+                    if (cellComments.length) {
+                        cellNode.comments = k === 0 ? cellComments : JSON.parse(JSON.stringify(cellComments));
                     }
 
                     cells.push(cellNode);
@@ -1459,10 +1490,27 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                             const cell = tableCells[c];
                             const colsRepeated = toRepeatCount(cell.getAttribute("table:number-columns-repeated"));
 
-                            // Extract text from cell (paragraphs inside cell)
+                            // ODS cell notes are `<office:annotation>` children of the cell; extract them
+                            // as comments. Their inner text:p must be kept out of the cell's own text
+                            // below (getElementsByTagName is descendant-recursive, so it would otherwise
+                            // pull the comment body into the cell value).
+                            const cellComments = config.ignoreComments
+                                ? []
+                                : getDirectChildren(cell, "office:annotation").map(a =>
+                                    buildAnnotationComment(a, parseParagraphContent, paragraphStyleMap, styleMap, config, xmlString));
+                            const insideAnnotation = (el: Element): boolean => {
+                                let p: Node | null = el.parentNode;
+                                while (p && p !== cell) {
+                                    if (isElement(p) && (p as Element).tagName === 'office:annotation') return true;
+                                    p = p.parentNode;
+                                }
+                                return false;
+                            };
+
+                            // Extract text from cell (paragraphs inside cell, excluding a comment's body)
                             let cellText = "";
                             const children: OfficeContentNode[] = [];
-                            const ps = getElementsByTagName(cell, "text:p");
+                            const ps = getElementsByTagName(cell, "text:p").filter(p => !insideAnnotation(p));
                             for (let p = 0; p < ps.length; p++) {
                                 const para = ps[p];
 
@@ -1601,7 +1649,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                             // rather than spinning the loop colsRepeated times for zero output -
                             // that spin was itself a CPU denial-of-service, unbounded by the cell
                             // budget because it created no cells to charge against.
-                            const willMaterialize = (cellText || children.length > 0 || fileType !== 'ods');
+                            const willMaterialize = (cellText || children.length > 0 || cellComments.length > 0 || fileType !== 'ods');
                             if (!willMaterialize) {
                                 colIndex += colsRepeated;
                             } else {
@@ -1616,6 +1664,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                                     };
                                     if (config.includeRawContent) {
                                         cellNode.rawContent = getRawContent(cell, xmlString, config);
+                                    }
+                                    // A repeated cell deep-copies its comments (like its children) so a
+                                    // later pass cannot mutate a node shared across columns.
+                                    if (cellComments.length) {
+                                        cellNode.comments = k === 0 ? cellComments : JSON.parse(JSON.stringify(cellComments));
                                     }
                                     cells.push(cellNode);
                                     colIndex++;
@@ -1708,6 +1761,15 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                                     }
                                     continue;
                                 }
+                                // A slide-level comment sits as a direct child of draw:page (outside any
+                                // text paragraph); attach it to the slide node's comments.
+                                if (element.tagName === "office:annotation") {
+                                    if (!config.ignoreComments) {
+                                        (slideNode.comments ||= []).push(
+                                            buildAnnotationComment(element, parseParagraphContent, paragraphStyleMap, styleMap, config, xmlString));
+                                    }
+                                    continue;
+                                }
                                 traverse(element, slideNode.children!, false, xmlString);
                             }
                         }
@@ -1753,6 +1815,15 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                         for (let j = 0; j < pageChildren.length; j++) {
                             const child = pageChildren[j];
                             if (isElement(child)) {
+                                // A page-level comment is a direct child of draw:page; attach it to the
+                                // page node's comments rather than letting traverse drop it.
+                                if ((child as Element).tagName === "office:annotation") {
+                                    if (!config.ignoreComments) {
+                                        (pageNode.comments ||= []).push(
+                                            buildAnnotationComment(child as Element, parseParagraphContent, paragraphStyleMap, styleMap, config, xmlString));
+                                    }
+                                    continue;
+                                }
                                 traverse(child as Element, pageNode.children!, false, xmlString);
                             }
                         }
