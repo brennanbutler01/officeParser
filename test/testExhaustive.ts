@@ -1711,8 +1711,14 @@ async function testNativePdfEngine(): Promise<void> {
     // A purely-Latin document draws cleanly with no such warning.
     const latin = await OfficeParser.parseOffice(Buffer.from('# Hello\n\nPlain ASCII text.\n'), { fileType: 'md' });
     const w2: string[] = [];
-    await latin.to('pdf', { pdfConfig: { engine: 'native' }, onWarning: (i: any) => w2.push(i.code) } as any);
+    const first = (await latin.to('pdf', { pdfConfig: { engine: 'native' }, onWarning: (i: any) => w2.push(i.code) } as any)).value as Uint8Array;
     assert.ok(!w2.includes('CONTENT_NOT_REPRESENTABLE'), 'native PDF: no spurious warning for Latin-only text');
+
+    // Determinism: a date-less source renders byte-identically every time. PDFDocument.create is passed
+    // updateMetadata:false and no /ID is set, so a stray new Date() or a pdf-lib bump would regress this.
+    const second = (await (await OfficeParser.parseOffice(Buffer.from('# Hello\n\nPlain ASCII text.\n'), { fileType: 'md' }))
+        .to('pdf', { pdfConfig: { engine: 'native' } } as any)).value as Uint8Array;
+    assert.ok(Buffer.from(first).equals(Buffer.from(second)), 'native PDF: rendering a date-less source is deterministic (byte-identical)');
 }
 
 /**

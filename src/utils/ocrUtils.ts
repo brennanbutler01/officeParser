@@ -88,8 +88,11 @@ export function layoutOcrText(page: any): string {
     const pitches: number[] = [];
     for (let i = 1; i < lines.length; i++) pitches.push(lines[i].y0 - lines[i - 1].y0);
     // Line pitch is the typical row advance: exclude near-zero gaps (two lines Tesseract split across
-    // columns at the same y), which would otherwise drag the median down on a multi-column scan.
-    const linePitch = median(pitches.filter(v => v > charWidth)) || charWidth * 2;
+    // columns at the same y), which would otherwise drag the median down on a multi-column scan. If an
+    // unusually wide face or very tight leading leaves the filtered set empty, fall back to the
+    // unfiltered positive median before the last-resort 2x charWidth, so rowBand does not overshoot the
+    // real pitch and merge consecutive single-column lines into one row.
+    const linePitch = median(pitches.filter(v => v > charWidth)) || median(pitches.filter(v => v > 0)) || charWidth * 2;
 
     // Merge lines that sit at (nearly) the same y into one visual row. A multi-column or table scan
     // puts each column's line in its own Tesseract block at the same vertical position; placing each on

@@ -108,7 +108,11 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
     /** Packages an image attachment once, returning the relationship id or null (skipped). */
     private mediaRel(attachmentName: string): { rid: string; cx: number; cy: number; intrinsic: { w: number; h: number } | null } | null {
         const att = this.getAttachment(attachmentName);
-        if (!att || !att.data) return null;
+        if (!att || !att.data) {
+            // Warn like the ODT and native-PDF generators do, rather than degrading to alt text silently.
+            this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: att ? 'attachment has no data' : 'missing attachment' });
+            return null;
+        }
         const ext = MIME_EXT[(att.mimeType || '').toLowerCase()];
         if (!ext) { this.warn(OfficeWarningType.IMAGE_PROCESSING_FAILED, { name: attachmentName, reason: 'unsupported mime' }); return null; }
         // Word does not render an SVG referenced by a bare a:blip (it needs the asvg extension + a
@@ -572,7 +576,8 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             + (tableAlign ? `<w:jc w:val="${tableAlign}"/>` : '')
             + `<w:tblBorders>${['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(s => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="auto"/>`).join('')}</w:tblBorders></w:tblPr>`;
 
-        const active = new Map<number, number>(); // grid col -> remaining vMerge rows
+        // grid left-col -> a pending vertical merge (rows still to cover, and the merge's column span).
+        const active = new Map<number, { remaining: number; span: number }>();
         let trs = '';
         for (let ri = 0; ri < rows.length; ri++) {
             const row = rows[ri];
@@ -581,12 +586,16 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
             let tcs = '';
             let col = 0, ci = 0;
             while (ci < cells.length || [...active.keys()].some(c => c >= col)) {
-                if ((active.get(col) || 0) > 0) {
-                    // continuation cell for an active vertical merge
-                    tcs += `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/><w:vMerge/></w:tcPr><w:p/></w:tc>`;
-                    active.set(col, active.get(col)! - 1);
-                    if (active.get(col)! <= 0) active.delete(col);
-                    col++;
+                const act = active.get(col);
+                if (act) {
+                    // Continuation cell for an active vertical merge. Carry the origin's gridSpan so a cell
+                    // merged BOTH across columns and down emits one spanning continuation, not one narrow
+                    // vMerge per column (which made the merge cover only its first column in Word).
+                    const gs = act.span > 1 ? `<w:gridSpan w:val="${act.span}"/>` : '';
+                    tcs += `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>${gs}<w:vMerge/></w:tcPr><w:p/></w:tc>`;
+                    act.remaining--;
+                    if (act.remaining <= 0) active.delete(col);
+                    col += act.span;
                     continue;
                 }
                 if (ci >= cells.length) {
@@ -613,7 +622,7 @@ export class DocxGenerator extends BaseGenerator<'docx'> {
                 const rowSpan = Math.max(1, Math.min(1000, cmeta?.rowSpan || 1));
                 let tcPr = `<w:tcW w:w="0" w:type="auto"/>`;
                 if (colSpan > 1) tcPr += `<w:gridSpan w:val="${colSpan}"/>`;
-                if (rowSpan > 1) { tcPr += `<w:vMerge w:val="restart"/>`; for (let k = 0; k < colSpan; k++) active.set(col + k, rowSpan - 1); }
+                if (rowSpan > 1) { tcPr += `<w:vMerge w:val="restart"/>`; active.set(col, { remaining: rowSpan - 1, span: colSpan }); }
                 const bg = hexColor(cmeta?.backgroundColor);
                 if (bg) tcPr += `<w:shd w:val="clear" w:color="auto" w:fill="${bg}"/>`;
                 let inner = await this.renderBlocks(cell.children);

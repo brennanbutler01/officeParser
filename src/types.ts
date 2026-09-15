@@ -282,8 +282,9 @@ export interface CommonOfficeParserConfig {
      * Called with `'required'` when the document is encrypted and no password was given, or
      * `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to retry;
      * return `undefined`/`''` to stop, in which case parsing rejects with `PASSWORD_REQUIRED` or
-     * `PASSWORD_INCORRECT` as it would with no callback. Retries are capped so a callback that keeps
-     * returning a wrong password cannot loop forever.
+     * `PASSWORD_INCORRECT` as it would with no callback. The callback is asked at most 3 times in total
+     * (shared across `'required'`/`'incorrect'`), so one that keeps returning a wrong password cannot
+     * loop forever.
      *
      * By default this is unset, so an encrypted document without a valid `password` simply throws:
      * an undecryptable document is unrecoverable for that call, so it is an error rather than a
@@ -1935,7 +1936,8 @@ export interface TemplateConfig {
      * parser's `onPassword`. Called with `'required'` when the template is encrypted and no password
      * was given, or `'incorrect'` when the last attempt was wrong. Return a password (sync or async) to
      * retry, or `undefined` to give up (rejecting with `PASSWORD_REQUIRED`/`PASSWORD_INCORRECT`).
-     * Retries are capped so a callback that keeps returning a wrong password cannot loop forever.
+     * The callback is asked at most 3 times in total, so one that keeps returning a wrong password
+     * cannot loop forever.
      */
     onPassword?: (reason: 'required' | 'incorrect') => string | undefined | Promise<string | undefined>;
     /**

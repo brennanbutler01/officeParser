@@ -24,7 +24,9 @@
  *   --preserveXmlWhitespace   Keep raw formatting space (default: false)
  *   --includeBreakNodes       Include break nodes (DOCX & ODF, default: false)
  *   --ignorePageGeometry      Omit per-node bounding boxes and page dimensions (default: false)
- *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF)
+ *   --password=secret         Password for an encrypted document (PDF, OOXML, or ODF); or set
+ *                             OFFICEPARSER_PASSWORD to keep the secret out of the process list
+ *                             and shell history
  *   --includeImages=<mode>    image-only | image+ocr-text | ocr-text-only | none (default: image-only)
  *   --maxInlineImageBytes=N   Largest image inlined as a data: URI by HTML/Markdown (default: 1500000)
  *   --pdfParserConfig.useTags=false     Geometry-only PDF structure (default: true)
@@ -265,6 +267,12 @@ if (fileArg && !showHelp) {
         }
     }
 
+    // Password from the environment, so a script need not put a secret on the command line (where it
+    // is visible in the process list / shell history). An explicit --password still wins.
+    if (config.password === undefined && process.env.OFFICEPARSER_PASSWORD) {
+        config.password = process.env.OFFICEPARSER_PASSWORD;
+    }
+
     // Run the main parser
     OfficeParser.parseOffice(fileArg, config)
         .then(async (ast: OfficeParserAST) => {
@@ -345,6 +353,7 @@ if (fileArg && !showHelp) {
     console.log('  --newlineDelimiter=string                   Delimiter string between blocks/lines (default: \\n)');
     console.log('  --csvDelimiter=char                         Custom CSV delimiter (default: ,)');
     console.log('  --password=secret                           Password for an encrypted document (PDF, OOXML, or ODF)');
+    console.log('                                              (or set OFFICEPARSER_PASSWORD to keep it out of the process list)');
     console.log('  --htmlParserConfig.preserveIframes          Keep non-YouTube <iframe> embeds (dropped by default)');
     console.log('  --ocrConfig.preserveLayout=false            Flatten OCR text instead of keeping its line layout (default: true)');
     console.log('');

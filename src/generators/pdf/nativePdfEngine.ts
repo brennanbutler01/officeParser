@@ -213,21 +213,37 @@ class NativeLayout {
     private async flatText(node: OfficeContentNode): Promise<string> {
         const children = node.children || [];
         // Inline-only children (the common Markdown cell) flatten to a single line; block children
-        // (paragraphs, headings, lists, a nested table's rows) are each a line of their own.
-        if (children.some(c => BLOCK_CELL_TYPES.has(c.type))) {
+        // (paragraphs, headings, lists, a nested table's rows) are each a line of their own. An image
+        // in a cell counts too: the engine cannot embed a picture inside a cell, so it degrades to the
+        // image's alt (or OCR) text rather than vanishing silently.
+        if (children.some(c => BLOCK_CELL_TYPES.has(c.type) || c.type === 'image')) {
             const lines: string[] = [];
             for (const c of children) {
                 // Each block child is a node in its own right, so it gets the hook here (collectRuns
                 // only hooks the descendants of whatever root it is handed).
                 const override = await this.onNodeValue(c);
                 if (override === false) continue;
-                const t = typeof override === 'string' ? override : (await this.collectRuns(c)).map(r => r.text).join('');
+                let t: string;
+                if (typeof override === 'string') t = override;
+                else if (c.type === 'image') t = this.cellImageText(c);
+                else t = (await this.collectRuns(c)).map(r => r.text).join('');
                 if (t !== '') lines.push(t);
             }
             if (lines.length) return lines.join('\n');
         }
         const flat = (await this.collectRuns(node)).map(r => r.text).join('');
         return flat || node.text || '';
+    }
+
+    private cellImageWarned = false;
+    /** The text an image in a table cell degrades to (alt text, else OCR text), warning once that the
+     * native engine cannot embed a picture inside a cell. */
+    private cellImageText(node: OfficeContentNode): string {
+        if (!this.cellImageWarned) {
+            this.cellImageWarned = true;
+            this.reportWarning(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, { format: 'pdf', feature: 'image inside a table cell (native engine renders its alt/OCR text)' });
+        }
+        return ((node.metadata as any)?.altText || node.text || '').trim();
     }
 
     /**
@@ -279,10 +295,14 @@ class NativeLayout {
 
         for (const piece of pieces) {
             const w = piece.p.font.widthOfTextAtSize(piece.p.text, piece.p.size);
-            const gap = line.length ? spaceWidth(line[line.length - 1].p) : 0;
-            if (line.length && lineWidth + gap + w > width) flush();
+            // Only the previous piece's OWN trailing space counts toward width: a word split across two
+            // runs (or a splitToWidth chunk) has space:false and draws with no gap, so measuring one
+            // there wrapped such lines slightly early and disagreed with what flush() draws.
+            const prev = line[line.length - 1];
+            if (prev && lineWidth + (prev.space ? spaceWidth(prev.p) : 0) + w > width) flush();
+            const prevAfter = line[line.length - 1];
+            lineWidth += (prevAfter && prevAfter.space ? spaceWidth(prevAfter.p) : 0) + w;
             line.push({ p: piece.p, space: piece.space, w });
-            lineWidth += (line.length > 1 ? gap : 0) + w;
         }
         flush();
     }
@@ -329,16 +349,19 @@ class NativeLayout {
     /** Entry point: renders any node, dispatching by type. `topLevel` drives inter-page pagination. */
     async render(node: OfficeContentNode, topLevel = false): Promise<void> {
         if (this.config.abortSignal?.aborted) throw getAbortError();
-        // The caller's onNode hook can skip a node/subtree or replace its output, exactly as the
-        // text-based generators honor it; applied before any default rendering (and before pagination).
-        if (await this.applyOnNode(node)) return;
         // Preserve source pagination: start a fresh page between consecutive page (or slide) nodes.
+        // Done BEFORE the hook so a page/slide the hook drops or replaces with a string still advances
+        // the bookkeeping (the next page gets its break, and a replacement string lands on a fresh page)
+        // instead of leaving prevPaginated stale.
         if (topLevel && (node.type === 'page' || node.type === 'slide')) {
             if (this.prevPaginated === node.type) this.newPage();
             this.prevPaginated = node.type;
         } else if (topLevel) {
             this.prevPaginated = null;
         }
+        // The caller's onNode hook can skip a node/subtree or replace its output, exactly as the
+        // text-based generators honor it; applied before any default rendering.
+        if (await this.applyOnNode(node)) return;
         switch (node.type) {
             case 'page':
             case 'slide':
@@ -425,7 +448,9 @@ class NativeLayout {
         // makes drawRuns place nothing and never advance `this.y`, so the next item would overprint.
         if (bodyRuns.some(r => r.text && r.text.trim())) this.drawRuns(bodyRuns, this.margin.left + indent, this.contentWidth - indent);
         else this.y += size * 1.35;
-        for (const c of (node.children || []).filter(c => c.type === 'list')) await this.listItem(c);
+        // Route nested list items through render() (not listItem() directly) so the onNode hook and the
+        // abort check see them like every other node.
+        for (const c of (node.children || []).filter(c => c.type === 'list')) await this.render(c);
     }
 
     private code(node: OfficeContentNode): void {
@@ -628,14 +653,24 @@ class NativeLayout {
             // rather than drawn off the bottom (which silently lost the overflowing text). A normal row
             // is a single band. Each band redraws every cell's border and its slice of the wrapped
             // lines, so the cell continues cleanly on the next page.
-            const linesPerBand = Math.max(1, Math.floor((this.bottom - this.margin.top - 2 * pad) / lineH));
+            const fullBand = Math.max(1, Math.floor((this.bottom - this.margin.top - 2 * pad) / lineH));
             const maxLines = Math.max(1, ...placed.map(p => p.lines.length));
             const newCarry = new Map<number, number>();
-            for (let lineOffset = 0; lineOffset < maxLines; lineOffset += linesPerBand) {
-                const whole = lineOffset === 0 && maxLines <= linesPerBand;
-                const bandLines = Math.min(maxLines - lineOffset, linesPerBand);
+            let lineOffset = 0;
+            while (lineOffset < maxLines) {
+                const remaining = maxLines - lineOffset;
+                // Lines that fit below the cursor on the current page. If the whole remaining row fits,
+                // draw it in one band; otherwise fill what is left of this page (>=1 line) before moving
+                // on, so a tall row starting mid-page does not blank the rest of the page. A band is
+                // never taller than a page (fitLines <= fullBand), so no line is ever drawn off-page.
+                const fitLines = Math.max(0, Math.floor((this.bottom - this.y - 2 * pad) / lineH));
+                let bandLines: number;
+                if (fitLines >= remaining) bandLines = remaining;               // the rest fits here
+                else if (this.y > this.margin.top && fitLines >= 1) bandLines = fitLines; // fill this page
+                else if (this.y > this.margin.top) { this.newPage(); continue; } // nothing fits: fresh page
+                else bandLines = Math.min(remaining, fullBand);                  // at page top: a full band
+                const whole = lineOffset === 0 && bandLines === maxLines;
                 const bandH = whole ? rowH : bandLines * lineH + 2 * pad;
-                if (this.y + bandH > this.bottom && this.y > this.margin.top) this.newPage();
                 const topY = this.pageH - this.y;
                 for (const p of placed) {
                     const x = this.margin.left + p.col * colW;
@@ -647,8 +682,15 @@ class NativeLayout {
                     }
                 }
                 this.y += bandH;
+                lineOffset += bandLines;
             }
-            // Record this row's rowspans, then age the carries by one row.
+            // Record this row's rowspans, then age the carries by one row. The carry reserves the
+            // spanned columns below so later rows do not slide under a rowspan cell, and the cell's text
+            // is placed correctly in its first row. Its border box, though, covers only that first row:
+            // painting the continuation border correctly (a single tall box, or edges without internal
+            // lines, and correct across a page break) needs a two-pass layout with pre-measured row
+            // heights, which is out of proportion to this opt-in engine's fallback role, so a rowspan
+            // cell's lower rows are left unbordered rather than mis-bordered.
             for (const p of placed) {
                 if (p.rowSpan > 1) for (let c = p.col; c < p.col + p.span; c++) newCarry.set(c, p.rowSpan - 1);
             }
