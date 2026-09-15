@@ -161,6 +161,13 @@ export async function testTextLayout(): Promise<LayoutTest[]> {
         add('Stacked short glyphs join, longer stacks stay split',
             sun.length === 1 && sun[0] === 'paragraph:Sun' && janY.length === 1 && janY[0] === 'paragraph:12 Jan',
             'Su/n -> "Sun", 12/Jan -> "12 Jan"', `${sun.join('|')} ;; ${janY.join('|')}`);
+        // A digit stack still folds ("1"/"1" -> "11"), but two stacked upper-case abbreviations are two
+        // real tokens and must keep their space ("US"/"UK" -> "US UK", not "USUK").
+        const dd = shapeOf(nodesOf([run('1', 100, 100, 12, { width: 6 }), run('1', 100, 112, 12, { width: 6 })]));
+        const abbr = shapeOf(nodesOf([run('US', 100, 100, 12, { width: 12 }), run('UK', 100, 112, 12, { width: 12 })]));
+        add('Digit stacks fold but upper-case abbreviation stacks keep their space',
+            dd.length === 1 && dd[0] === 'paragraph:11' && abbr.length === 1 && abbr[0] === 'paragraph:US UK',
+            '1/1 -> "11", US/UK -> "US UK"', `${dd.join('|')} ;; ${abbr.join('|')}`);
     }
     {
         // A hostile PDF can put a run under an enormous text matrix; the colour lookup must stay bounded

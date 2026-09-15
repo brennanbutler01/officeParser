@@ -23,8 +23,6 @@ export interface ResolvedFont {
     ascent: number;
     /** Descent as a fraction of font size (negative). */
     descent: number;
-    /** True for vertical (top-to-bottom) writing mode fonts. */
-    vertical: boolean;
 }
 
 /**
@@ -42,11 +40,7 @@ export interface RawRun {
     width: number;
     height: number;
     fontSize: number;
-    /** pdf.js internal font id (e.g. "g_d0_f1"), used only to group same-font runs. */
-    fontKey: string;
     dir: 'ltr' | 'rtl' | 'ttb';
-    /** pdf.js hasEOL: this run visually ends its line. */
-    hasEOL: boolean;
     /** Snapped writing angle. Only 0 goes through the normal flow; others are appended after. */
     angle: RunAngle;
     /** Marked-content id for the tagged path, or null. */
@@ -108,6 +102,9 @@ export interface PageExtract {
     authoredW: number;
     /** Authored (rotation-0) viewport height. */
     authoredH: number;
+    /** Authored viewport top in PDF user space (CropBox y1); equals `authoredH` only when the CropBox
+     * origin is at 0. Used to map a named destination's user-space y into viewport space. */
+    authoredY1: number;
     /** Page /Rotate in degrees (0/90/180/270). */
     rotation: number;
     runs: RawRun[];

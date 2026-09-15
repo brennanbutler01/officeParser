@@ -93,6 +93,24 @@ interface ParagraphStyleInfo {
     breakAfter?: 'page' | 'column';
 }
 
+/**
+ * Concatenates a node's descendant text, skipping the subtrees of the given tags. Used for the
+ * paragraph text fallback so a comment (`office:annotation`) or note (`text:note`) body - which is
+ * attached separately, or dropped under `ignoreComments`/`ignoreNotes` - never leaks into the
+ * paragraph's own text the way raw `node.textContent` would.
+ */
+function textContentSkipping(node: Node, skipTags: Set<string>): string {
+    let out = '';
+    const walk = (n: Node) => {
+        if (isElement(n) && skipTags.has((n as Element).tagName)) return;
+        if (n.nodeType === 3) { out += n.nodeValue || ''; return; }
+        const kids = n.childNodes;
+        if (kids) for (let i = 0; i < kids.length; i++) walk(kids[i]);
+    };
+    walk(node);
+    return out;
+}
+
 /** The parseParagraphContent closure's shape, passed to {@link buildAnnotationComment}. */
 type ParseParaFn = (
     node: Element,
@@ -713,9 +731,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
             });
         }
 
-        // Fallback: if no children were created but there's text content
-        if (content.children.length === 0 && node.textContent) {
-            const fullText = node.textContent;
+        // Fallback: if no children were created but there's text content. Exclude comment/note subtrees
+        // so an annotation-only or note-only paragraph does not leak the comment/note body into the
+        // paragraph text (e.g. when ignoreComments/ignoreNotes skipped building the child node).
+        if (content.children.length === 0) {
+            const fullText = textContentSkipping(node, new Set(['office:annotation', 'text:note']));
             if (fullText.trim()) {
                 content.text = fullText;
                 content.children.push({

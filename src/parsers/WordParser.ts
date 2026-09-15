@@ -937,7 +937,10 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
             // reading it, a header row survived only when it happened to be all-bold.
             const trPr = getFirstElementByTagName(trNode, "w:trPr");
             const tblHeader = trPr ? getFirstElementByTagName(trPr, "w:tblHeader") : null;
-            const isHeaderRowNode = !!tblHeader && tblHeader.getAttribute("w:val") !== "false" && tblHeader.getAttribute("w:val") !== "0";
+            // ST_OnOff turns the toggle off with "false"/"0"/"off"; a bare <w:tblHeader/> or any other
+            // value (true/1/on) is on.
+            const tblHeaderVal = tblHeader?.getAttribute("w:val");
+            const isHeaderRowNode = !!tblHeader && tblHeaderVal !== "false" && tblHeaderVal !== "0" && tblHeaderVal !== "off";
 
             let visualCol = 0;
             for (let tcIndex = 0; tcIndex < tcNodes.length; tcIndex++) {

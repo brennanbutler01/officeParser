@@ -211,7 +211,7 @@ function resolvePdfLayoutConfig(config: FullOfficeParserConfig): PdfLayoutConfig
         spaceToleranceFactor: num(p.spaceToleranceFactor, 0.25),
         headingDetection: p.headingDetection ?? 'auto',
         normalizeText: p.normalizeText !== false,
-        extractTextColor: !!p.extractTextColor,
+        extractTextColor: p.extractTextColor !== false, // default true, matching defaults.ts and its siblings
         includeBounds: !config.ignorePageGeometry,
     };
 }
@@ -250,7 +250,6 @@ async function resolveFont(fontKey: string, commonObjs: any, styles: Record<stri
         italic: false,
         ascent: typeof style.ascent === 'number' ? style.ascent : 0.8,
         descent: typeof style.descent === 'number' ? style.descent : -0.2,
-        vertical: !!style.vertical,
     };
     try {
         if (commonObjs?.has?.(fontKey)) {
@@ -579,8 +578,8 @@ function resolveSectionLinks(
 ): void {
     if (!sectionLinks.targets.length) return;
 
-    const pageInfo = new Map<number, { authoredH: number; rotation: number }>();
-    for (const e of extracts) pageInfo.set(e.pageNumber, { authoredH: e.authoredH, rotation: e.rotation });
+    const pageInfo = new Map<number, { authoredH: number; authoredY1: number; rotation: number }>();
+    for (const e of extracts) pageInfo.set(e.pageNumber, { authoredH: e.authoredH, authoredY1: e.authoredY1, rotation: e.rotation });
 
     // Headings per page (top-to-bottom, with their rendered top y when known), plus a document-wide
     // count of each heading's base slug so a referenced heading can be disambiguated from same-text
@@ -635,7 +634,7 @@ function resolveSectionLinks(
         if (t.pdfY != null && info && info.rotation === 0 && hs) {
             const positioned = hs.filter((h): h is { node: OfficeContentNode; y: number } => h.y !== undefined);
             if (positioned.length) {
-                const targetY = info.authoredH - t.pdfY; // PDF user space (y-up) -> rendered viewport (y-down)
+                const targetY = info.authoredY1 - t.pdfY; // PDF user space (y-up) -> viewport (y-down), honouring a non-zero CropBox origin
                 let best: OfficeContentNode | null = null, bestD = Infinity;
                 for (const h of positioned) { const d = Math.abs(h.y - targetY); if (d < bestD) { bestD = d; best = h.node; } }
                 if (best && bestD <= info.authoredH * 0.5) return `#${anchorFor(best)}`;
@@ -676,6 +675,9 @@ async function collectPage(
     const layoutViewport = page.getViewport({ scale: 1, rotation: 0 });
     const authoredW = layoutViewport.width;
     const authoredH = layoutViewport.height;
+    // CropBox top in user space (viewBox = [x0, y0, x1, y1]); equals authoredH only when the CropBox
+    // origin y is 0. A section-link destination's user-space y maps to viewport y as authoredY1 - y.
+    const authoredY1 = Array.isArray((layoutViewport as any).viewBox) ? (layoutViewport as any).viewBox[3] : authoredH;
     const width = rotation % 180 === 0 ? authoredW : authoredH;
     const height = rotation % 180 === 0 ? authoredH : authoredW;
 
@@ -719,7 +721,7 @@ async function collectPage(
             continue;
         }
         if (!item.str) continue;
-        const font = fontCache.get(item.fontName) || { bold: false, italic: false, ascent: 0.8, descent: -0.2, vertical: false };
+        const font = fontCache.get(item.fontName) || { bold: false, italic: false, ascent: 0.8, descent: -0.2 };
         const m = pdfjs.Util.transform(layoutViewport.transform, item.transform);
         const box = computeRunBox(m, item.width || 0, font.ascent, font.descent);
 
@@ -767,9 +769,7 @@ async function collectPage(
                 text: segText,
                 x: segX, yTop: box.yTop, yBaseline: box.yBaseline, width: segW, height: box.height,
                 fontSize: box.fontSize,
-                fontKey: item.fontName,
                 dir,
-                hasEOL: !!item.hasEOL && seg.end === len,
                 angle,
                 mcid, inArtifact,
                 formatting,
@@ -792,7 +792,7 @@ async function collectPage(
 
     if (typeof page.cleanup === 'function') { try { page.cleanup(); } catch { /* best effort */ } }
 
-    return { pageNumber, width, height, authoredW, authoredH, rotation, runs, images, structTree };
+    return { pageNumber, width, height, authoredW, authoredH, authoredY1, rotation, runs, images, structTree };
 }
 
 /** Extracts images from a page's operator list, positioned in layout-viewport space. */
@@ -810,6 +810,44 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
         // every image mirrored, and an image inside a form got the form-local box.
         let ctm = identityMatrix();
         const ctmStack: number[][] = [];
+        let inlineSeq = 0;
+
+        /**
+         * Encodes one decoded image object to PNG at the current CTM and records it. Shared by the
+         * named-XObject, repeated-XObject and inline-image ops so all three collect identically. The
+         * megapixel guard bounds an inline image's allocation (pdf.js `maxImageSize` gates decoded
+         * XObjects, but an inline image's declared dimensions reach `convertToRgbaBuffer` directly).
+         */
+        const pushImage = async (imgObj: any, imgName: string): Promise<void> => {
+            if (!imgObj) return;
+            if (isBrowser && !imgObj.data && imgObj.bitmap) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = imgObj.width; canvas.height = imgObj.height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) { ctx.drawImage(imgObj.bitmap, 0, 0); imgObj.data = ctx.getImageData(0, 0, imgObj.width, imgObj.height).data; imgObj.kind = 3; }
+                } catch (e) {
+                    logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, undefined, e);
+                }
+            }
+            if (!(imgObj.data && imgObj.width > 0 && imgObj.height > 0)) return;
+            if (imgObj.width * imgObj.height > 40_000_000) {
+                logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, `image on page ${pageNumber} is too large to extract (${imgObj.width}x${imgObj.height} pixels)`);
+                return;
+            }
+            // The tracked CTM is the image placement (unit square mapped by [a,b,c,d,e,f]). Encode to
+            // PNG now, while this page's raw pixel buffer is in hand, so the large uncompressed RGBA is
+            // freed as the page goes out of scope instead of being retained until the emit pass.
+            const bounds = imageBounds(viewport, ctm);
+            try {
+                const rgba = convertToRgbaBuffer(imgObj.data, imgObj.width, imgObj.height, imgObj.kind);
+                const png = encodePng(imgObj.width, imgObj.height, new Uint8Array(rgba));
+                images.push({ name: imgName, bounds, png, pixelWidth: imgObj.width, pixelHeight: imgObj.height });
+            } catch (e) {
+                logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, `on page ${pageNumber}`, e);
+            }
+        };
+
         for (let j = 0; j < fnArray.length; j++) {
             const fn = fnArray[j];
             if (fn === pdfjs.OPS.save) { ctmStack.push(ctm); continue; }
@@ -841,7 +879,11 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
                     }
                 }
             }
-            if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintXObject) {
+            // A named XObject image, or a repeated (tiled) one: args[0] is the object id in either pool.
+            // The repeat positions do not change the pixels, so collect the bitmap once at the current
+            // placement. (`paintImageMaskXObject` is deliberately not collected: a stencil mask is painted
+            // in the current fill colour, which this pass does not track, so it has no faithful bitmap.)
+            if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintImageXObjectRepeat) {
                 const imgName = argsArray[j][0];
                 try {
                     let hasObj = page.objs.has(imgName);
@@ -849,34 +891,17 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
                     if (!hasObj && page.commonObjs.has(imgName)) { hasObj = true; targetObjs = page.commonObjs; }
                     if (!hasObj) continue;
                     const imgObj: any = await new Promise((resolve) => targetObjs.get(imgName, (d: any) => resolve(d)));
-                    if (isBrowser && !imgObj.data && imgObj.bitmap) {
-                        try {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = imgObj.width; canvas.height = imgObj.height;
-                            const ctx = canvas.getContext('2d');
-                            if (ctx) { ctx.drawImage(imgObj.bitmap, 0, 0); imgObj.data = ctx.getImageData(0, 0, imgObj.width, imgObj.height).data; imgObj.kind = 3; }
-                        } catch (e) {
-                            logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, undefined, e);
-                        }
-                    }
-                    if (imgObj?.data && imgObj.width > 0 && imgObj.height > 0) {
-                        // The tracked CTM is the image placement (unit square mapped by [a,b,c,d,e,f]).
-                        const bounds = imageBounds(viewport, ctm);
-                        // Encode to PNG now, while this page's raw pixel buffer is in hand, so the large
-                        // uncompressed RGBA data is freed as the page goes out of scope instead of being
-                        // retained for every page until the emit pass. Encode failures are logged (as the
-                        // emit pass used to) rather than silently swallowed by the outer per-image catch.
-                        try {
-                            const rgba = convertToRgbaBuffer(imgObj.data, imgObj.width, imgObj.height, imgObj.kind);
-                            const png = encodePng(imgObj.width, imgObj.height, new Uint8Array(rgba));
-                            images.push({ name: imgName, bounds, png, pixelWidth: imgObj.width, pixelHeight: imgObj.height });
-                        } catch (e) {
-                            logWarning(OfficeWarningType.IMAGE_EXTRACTION_FAILED, config, `on page ${pageNumber}`, e);
-                        }
-                    }
+                    await pushImage(imgObj, imgName);
                 } catch {
                     // Image access failed, continue.
                 }
+                continue;
+            }
+            // An inline image (BI...EI): the decoded pixel object is passed directly in the args, with
+            // no id, so it never goes through page.objs.
+            if (fn === pdfjs.OPS.paintInlineImageXObject) {
+                try { await pushImage(argsArray[j][0], `inline_p${pageNumber}_${inlineSeq++}`); } catch { /* continue */ }
+                continue;
             }
         }
     } catch (e) {

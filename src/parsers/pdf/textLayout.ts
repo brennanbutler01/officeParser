@@ -1166,11 +1166,17 @@ function paragraphNode(group: ParaGroup, page: PageContext, doc: DocContext, for
             // longer stacked line such as "12"/"Jan" or "Yes"/"No" is two real tokens and must keep its
             // space. Requiring <=2 chars (not a width test that a 3-letter word also passes) is what
             // keeps ordinary short stacked lines from being glued together.
+            const curText = lineTextOf(line).trim();
             const shortPrev = prevText.trim().length <= 2;
-            const shortCur = lineTextOf(line).trim().length <= 2;
+            const shortCur = curText.length <= 2;
             const overlap = Math.min(prev.x + prev.width, line.x + line.width) - Math.max(prev.x, line.x);
             const stacked = overlap > 0.5 * (Math.min(prev.width, line.width) || 1);
-            const glyphStack = shortPrev && shortCur && stacked;
+            // Only fold when the join plausibly forms ONE token: an all-digit stack (a 2-digit day "1"/"1"
+            // -> "11") or a lower-case continuation of a word ("Su"/"n" -> "Sun"). Two stacked upper-case
+            // abbreviations ("US"/"UK") or a digit-over-letter pair are two real tokens and keep their space.
+            const bothDigits = /^\d+$/.test(prevText.trim()) && /^\d+$/.test(curText);
+            const lowerContinuation = /^[\p{Ll}]/u.test(curText);
+            const glyphStack = shortPrev && shortCur && stacked && (bothDigits || lowerContinuation);
             if (cfg.mergeHyphenatedWords && (softHyphen || (hardHyphen && nextStartsLower))) {
                 // drop the trailing hyphen from the last emitted child and join with no space
                 const lastChild = children[children.length - 1];
