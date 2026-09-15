@@ -714,7 +714,14 @@ export function detectTables(lines: PdfLine[], page: PageContext, doc: DocContex
     // | Date:", then "Subtotal | $10 | Tax") used to splice into one bogus table. So a run is broken
     // wherever a prose line lies between two rows, or the pitch between them jumps.
     const excludedYs = lines.filter(l => l.fragments.length && lineLen(l) > 40).map(l => l.baseline).sort((a, b) => a - b);
-    const proseBetween = (a: number, b: number) => excludedYs.some(y => y > a && y < b);
+    // Binary-search the sorted excludedYs for any prose line in (a, b): find the first y > a and test it
+    // is < b. A linear `.some()` here was O(rows x proseLines), which a page of tens of thousands of
+    // short lines could drive superlinear (a bounded but real DoS on the geometric path).
+    const proseBetween = (a: number, b: number): boolean => {
+        let lo = 0, hi = excludedYs.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (excludedYs[mid] > a) hi = mid; else lo = mid + 1; }
+        return lo < excludedYs.length && excludedYs[lo] < b;
+    };
     const rowY = (r: PdfLine[]) => r[0].baseline;
     const adjacentRuns = (rowRun: PdfLine[][]): PdfLine[][][] => {
         const pitches: number[] = [];
@@ -1031,6 +1038,17 @@ export function blockToNodes(block: PdfLine[], page: PageContext, doc: DocContex
     const attached: (ListMarker | null)[] = new Array(N).fill(null); // separate marker merged onto a group
     const markerLeft: (number | null)[] = new Array(N).fill(null);   // the marker's own x (for nesting)
 
+    // Bucket group indices by rounded baseline so a marker scans only groups on (near) its own
+    // baseline instead of all N groups: the fold below was O(markers x groups), a bounded but real
+    // superlinear cost on a pathological page. The precise |baseline diff| <= 0.6*fs test and the
+    // lowest-index tie-break are preserved, so the chosen group is identical to the linear scan's.
+    const byBaseline = new Map<number, number[]>();
+    for (let j = 0; j < N; j++) {
+        const k = Math.round(baseOf(groups[j]));
+        const bucket = byBaseline.get(k);
+        if (bucket) bucket.push(j); else byBaseline.set(k, [j]);
+    }
+
     // Fold a standalone marker atom into the item-text group sharing its baseline, just to its right.
     for (let i = 0; i < N; i++) {
         if (dropped[i]) continue;
@@ -1040,12 +1058,19 @@ export function blockToNodes(block: PdfLine[], page: PageContext, doc: DocContex
         if (!mk) continue;
         const yb = baseOf(groups[i]), xr = leftOf(groups[i]), fs = groups[i].fontSize || 12;
         let best = -1, bestDx = Infinity;
-        for (let j = 0; j < N; j++) {
-            if (j === i || dropped[j] || attached[j]) continue;
-            if (Math.abs(baseOf(groups[j]) - yb) > 0.6 * fs) continue;
-            const dx = leftOf(groups[j]) - xr;
-            if (dx <= 0) continue; // the text must be to the marker's right
-            if (dx < bestDx) { bestDx = dx; best = j; }
+        // Rounded baselines within 0.6*fs of yb, with a 1-unit margin so rounding never drops a
+        // candidate the precise test below would have kept.
+        const kLo = Math.floor(yb - 0.6 * fs) - 1, kHi = Math.ceil(yb + 0.6 * fs) + 1;
+        for (let k = kLo; k <= kHi; k++) {
+            const bucket = byBaseline.get(k);
+            if (!bucket) continue;
+            for (const j of bucket) {
+                if (j === i || dropped[j] || attached[j]) continue;
+                if (Math.abs(baseOf(groups[j]) - yb) > 0.6 * fs) continue;
+                const dx = leftOf(groups[j]) - xr;
+                if (dx <= 0) continue; // the text must be to the marker's right
+                if (dx < bestDx || (dx === bestDx && (best < 0 || j < best))) { bestDx = dx; best = j; }
+            }
         }
         if (best >= 0 && bestDx < 6 * fs) { attached[best] = mk; markerLeft[best] = xr; dropped[i] = true; }
     }
