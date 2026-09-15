@@ -313,7 +313,11 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
     }
 
     const numberingFile = files.find(f => f.path.match(numberingFileRegex));
-    const numberingMap: { [key: string]: { [key: string]: { numFmt: string, lvlText: string, start: number } } } = {};
+    // Null-prototype: `numId` is the raw document `w:numId/@w:val`, so a plain `{}` here lets a
+    // `numId="__proto__"` read `Object.prototype` (truthy) and, two levels down, write onto it -
+    // global prototype pollution from one crafted .docx. With no prototype, `map["__proto__"]` is a
+    // normal absent key and the numbering guard simply skips the undefined definition.
+    const numberingMap: { [key: string]: { [key: string]: { numFmt: string, lvlText: string, start: number } } } = Object.create(null);
 
     if (numberingFile) {
         const numberingXml = parseXmlString(numberingFile.content.toString());
@@ -453,8 +457,10 @@ export const parseWord = async (buffer: Buffer, config: FullOfficeParserConfig):
 
 
     const content: OfficeContentNode[] = [];
-    const numberingState: { [key: string]: { [key: string]: number } } = {};
-    const listCounters: { [key: string]: { [key: string]: number } } = {}; // Track item index per listId/level
+    // Null-prototype for the same reason as numberingMap: both are keyed by the raw document `numId`
+    // and written two levels deep, which is the prototype-pollution vector.
+    const numberingState: { [key: string]: { [key: string]: number } } = Object.create(null);
+    const listCounters: { [key: string]: { [key: string]: number } } = Object.create(null); // Track item index per listId/level
 
     // Helper to parse a paragraph node
     const parseParagraph = (pNode: Element, documentContent: string, pendingAnchorIds: string[] = []): OfficeContentNode => {

@@ -1,6 +1,7 @@
 import { AdmonitionMetadata, AdmonitionSyntax, AttributeListSyntax, BreakMetadata, CitationSyntax, CodeMetadata, ConversionResult, DefinitionListSyntax, DeprecatedAdmonitionFlavor, EmbedMetadata, EmbedSyntax, FallbackToHtmlConfig, FootnoteSyntax, GeneratorConfig, HeadingMetadata, HighlightSyntax, ImageMetadata, ListMetadata, MarkdownDialectConfig, MarkdownDialectPreset, NoteMetadata, OfficeContentNode, OfficeParserAST, OfficeWarningType, StrikethroughSyntax, TableMetadata, TextMetadata, WikilinkSyntax } from '../types.js';
 import { escapeHtml, markdownEscapeText, sanitizeCssValue, sanitizeMarkdownUrl, sanitizeUrl } from '../utils/sanitize.js';
 import { base64ByteLength } from '../utils/officeGenUtils.js';
+import { clampRepeat } from '../utils/numberUtils.js';
 import { BaseGenerator } from './BaseGenerator.js';
 import { checkAbortSignal } from '../utils/errorUtils.js';
 
@@ -482,7 +483,9 @@ export class MarkdownGenerator extends BaseGenerator<'md'> {
                 case 'list': {
                     const meta = node.metadata as ListMetadata;
                     const indentSpaces = ' '.repeat(4);
-                    const indent = indentSpaces.repeat(meta?.indentation || 0);
+                    // Clamp the nesting depth: `indentation` derives from an uncapped document `ilvl`,
+                    // so a hostile value would otherwise repeat the indent into a multi-GB string.
+                    const indent = indentSpaces.repeat(clampRepeat(meta?.indentation || 0, 64));
                     const bullet = `${this.resolvedDialect.bulletListMarker} `;
                     const marker = meta?.isTask
                         ? (meta.checked ? `${bullet}[x] ` : `${bullet}[ ] `)

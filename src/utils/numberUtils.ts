@@ -15,3 +15,13 @@ export function median(values: number[]): number {
     const s = [...values].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
 }
+
+/**
+ * Clamps a document-derived repeat count to a safe range before it reaches `String.prototype.repeat`,
+ * so a hostile file cannot turn a tiny attribute (an ODF `text:c`, a list `ilvl`/indentation) into a
+ * multi-gigabyte string, and a negative/NaN count cannot throw. Returns 0 for NaN/negative and caps at
+ * `max`. No real document repeats a character thousands of times or nests thousands deep.
+ */
+export function clampRepeat(count: number, max = 10000): number {
+    return Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), max) : 0;
+}

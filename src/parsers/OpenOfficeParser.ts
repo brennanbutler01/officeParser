@@ -26,6 +26,7 @@ import { createAST } from '../utils/astUtils.js';
 import { extractChartData } from '../utils/chartUtils.js';
 import { checkAbortSignal, logWarning } from '../utils/errorUtils.js';
 import { mathmlToLatex } from '../utils/mathUtils.js';
+import { clampRepeat } from '../utils/numberUtils.js';
 
 /**
  * Tracks how many table cells a single document has been allowed to materialize.
@@ -203,7 +204,10 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
     // Inline style parsing (from content.xml automatic styles)
     const styleMap: { [key: string]: TextFormatting } = {};
     const paragraphStyleMap: { [key: string]: ParagraphStyleInfo } = {};
-    const listCounters: { [listId: string]: { [level: string]: number } } = {}; // Track item index per listId/level
+    // Null-prototype: `listId` is the raw document `text:style-name`/`xml:id`, so a plain `{}` lets a
+    // `listId="__proto__"` write onto `Object.prototype` two levels down (global pollution from one
+    // crafted ODF). With no prototype the `__proto__` key is an ordinary own property.
+    const listCounters: { [listId: string]: { [level: string]: number } } = Object.create(null); // Track item index per listId/level
     let currentListId: string | null = null;
     let lastListType: 'ordered' | 'unordered' | null = null;
     let lastListStyle: string | null = null;
@@ -377,9 +381,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                     const name = element.getAttribute('text:name');
                     if (name) anchorIds.push(name);
                 } else if (tagName === 'text:s') {
-                    // Space
+                    // Space. `text:c` is attacker-controlled: clamp it so a tiny `<text:s text:c="5e8"/>`
+                    // cannot allocate a multi-GB string (a memory DoS the zip cap does not stop, since the
+                    // blow-up is in repeat, after inflation).
                     const count = parseInt(element.getAttribute('text:c') || '1');
-                    const spaces = ' '.repeat(count);
+                    const spaces = ' '.repeat(clampRepeat(count));
                     fullText += spaces;
                     children.push({
                         type: 'text',

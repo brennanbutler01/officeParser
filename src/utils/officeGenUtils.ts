@@ -221,8 +221,11 @@ export function sniffImageSize(bytes: Uint8Array): { w: number; h: number } | nu
     if (bytes.length < 24) return null;
     // PNG: signature then IHDR width/height (big-endian) at offset 16.
     if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
-        const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
-        const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+        // Read UNSIGNED (`>>> 0`): a dimension with the top bit set (>= 2^31) would otherwise overflow
+        // the signed `<< 24` into a negative value, fail the `> 0` check, return null, and let the
+        // caller's megapixel cap be BYPASSED for exactly the absurd-dimension PNG the cap exists to stop.
+        const w = ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0;
+        const h = ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0;
         if (w > 0 && h > 0) return { w, h };
     }
     // GIF: logical screen width/height (little-endian) at offset 6.

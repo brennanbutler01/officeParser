@@ -1,6 +1,6 @@
 import { ConversionResult, GeneratorConfig, OfficeContentNode, OfficeContentNodeType, OfficeParserAST } from '../types.js';
 import { BaseGenerator } from './BaseGenerator.js';
-import { median } from '../utils/numberUtils.js';
+import { clampRepeat, median } from '../utils/numberUtils.js';
 import { base64ByteLength } from '../utils/officeGenUtils.js';
 
 const escapeRegExpChars = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -112,7 +112,9 @@ export class TextGenerator extends BaseGenerator<'text'> {
             if (node.type === 'list' && this.config.textConfig.preserveLayout) {
                 const meta = node.metadata as any;
                 const indentSpaces = ' '.repeat(4);
-                const indent = indentSpaces.repeat(meta?.indentation || 0);
+                // Clamp the nesting depth: `indentation` derives from an uncapped document `ilvl`, so a
+                // hostile value would otherwise repeat the indent into a multi-GB string.
+                const indent = indentSpaces.repeat(clampRepeat(meta?.indentation || 0, 64));
                 const marker = meta?.listType === 'ordered' ? `${(meta.itemIndex ?? 0) + 1}. ` : '- ';
                 return `${indent}${marker}${childrenOutput.trimStart()}` + (childrenOutput.endsWith(newline) ? '' : newline);
             }
