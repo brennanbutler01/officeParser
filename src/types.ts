@@ -297,23 +297,28 @@ export interface CommonOfficeParserConfig {
      */
     newlineDelimiter?: string;
     /**
-     * Flag to ignore notes from parsing in files like powerpoint.
-     * Default is false. It includes notes in the parsed text by default.
+     * Flag to ignore notes from parsing. Default is false (notes are extracted).
+     * Applies to: footnotes/endnotes (DOCX, ODT, RTF, PDF tagged, HTML, Markdown, EPUB) and speaker
+     * notes (PPTX, ODP). No effect on formats that carry no notes (XLSX, ODS, ODG, CSV).
      */
     ignoreNotes?: boolean;
     /**
-     * Flag to ignore comments from parsing.
-     * Default is false.
+     * Flag to ignore comments from parsing. Default is false (comments are extracted onto `node.comments`).
+     * Applies to: DOCX, XLSX, PPTX and every ODF type (ODT/ODS/ODP/ODG). Not applicable to PDF, RTF,
+     * HTML, Markdown or EPUB (no comments are parsed there). (The CSV `#`-row convention produces
+     * top-level `comment` nodes and is not governed by this flag.)
      */
     ignoreComments?: boolean;
     /**
-     * Flag to ignore headers and footers from parsing.
-     * Default is false.
+     * Flag to ignore headers and footers from parsing. Default is false (they are extracted into
+     * `ast.auxiliary.headers`/`.footers`). Extracted for DOCX, PDF (the top/bottom running bands) and
+     * ODT (Writer master pages). It is a no-op for ODS/ODP/ODG, XLSX, PPTX and RTF, where running
+     * headers/footers are not extracted at all.
      */
     ignoreHeadersAndFooters?: boolean;
     /**
-     * Flag to ignore slide masters from parsing in PowerPoint.
-     * Default is false.
+     * Flag to ignore slide masters from parsing. Default is false. PPTX only; ODP master pages are not
+     * extracted, so the flag is a no-op for ODP.
      */
     ignoreSlideMasters?: boolean;
     /**
@@ -327,8 +332,10 @@ export interface CommonOfficeParserConfig {
      */
     includeRawContent?: boolean;
     /**
-     * Flag to enable OCR for images.
-     * Default is false.
+     * Flag to enable OCR for images. Default is false. OCR runs over EXTRACTED images, so it requires
+     * `extractAttachments: true` as well - in every format (PDF page images, and embedded images in
+     * DOCX/PPTX/XLSX/ODF/RTF/HTML/Markdown/EPUB). Setting `ocr: true` alone performs no OCR and raises
+     * an `OCR_REQUIRES_ATTACHMENTS` warning. Uses Tesseract.js (`ocrConfig.language`, default 'eng').
      */
     ocr?: boolean;
     /**
@@ -887,7 +894,10 @@ export interface CommonGeneratorConfig {
      * compatibility (`true` = `'image-only'`, `false` = `'none'`) or one of the {@link ImageMode}
      * strings:
      * - `'image-only'` (default): embed the image (inlined as a `data:` URI when under
-     *   `maxInlineImageBytes`, otherwise referenced by name); no OCR/recognized text.
+     *   `maxInlineImageBytes`, otherwise referenced by name); no OCR/recognized text. ONE exception:
+     *   in Markdown and plain-text output, an image OVER `maxInlineImageBytes` that cannot be embedded
+     *   falls back to its recognized (OCR) text when it has any, since a bare placeholder would lose a
+     *   scanned page's whole content (see `maxInlineImageBytes`). Use `'none'` to guarantee no image text.
      * - `'image+ocr-text'`: embed the image, then its recognized (OCR) text below it.
      * - `'ocr-text-only'`: only the recognized (OCR) text, no image.
      * - `'none'`: omit the image entirely.
@@ -1227,11 +1237,15 @@ export interface PdfGeneratorConfig {
     height?: string | number;
     /** Whether to print in landscape orientation. Defaults to false. */
     landscape?: boolean;
-    /** Whether to print background graphics. Defaults to true. */
+    /** Whether to print background graphics. Defaults to true. HTML engine only. */
     printBackground?: boolean;
-    /** Scale of the webpage rendering. Defaults to 1. */
+    /** Scale of the webpage rendering. Defaults to 1. HTML engine only. */
     scale?: number;
-    /** Paper margins. */
+    /**
+     * Paper margins. The default depends on the engine: the `'html'` engine uses 0 on every side (the
+     * body carries its own padding), while the `'native'` engine uses a small default (~48pt) so text
+     * is not glued to the sheet edge. An explicit value (including `0`) is honored by both engines.
+     */
     margin?: {
         top?: string | number;
         right?: string | number;

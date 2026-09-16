@@ -29,7 +29,7 @@ A robust, strictly-typed **Node.js and Browser** library for parsing office file
 
 ## What's New in v8
 
-- **Rebuilt PDF text extraction.** PDF is no longer treated as a page of flat lines. Tagged PDFs now yield real `heading` (with correct levels), `table`/`row`/`cell`, `list` and footnote/endnote `note` nodes, and one `paragraph` per paragraph. Untagged PDFs recover the same structure geometrically. Multi-column and float-beside-text pages are read in the correct order (recursive XY-cut), broken and glued words are fixed from inter-fragment spacing, super/subscripts and hyphenated line-breaks are rejoined, rotated text is recovered, and internal links resolve to the target section. `.to('text')` is **layout-faithful by default**, rendering each page as a spatial grid so columns and tables line up like the source. Optional per-run color/highlight extraction and merged-cell (`colSpan`/`rowSpan`) recovery round it out, and every node carries page geometry (`bounds`).
+- **Rebuilt PDF text extraction.** PDF is no longer treated as a page of flat lines. Tagged PDFs now yield real `heading` (with correct levels), `table`/`row`/`cell`, `list` and footnote/endnote `note` nodes, and one `paragraph` per paragraph. Untagged PDFs recover the same structure geometrically. Multi-column and float-beside-text pages are read in the correct order (recursive XY-cut), broken and glued words are fixed from inter-fragment spacing, super/subscripts and hyphenated line-breaks are rejoined, rotated text is recovered, and internal links resolve to the target section. `.to('text')` is **layout-faithful by default**, rendering each page as a spatial grid so columns and tables line up like the source. Per-run color/highlight extraction (on by default; set `pdfParserConfig.extractTextColor: false` to skip it) and merged-cell (`colSpan`/`rowSpan`) recovery round it out, and every node carries page geometry (`bounds`).
 - **Password-protected documents.** Encrypted PDF, OOXML (`docx`/`xlsx`/`pptx`) and ODF (`odt`/`ods`/`odp`/`odg`) open through one unified `password` / `onPassword` option, across parsing, conversion and templating.
 - **Native DOCX & ODT generation**, plus a **native PDF engine** (`pdfConfig.engine: 'native'`, built on `pdf-lib`) that produces real PDF bytes with no headless browser, in Node and the browser alike.
 - **Templates / mail-merge** via `OfficeTemplate.render` (fill a DOCX template's `{{placeholders}}`, single or batch), and **ODG parsing** (LibreOffice Draw).
@@ -106,8 +106,8 @@ npx officeparser /path/to/file.docx --to=text
 # Convert DOCX to Markdown and save
 npx officeparser report.docx --to=md --output=report.md
 
-# Convert PPTX to HTML (using a bare flag for ocr)
-npx officeparser presentation.pptx --to=html --output=preview.html --ocr
+# Convert PPTX to HTML with OCR (OCR runs over extracted images, so --extractAttachments is required)
+npx officeparser presentation.pptx --to=html --output=preview.html --ocr --extractAttachments
 
 # Convert XLSX to CSV with a custom delimiter
 npx officeparser data.xlsx --to=csv --csvDelimiter=";"
@@ -140,7 +140,7 @@ npx officeparser my_document --fileType=docx --to=json
 | `--to` | `json\|text\|md\|html\|csv\|rtf\|pdf\|docx\|odt\|epub\|chunks` | `json` | Output format |
 | `--output` | path | (none) | Write output to a file |
 | `--fileType` | `docx\|xlsx\|pptx\|odt\|odp\|ods\|odg\|pdf\|rtf\|csv\|md\|html\|epub` | (none) | Explicitly override input file type detection |
-| `--ocr` | boolean | `false` | Enable OCR for images |
+| `--ocr` | boolean | `false` | Enable OCR for images (also requires `--extractAttachments`; OCR runs over extracted images) |
 | `--ocrConfig.language` | string | `eng` | Tesseract language(s), e.g. `deu` or `eng+fra` |
 | `--ocrConfig.preserveLayout` | boolean | `true` | Keep the line layout of recognized text |
 | `--password` | string | (none) | Password for an encrypted document (PDF, OOXML, or ODF) |
@@ -436,7 +436,7 @@ const { value: csv } = await OfficeGenerator.generate(ast, 'csv');
 
 ## OfficeConverter: One-Step API
 
-`OfficeConverter.convert()` combines parsing and generation in a single call. It automatically syncs parser options from generator config (e.g., enables `extractAttachments` when images are requested).
+`OfficeConverter.convert()` combines parsing and generation in a single call. It automatically syncs parser options from the generator config: unless you set `parseConfig.extractAttachments` explicitly, it is enabled when the output will render images or charts, or when you enable `parseConfig.ocr`. An explicit `parseConfig.extractAttachments` (including `false`) always wins, and `parseConfig.ocr` is honored (so `{ parseConfig: { ocr: true } }` produces OCR text through the converter, given an image-or-OCR output mode).
 
 ```ts
 import { OfficeConverter } from 'officeparser';
@@ -667,6 +667,66 @@ try {
 > `ast.warnings` (`NO_WORKSHEETS_FOUND` for a chartsheet-only workbook, `NO_SLIDES_FOUND` for a
 > presentation with no slides).
 
+#### Warning codes (`type: 'warning' | 'info'`, delivered to `onWarning` and collected in `ast.warnings`)
+
+These never throw; they report a degraded-but-successful outcome you may branch on by `code`.
+
+| Code | Phase | Meaning / what to do |
+|---|---|---|
+| `OCR_REQUIRES_ATTACHMENTS` | parse | `ocr: true` without `extractAttachments: true`; no OCR ran. Set both. |
+| `PDF_NO_TEXT_EXTRACTED` | parse | A PDF yielded ~no text (likely scanned). Set `ocr: true` + `extractAttachments: true`. |
+| `PDF_STRUCT_TREE_UNRELIABLE` | parse | PDF tag tree absent/incomplete; structure recovered geometrically. |
+| `PDF_TEXT_ENCODING_SUSPECT` | parse | PDF glyphs mostly unmappable (broken ToUnicode); text may be garbage. Consider OCR. |
+| `PDF_OUTLINE_TRUNCATED` | parse | Bookmark outline hit the depth/size cap; `ast.auxiliary.outline` is partial. |
+| `PDF_WORKER_MISSING` / `PDF_WORKER_FALLBACK` | parse | The pdf.js worker could not be loaded / a fallback was used (set `pdfWorkerSrc`). |
+| `NO_WORKSHEETS_FOUND` / `NO_SLIDES_FOUND` | parse | A legitimately empty workbook/presentation. |
+| `TABLE_CELL_LIMIT_EXCEEDED` | parse | A table exceeded `decompressionLimits.maxTableCells`; it was clamped. |
+| `IMAGE_EXTRACTION_FAILED` / `IMAGE_PROCESSING_FAILED` / `ATTACHMENT_EXTRACTION_FAILED` | parse | An image/attachment could not be extracted or decoded; it was skipped or degraded. |
+| `ANNOTATION_EXTRACTION_FAILED` / `CHART_DATA_EXTRACTION_FAILED` | parse | A PDF annotation / a chart's data could not be read. |
+| `OCR_FAILED` | parse | OCR ran but failed for an image (see `details`). |
+| `FILE_TYPE_DETECTION_FAILED` / `BUFFER_TYPE_MISMATCH` | parse | Type could not be sniffed / disagreed with the `fileType` hint. |
+| `PASSWORD_REQUIRED` / `PASSWORD_INCORRECT` | parse | Encrypted input; supply `password`/`onPassword` (these also throw when parsing cannot continue). |
+| `UNRECOGNIZED_CONFIG_OPTION` | config | A config key this version does not know (often a typo or a removed/renamed option); it had no effect. |
+| `CONTENT_NOT_REPRESENTABLE` | generate | A node type has no faithful form in the target format and was downgraded or omitted (e.g. math/embeds in DOCX/ODT, a table-less document to CSV). |
+| `METADATA_NOT_REPRESENTABLE` | generate | A metadata field could not be represented in the target format. |
+| `IMAGE_NOT_INLINED` | generate | An image over `maxInlineImageBytes` was referenced by name instead of inlined (Markdown / fragment HTML). |
+| `PDF_GENERATION_FAILED` | generate | PDF generation failed (e.g. Puppeteer missing for `engine: 'html'`). |
+| `INVALID_STYLE_MAPPING` / `INVALID_STYLE_MAP_TAG` | generate | A `styleMap` entry/tag was invalid and ignored. |
+| `TEMPLATE_UNSUPPORTED_FORMAT` / `TEMPLATE_FIELD_MISSING` | template | The template format is unsupported / a `{{field}}` had no value under `onMissing: 'error'`. |
+
+The full enum lives in `OfficeWarningType` / `OfficeErrorType` (`src/types.ts`); the error codes used in the `catch` above are the `OfficeErrorType` members.
+
+---
+
+## Per-Format Capability Matrix
+
+What each parser extracts differs by format, because the source formats themselves differ. This table
+is the authoritative reference; the option docs point back to it. `Y` = extracted by default (subject to
+the relevant `ignore*`/`extractAttachments` flag), `–` = the format has no such construct or it is not
+extracted (the matching `ignore*` flag is then a no-op).
+
+| Input | Comments (`node.comments`) | Notes (`node.notes`) | Headers/footers (`ast.auxiliary`) | Slide masters | Images (needs `extractAttachments`) | Charts | Tables (colSpan/rowSpan) |
+|---|---|---|---|---|---|---|---|
+| DOCX | Y | footnotes/endnotes | Y | – | Y | Y | Y |
+| XLSX | Y | – | – | – | Y | Y | grid |
+| PPTX | Y | speaker notes | – | Y | Y | Y | Y |
+| ODT  | Y (in text) | footnotes/endnotes | Y (master pages) | – | Y | Y | Y |
+| ODS  | Y (cell notes) | – | – | – | Y | Y | grid |
+| ODP  | Y (page) | speaker notes | – | – (ODP masters not extracted) | Y | Y | Y |
+| ODG  | Y (page) | – | – | – | Y | – | Y |
+| PDF  | – | footnotes/endnotes (tagged) | Y (top/bottom bands) | – | Y | – | Y (tagged) |
+| RTF  | – | footnotes/endnotes | – (dropped) | – | Y | – | Y |
+| HTML | – | footnotes/endnotes | – | – | Y (`data:` only) | – | Y |
+| MD   | – | footnotes/endnotes | – | – | Y (`data:` only) | – | Y (HTML-table fallback) |
+| CSV  | `#`-rows become `comment` nodes* | – | – | – | – | – | rows |
+| EPUB | – | footnotes/endnotes | – | – | Y | – | Y |
+
+Notes: comments land on `node.comments[]` (with `author`/`date`) except CSV, whose leading-`#` rows
+become top-level `comment` nodes and are *not* governed by `ignoreComments`. `ignoreNotes` /
+`ignoreComments` / `ignoreHeadersAndFooters` / `ignoreSlideMasters` each remove the corresponding
+column and are a no-op wherever it shows `–`. OCR (`ocr: true`) recognizes text from any extracted
+image and therefore also needs `extractAttachments: true`.
+
 ---
 
 ## Deep Dive: Document Components
@@ -702,7 +762,7 @@ Table Node (type: 'table')
 ```
 
 - `row` / `col`: zero-based grid position
-- `rowSpan` / `colSpan`: merged cells (primarily ODF formats)
+- `rowSpan` / `colSpan`: merged cells (DOCX, ODF, HTML, Markdown HTML-tables, and tagged PDF)
 - Cells can contain nested tables
 
 ### 3. Images & OCR
@@ -967,7 +1027,7 @@ Set `ignoreComments: true` to skip extraction.
 const slide = ast.content.find(n => n.type === 'slide');
 console.log(slide?.notes?.map(n => n.text));
 
-// Footnotes and endnotes (DOCX/RTF) can be deeply nested, so we traverse recursively:
+// Footnotes and endnotes (DOCX, ODT, RTF, PDF, HTML, Markdown, EPUB) can be deeply nested, so we traverse recursively:
 const printNotes = (nodes: OfficeContentNode[]) => {
     nodes.forEach(node => {
         if (node.notes) {
@@ -1061,10 +1121,10 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `newlineDelimiter` | `string` | `'\n'` | Delimiter inserted between lines in text output |
 | `password` | `string` | `''` | Password for a password-protected document. Applies to every encryptable format: PDF, encrypted OOXML (`.docx`/`.xlsx`/`.pptx`, ECMA-376 agile or standard AES), and encrypted ODF (`.odt`/`.ods`/`.odp`/`.odg`, AES-CBC with PBKDF2). A missing password rejects with `PASSWORD_REQUIRED`, a wrong one with `PASSWORD_INCORRECT`. Ignored for unencrypted files. *ODF note:* LibreOffice 24.8+ defaults to AES-256-GCM with Argon2id key derivation ("wholesome encryption"), which is not supported and rejects with `DOCUMENT_DECRYPTION_FAILED`; re-save with the classic AES-CBC/PBKDF2 scheme (or an earlier LibreOffice) to parse it |
 | `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted document needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Works for every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's `onPassword` |
-| `ignoreNotes` | `boolean` | `false` | Ignore footnotes/endnotes (DOCX, RTF) and speaker notes (PPTX/ODP) |
-| `ignoreComments` | `boolean` | `false` | **New**: Ignore inline comments/annotations (DOCX, XLSX, PPTX), attached by default via `node.comments[]` |
-| `ignoreHeadersAndFooters` | `boolean` | `false` | **New**: Skip DOCX headers & footers (populated in `ast.auxiliary.headers/footers` by default) |
-| `ignoreSlideMasters` | `boolean` | `false` | **New**: Skip PPTX slide masters (populated in `ast.auxiliary.slideMasters` by default) |
+| `ignoreNotes` | `boolean` | `false` | Ignore footnotes/endnotes (DOCX, ODT, RTF, PDF, HTML, Markdown, EPUB) and speaker notes (PPTX/ODP). See the [capability matrix](#per-format-capability-matrix) |
+| `ignoreComments` | `boolean` | `false` | Ignore comments/annotations, attached by default via `node.comments[]`. Applies to DOCX, XLSX, PPTX and every ODF type (ODT/ODS/ODP/ODG). See the [capability matrix](#per-format-capability-matrix) |
+| `ignoreHeadersAndFooters` | `boolean` | `false` | Skip headers & footers (populated in `ast.auxiliary.headers/footers` by default). Extracted for DOCX, PDF and ODT only; a no-op for ODS/ODP/ODG, XLSX, PPTX and RTF. See the [capability matrix](#per-format-capability-matrix) |
+| `ignoreSlideMasters` | `boolean` | `false` | Skip PPTX slide masters (populated in `ast.auxiliary.slideMasters` by default). PPTX only; ODP masters are not extracted |
 | `extractAttachments` | `boolean` | `false` | Populate `ast.attachments` with Base64 images/charts |
 | `ocr` | `boolean` | `false` | Run Tesseract OCR on images (requires `extractAttachments: true`) |
 | `ocrConfig` | `OcrConfig` | `{}` | OCR worker pool settings (see [OCR section](#ocr-scheduler--resource-management)) |
@@ -1273,15 +1333,20 @@ Pass as `pdfConfig` inside `GeneratorConfig`. The default `'html'` engine requir
 | `format` | `string` | `'A4'` | Paper format (`'A4'`, `'Letter'`, `'Legal'`, etc.) |
 | `width` | `string \| number` | `''` | Paper width (e.g., `'5in'`, `'3cm'`) or pixels |
 | `height` | `string \| number` | `''` | Paper height (e.g., `'5in'`, `'3cm'`) or pixels |
-| `landscape` | `boolean` | `false` | Landscape page orientation |
-| `printBackground` | `boolean` | `true` | Print background graphics |
-| `margin` | `object` | `{0,0,0,0}` | Page margins (`top`, `right`, `bottom`, `left`) |
-| `displayHeaderFooter` | `boolean` | `false` | Show print header/footer |
-| `headerTemplate` | `string` | `''` | HTML template for the print header |
-| `footerTemplate` | `string` | `''` | HTML template for the print footer |
-| `scale` | `number` | `1` | Rendering scale factor |
-| `launchOptions` | `object` | headless defaults | Puppeteer launch options (e.g., `executablePath`) |
-| `timeout` | `number` | `30000` | PDF rendering timeout in milliseconds. Set to `0` to disable. |
+| `landscape` | `boolean` | `false` | Landscape page orientation (both engines) |
+| `printBackground` | `boolean` | `true` | Print background graphics. **HTML engine only** |
+| `margin` | `object` | see note | Page margins (`top`, `right`, `bottom`, `left`). Default differs by engine: the HTML engine uses `0` (the body carries its own padding); the native engine uses a small default (~48pt) so text is not glued to the sheet edge. An explicit value (including `0`) is honored by both |
+| `displayHeaderFooter` | `boolean` | `false` | Show print header/footer. **HTML engine only** |
+| `headerTemplate` | `string` | `''` | HTML template for the print header. **HTML engine only** |
+| `footerTemplate` | `string` | `''` | HTML template for the print footer. **HTML engine only** |
+| `scale` | `number` | `1` | Rendering scale factor. **HTML engine only** |
+| `launchOptions` | `object` | headless defaults | Puppeteer launch options (e.g., `executablePath`). **HTML engine only** |
+| `timeout` | `number` | `30000` | PDF rendering timeout in milliseconds. Set to `0` to disable. **HTML engine only** |
+
+> **Native engine (`engine: 'native'`) differences beyond fidelity:** it ignores the Puppeteer-only
+> options above (and `tagged`/`outline`), uses a non-zero default `margin`, does not render charts,
+> and does not apply `renderMetadata`. Choose it to avoid the headless browser; choose `'html'` for
+> pixel-matching fidelity, charts, print headers/footers and PDF/UA tags.
 
 ### DocxGeneratorConfig
 
@@ -1330,7 +1395,7 @@ Pass as `csvConfig` inside `GeneratorConfig`.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `sheets` | `string` | `''` | Sheet range to export: `'1'`, `'1-3'`, `'1,3'` (1-based). Empty = all sheets |
-| `mergeSheets` | `boolean` | `true` | Merge all sheets into one CSV. If `false`, returns a ZIP archive |
+| `mergeSheets` | `boolean` | `true` | Merge all sheets into one CSV. When more than one sheet is merged, each is preceded by a `# Sheet: <name>` marker row and followed by a blank line (officeParser's own CSV parser reads these back as `comment` nodes; Excel/pandas read them as data rows). If `false`, returns a ZIP archive with one CSV per sheet and no markers |
 | `columnDelimiter` | `string` | `','` | Output column delimiter |
 
 ### TextGeneratorConfig
