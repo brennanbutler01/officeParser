@@ -27,6 +27,9 @@ export class CsvGenerator extends BaseGenerator<'csv'> {
         const sheetNodes = await this.collectSheetLikeNodes(this.ast.content);
 
         if (sheetNodes.length === 0) {
+            // "An empty result is never silent": the document carried no sheet or table for CSV to
+            // export (CSV output is tabular-content only), so surface it rather than returning ''.
+            this.warn(OfficeWarningType.CONTENT_NOT_REPRESENTABLE, { feature: 'a document with no spreadsheet or table', format: 'csv' });
             return { value: '', messages: this.messages };
         }
 

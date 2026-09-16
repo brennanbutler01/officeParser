@@ -375,6 +375,15 @@ export function resolveGeneratorConfig<D extends string>(
             // We ensure the resolved config reflects this if possible, or generators can check astConfig directly.
             // Since FullGeneratorConfig doesn't have an 'mdConfig', we rely on the generator implementation.
         }
+
+        // Inherit the parse-side `csvDelimiter` into CSV output when the user did not set the
+        // generator's `csvConfig.columnDelimiter`, so `parseOffice(f, { csvDelimiter: ';' }).to('csv')`
+        // matches the CLI's `--csvDelimiter=';'` (which wires the same propagation). Precedence:
+        // csvConfig.columnDelimiter > csvDelimiter > ','.
+        const astCsvDelim = astConfig.csvDelimiter;
+        if (astCsvDelim && destination === 'csv' && (userConfig as any)?.csvConfig?.columnDelimiter === undefined) {
+            config.csvConfig.columnDelimiter = astCsvDelim;
+        }
     }
 
     validateHtmlConfigWidth(config.htmlConfig, config);

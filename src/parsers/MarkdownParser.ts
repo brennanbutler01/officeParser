@@ -410,6 +410,10 @@ export const parseMarkdown = async (buffer: Buffer, config: FullOfficeParserConf
             } else if (g.footnoteId !== undefined) { // Footnote reference
                 const noteId = g.footnoteId;
                 referencedFootnoteIds.add(noteId);
+                // ignoreNotes drops footnotes at parse time (as in DOCX/ODT/PDF): swallow the marker and
+                // attach nothing. Advance lastIndex past the marker (so the gap text is not re-emitted)
+                // before skipping. The orphan sweep below is likewise skipped.
+                if (config.ignoreNotes) { lastIndex = regex.lastIndex; continue; }
                 // Reuse the same note object across every reference to this id (see the map's
                 // declaration): the first reference builds the body, the rest share it, so the
                 // generators assign one key and emit one definition.
@@ -1246,6 +1250,7 @@ export const parseMarkdown = async (buffer: Buffer, config: FullOfficeParserConf
     // marker or dangling back-link. Both generators still emit the definition (md: a `[^x]:` line;
     // html: a `div[data-footnote-id]` inside `section[data-footnotes]`, which re-parses on import).
     for (const [id, definition] of footnoteDefinitions) {
+        if (config.ignoreNotes) break; // ignoreNotes drops footnotes, orphan definitions included
         if (referencedFootnoteIds.has(id)) continue;
         const noteChildren = parseInline(definition);
         content.push({

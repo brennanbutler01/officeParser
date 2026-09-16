@@ -973,13 +973,10 @@ export const parsePdf = async (buffer: Buffer, config: FullOfficeParserConfig): 
     // `ocr` alone - without extractAttachments - collects nothing and must NOT raise this). When we do
     // need pixels, cap at a generous 40 megapixels so a decompression-bomb image (a few bytes of
     // headers declaring enormous dimensions) cannot drive a multi-GB, uncatchable allocation.
+    // `ocr: true` without `extractAttachments: true` collects no images, so no OCR runs and no page
+    // image is decoded for it. The OCR_REQUIRES_ATTACHMENTS warning is raised centrally in OfficeParser
+    // (it applies to every format, not just PDF), so it is not repeated here.
     const maxImageSize = config.extractAttachments ? 40_000_000 : 1;
-
-    // `ocr: true` without `extractAttachments: true` collects no images, so no OCR can run: warn once
-    // rather than silently doing nothing (and now doing it without decoding every page image for it).
-    if (config.ocr && !config.extractAttachments) {
-        logWarning(OfficeWarningType.OCR_REQUIRES_ATTACHMENTS, config);
-    }
 
     // Open the document, retrying with an onPassword-supplied password when the PDF is encrypted.
     while (true) {

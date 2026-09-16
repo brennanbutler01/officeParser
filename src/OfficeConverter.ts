@@ -65,8 +65,9 @@ export class OfficeConverter {
             onWarning: config?.onWarning || config?.parseConfig?.onWarning,
         };
 
-        // Remove OCR settings for the streamlined converter as requested
-        parserConfig.ocr = false;
+        // Whether the caller pinned `extractAttachments` explicitly (true OR false); an explicit value
+        // always wins over the auto-sync below. Captured before the undefined-key prune.
+        const callerSetAttachments = config?.parseConfig?.extractAttachments !== undefined;
 
         // Remove undefined keys to prevent overwriting defaults in resolveParserConfig
         (Object.keys(parserConfig) as (keyof OfficeParserConfig)[]).forEach(
@@ -75,15 +76,19 @@ export class OfficeConverter {
 
         /**
          * AUTOMATIC CONFIGURATION SYNC
-         * We sync extractAttachments from the generator configuration.
+         * `parseConfig.ocr` is honored (it is no longer forced off). We sync `extractAttachments` from
+         * the generator configuration unless the caller set it explicitly.
          */
-        // Extract attachments when the generator will render an image or its OCR text (any
-        // includeImages mode except false/'none'), or when charts are included.
-        const im = config?.generatorConfig?.includeImages;
-        // Resolve through the shared mapper so a CLI-style `'false'` string (and `'none'`) is honored,
-        // not just the boolean/'none' literals - otherwise `--includeImages=false` still extracts.
-        const wantsImageOrText = resolveImageMode(im) !== 'none';
-        parserConfig.extractAttachments = wantsImageOrText || (config?.generatorConfig?.includeCharts !== false);
+        if (!callerSetAttachments) {
+            // Extract attachments when the generator will render an image or its OCR text (any
+            // includeImages mode except false/'none'), when charts are included, or when the caller
+            // enabled OCR (which needs the extracted images to run over).
+            const im = config?.generatorConfig?.includeImages;
+            // Resolve through the shared mapper so a CLI-style `'false'` string (and `'none'`) is honored,
+            // not just the boolean/'none' literals - otherwise `--includeImages=false` still extracts.
+            const wantsImageOrText = resolveImageMode(im) !== 'none';
+            parserConfig.extractAttachments = wantsImageOrText || (config?.generatorConfig?.includeCharts !== false) || !!parserConfig.ocr;
+        }
 
         // 2. Parse the source document into the universal AST
         const ast = await OfficeParser.parseOffice(file, parserConfig);

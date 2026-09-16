@@ -548,6 +548,9 @@ export const parseHtml = async (buffer: Buffer, config: FullOfficeParserConfig):
                     if (child.type === 'element' && child.tagName === 'sup' && child.attributes?.['data-footnote-ref'] !== undefined) {
                         const key = child.attributes['data-footnote-ref'];
                         referencedFootnoteKeys.add(key);
+                        // ignoreNotes drops footnotes at parse time (as in DOCX/ODT/PDF): skip the marker
+                        // and attach nothing. The orphan sweep below is likewise skipped.
+                        if (config.ignoreNotes) continue;
                         const definition = footnoteDefinitions.get(key);
                         const noteNode: OfficeContentNode = {
                             type: 'note',
@@ -1282,6 +1285,7 @@ export const parseHtml = async (buffer: Buffer, config: FullOfficeParserConfig):
     // same shape MarkdownParser produces, so md -> html -> md preserves the definition instead of
     // turning it into junk text with a dead back-link.
     for (const [key, definition] of footnoteDefinitions) {
+        if (config.ignoreNotes) break; // ignoreNotes drops footnotes, orphan definitions included
         if (referencedFootnoteKeys.has(key)) continue;
         content.push({
             type: 'note',

@@ -282,6 +282,13 @@ export class OfficeParser {
             const ODF_TEMPLATE_EXT: Record<string, string> = { ott: 'odt', ots: 'ods', otp: 'odp', otg: 'odg' };
             const routedExt = ODF_TEMPLATE_EXT[ext.toLowerCase()] || ext.toLowerCase();
 
+            // OCR runs over extracted images in EVERY format (not just PDF), so `ocr: true` without
+            // `extractAttachments: true` performs no OCR anywhere. Warn once, centrally, so the no-op is
+            // never silent regardless of format (previously only the PDF parser warned).
+            if (internalConfig.ocr && !internalConfig.extractAttachments) {
+                logWarning(OfficeWarningType.OCR_REQUIRES_ATTACHMENTS, internalConfig);
+            }
+
             let result: OfficeParserAST;
             switch (routedExt) {
                 case 'docx':

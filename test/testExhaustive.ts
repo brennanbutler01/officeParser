@@ -1364,6 +1364,50 @@ async function testOdfComments(): Promise<void> {
     assert.strictEqual(bodied[0].children![0], bodied[1].children![0], 'ODT embedded repeat: repeated cells share the child node by reference (no per-cell duplication)');
 }
 
+/**
+ * Cross-format consistency guarantees a user relies on (from the consistency review): an option must
+ * not silently no-op where a user would expect it to work, and the CLI and library must agree.
+ */
+async function testConsistencyBehaviors(): Promise<void> {
+    const warnCodes = (fn: (onWarning: (i: any) => void) => Promise<any>) => (async () => {
+        const codes: string[] = [];
+        await fn((i) => codes.push(i.code));
+        return codes;
+    })();
+
+    // A-1: `ocr: true` without `extractAttachments` warns in EVERY format, not just PDF.
+    const ocrCodes = await warnCodes(onWarning =>
+        OfficeParser.parseOffice(Buffer.from('# Hi\n\ntext'), { fileType: 'md', ocr: true, onWarning }));
+    assert.ok(ocrCodes.includes('OCR_REQUIRES_ATTACHMENTS'), `ocr without extractAttachments warns for a non-PDF format; got ${ocrCodes.join(',')}`);
+
+    // B-1: `ignoreNotes` removes Markdown footnotes (previously a silent no-op).
+    const md = 'See this.[^1]\n\n[^1]: The footnote body.\n';
+    const kept = collectAllNodes(await OfficeParser.parseOffice(Buffer.from(md), { fileType: 'md' }));
+    const dropped = collectAllNodes(await OfficeParser.parseOffice(Buffer.from(md), { fileType: 'md', ignoreNotes: true }));
+    assert.ok(kept.some(n => n.type === 'note'), 'md footnote is a note node by default');
+    assert.ok(!dropped.some(n => n.type === 'note'), 'ignoreNotes removes md footnote nodes');
+    assert.ok(!JSON.stringify(dropped).includes('The footnote body'), 'ignoreNotes leaves no md footnote text behind');
+
+    // B-1 (HTML): same for a data-footnotes section.
+    const html = '<p>See<sup data-footnote-ref="1">1</sup></p><section data-footnotes><div data-footnote-id="1"><p>Body.</p></div></section>';
+    const htmlDropped = collectAllNodes(await OfficeParser.parseOffice(Buffer.from(html), { fileType: 'html', ignoreNotes: true }));
+    assert.ok(!htmlDropped.some(n => n.type === 'note'), 'ignoreNotes removes html footnote nodes');
+
+    // A-3: parse-side csvDelimiter reaches CSV output in the library, matching the CLI.
+    const tableMd = '| a | b |\n| - | - |\n| 1 | 2 |\n';
+    const semi = String((await (await OfficeParser.parseOffice(Buffer.from(tableMd), { fileType: 'md', csvDelimiter: ';' })).to('csv')).value);
+    assert.ok(/1;2/.test(semi), `csvDelimiter reaches to('csv'); got ${JSON.stringify(semi)}`);
+    // csvConfig.columnDelimiter still wins over the inherited csvDelimiter.
+    const pipe = String((await (await OfficeParser.parseOffice(Buffer.from(tableMd), { fileType: 'md', csvDelimiter: ';' })).to('csv', { csvConfig: { columnDelimiter: '|' } } as any)).value);
+    assert.ok(/1\|2/.test(pipe), `csvConfig.columnDelimiter overrides csvDelimiter; got ${JSON.stringify(pipe)}`);
+
+    // E-1: to('csv') on a document with no table/sheet warns instead of returning '' silently.
+    const csvCodes: string[] = [];
+    const emptyCsv = await (await OfficeParser.parseOffice(Buffer.from('# Just a heading\n\nprose only'), { fileType: 'md' })).to('csv', { onWarning: (i: any) => csvCodes.push(i.code) } as any);
+    assert.strictEqual(String(emptyCsv.value), '', 'no-table CSV is empty');
+    assert.ok(csvCodes.includes('CONTENT_NOT_REPRESENTABLE'), `empty CSV warns; got ${csvCodes.join(',')}`);
+}
+
 // A minimal valid 1x1 PNG (sniffs to 1x1, Tesseract-independent) for image-bearing synthetic ASTs.
 const TINY_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
@@ -1897,6 +1941,7 @@ async function runTests(): Promise<void> {
         ['GeneratedOutput', testGeneratedOutput],
         ['ODG', testOdg],
         ['ODFComments', testOdfComments],
+        ['ConsistencyBehaviors', testConsistencyBehaviors],
         ['DOCX', testDocxGeneration],
         ['ODT', testOdtGeneration],
         ['OfficeGenUtils', testOfficeGenUtils],
