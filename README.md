@@ -180,7 +180,7 @@ npx officeparser my_document --fileType=docx --to=json
 | ~~`--outputErrorToConsole`~~ | | | **Removed in v8.** Use `--verbose`. |
 
 Every removed flag above exits with status 1 and prints its replacement, rather than being accepted
-and ignored. An unrecognized or renamed **config** key (say `--ignoreBounds`) is not fatal, but the
+and ignored. An unrecognized or renamed **config** key (say `--ocrConfig.autoTerminateTimeout`) is not fatal, but the
 CLI always prints the warning naming its replacement, with or without `--verbose`.
 
 ---

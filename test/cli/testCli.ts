@@ -721,20 +721,20 @@ async function runTests() {
     //     the default no-op handler), and the CLI only printed warnings under --verbose.
     console.log('Test 43: Renamed option surfaces in ast.warnings and on stderr');
     const t43 = Date.now();
-    const res43 = runCli(['--ignoreBounds=true']);
+    const res43 = runCli(['--ocrConfig.autoTerminateTimeout=5000']);
     const d43 = Date.now() - t43;
     try {
         const json = JSON.parse(res43.stdout);
         const warn = (json.warnings || []).find((w: any) => w.code === 'UNRECOGNIZED_CONFIG_OPTION');
-        if (warn && /ignoreBounds/.test(warn.message) && /ignorePageGeometry/.test(warn.message)) {
+        if (warn && /ocrConfig\.autoTerminateTimeout/.test(warn.message) && /ocrConfig\.timeout\.autoTerminate/.test(warn.message)) {
             results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'PASS', details: 'Warning names both the old key and its replacement', duration: d43 });
         } else {
-            results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'FAIL', details: `Expected UNRECOGNIZED_CONFIG_OPTION naming ignorePageGeometry, got: ${JSON.stringify(json.warnings)?.slice(0, 90)}`, duration: d43 });
+            results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'FAIL', details: `Expected UNRECOGNIZED_CONFIG_OPTION naming ocrConfig.timeout.autoTerminate, got: ${JSON.stringify(json.warnings)?.slice(0, 90)}`, duration: d43 });
         }
     } catch (e) {
         results.push({ name: 'Warnings: renamed key reaches ast.warnings without onWarning', status: 'FAIL', details: 'Failed to parse JSON', duration: d43 });
     }
-    if (res43.stderr.includes('UNRECOGNIZED_CONFIG_OPTION') && res43.stderr.includes('ignorePageGeometry')) {
+    if (res43.stderr.includes('UNRECOGNIZED_CONFIG_OPTION') && res43.stderr.includes('ocrConfig.timeout.autoTerminate')) {
         results.push({ name: 'CLI: unrecognized option printed without --verbose', status: 'PASS', details: 'Warning found on stderr', duration: 0 });
     } else {
         results.push({ name: 'CLI: unrecognized option printed without --verbose', status: 'FAIL', details: `stderr: ${res43.stderr.slice(0, 80)}`, duration: 0 });

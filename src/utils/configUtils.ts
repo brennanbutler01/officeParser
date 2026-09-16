@@ -32,7 +32,6 @@ const RECOGNIZED_PARSER_KEYS = new Set(Object.keys(DEFAULT_OFFICE_PARSER_CONFIG)
  * Nested keys are spelled with their full dotted path, matching how the check below reports them.
  */
 const RENAMED_PARSER_KEYS: Record<string, string> = {
-    ignoreBounds: 'ignorePageGeometry',
     ocrLanguage: 'ocrConfig.language',
     outputErrorToConsole: 'onWarning',
     putNotesAtLast: '(removed; notes are attached to the node they belong to, as node.notes)',
