@@ -75,7 +75,7 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
             <tr>
                 <td><code>fileType</code></td>
                 <td><code>'docx'</code></td>
-                <td><code>—</code></td>
+                <td><code>(none)</code></td>
                 <td>Optional format hint. Only <code>'docx'</code> is currently supported; it is surfaced in the
                     unsupported-format error message when a non-DOCX template is passed.</td>
             </tr>
@@ -98,14 +98,14 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
             <tr>
                 <td><code>password</code></td>
                 <td><code>string</code></td>
-                <td><code>—</code></td>
+                <td><code>(none)</code></td>
                 <td>Decrypts the template first if it is itself password-protected (encrypted OOXML). A missing/wrong
                     password rejects with <code>PASSWORD_REQUIRED</code>/<code>PASSWORD_INCORRECT</code>.</td>
             </tr>
             <tr>
                 <td><code>onPassword</code></td>
                 <td><code>(reason) =&gt; string | undefined</code></td>
-                <td><code>—</code></td>
+                <td><code>(none)</code></td>
                 <td>Called (with <code>'required'</code> or <code>'incorrect'</code>) when <code>password</code> did not
                     decrypt the template, to supply one lazily; return a password to retry, or <code>undefined</code> to give
                     up. Same capped-retry behaviour as the parser's <code>onPassword</code>.</td>
@@ -120,7 +120,7 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));</code></pre>
             <tr>
                 <td><code>decompressionLimits</code></td>
                 <td><code>DecompressionLimits</code></td>
-                <td><code>—</code></td>
+                <td><code>(none)</code></td>
                 <td>Bounds unzipping of an untrusted template exactly as parsing does; a zip-bomb template rejects with a
                     typed <code>ZIP_*</code> error rather than being mistaken for a non-DOCX file.</td>
             </tr>

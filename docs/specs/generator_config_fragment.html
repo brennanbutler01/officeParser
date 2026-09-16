@@ -425,7 +425,7 @@ await ast.to('md', {
         [!IMPORTANT]
         Two engines. The default <code>'html'</code> engine renders through a headless browser (Puppeteer in Node.js, the
         browser's own print engine in-page) for maximum fidelity. The <code>'native'</code> engine lays the AST out directly
-        with <code>pdf-lib</code> (an optional peer dependency) — no browser required, so it runs unchanged in Node and the
+        with <code>pdf-lib</code> (an optional peer dependency), no browser required, so it runs unchanged in Node and the
         browser and is the only way to produce a real PDF client-side. It honors the shared <code>includeImages</code>/​<code>onNode</code>
         options and the page options below, but draws with the Standard-14 fonts and a clean reflow rather than a pixel match.
         In the prebuilt browser bundle <code>pdf-lib</code> is stubbed so the bundle stays self-contained; for client-side native
@@ -446,7 +446,7 @@ await ast.to('md', {
                 <td><code>'html' | 'native'</code></td>
                 <td><code>'html'</code></td>
                 <td>Rendering engine. <code>'html'</code> uses a headless browser (Puppeteer in Node, in-page print in the
-                    browser) for fidelity; <code>'native'</code> lays out directly with <code>pdf-lib</code> — no browser, runs
+                    browser) for fidelity; <code>'native'</code> lays out directly with <code>pdf-lib</code>, no browser, runs
                     in Node and the browser, using the Standard-14 font families.</td>
             </tr>
             <tr>
