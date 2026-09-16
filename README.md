@@ -768,6 +768,14 @@ Table Node (type: 'table')
 - `rowSpan` / `colSpan`: merged cells (DOCX, ODF, HTML, Markdown HTML-tables, and tagged PDF)
 - Cells can contain nested tables
 
+> [!NOTE]
+> **Header rows.** A header row is flagged on its cells' metadata (`style: 'header'`, or `isHeader`),
+> set by the parsers that mark one (DOCX `w:tblHeader`, ODF `table:table-header-rows`, HTML `<th>`/
+> `<thead>`, tagged-PDF `TH`); generators read it through one shared heuristic (a marked row, or an
+> all-bold first row). One format-imposed asymmetry: a **Markdown** table always renders a header row
+> (the GFM `| --- |` separator is mandatory syntax), whereas **HTML** emits `<thead>` only for a
+> detected header. So a table with no real header prints a header in Markdown output but not in HTML.
+
 ### 3. Images & OCR
 
 ```text
@@ -869,6 +877,12 @@ used verbatim in preference to anything reconstructed from the presentation mark
 > concatenated reads as a different number rather than as obviously-missing content. Consumers that
 > index document text should treat `code` nodes carrying `math` as opaque LaTeX rather than
 > splitting them as words.
+
+**On generation**, an equation's fate depends on the target: HTML and Markdown keep it as LaTeX (a
+`$…$`/`$$…$$` delimited block or a `data-math` attribute); DOCX and ODT downgrade it to its LaTeX text
+and emit a `CONTENT_NOT_REPRESENTABLE` warning (no native OMML/ODF-math is written); plain text, RTF and
+the PDF engines render the LaTeX string as-is without a warning. So the LaTeX always survives, but only
+HTML/Markdown round-trip it as math.
 
 ### 7. Document Metadata
 
