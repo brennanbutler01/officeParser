@@ -947,7 +947,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                     const cellNode: OfficeContentNode = {
                         type: 'cell',
                         text: cellText,
-                        children: cellChildren.length > 0 ? (k === 0 ? cellChildren : JSON.parse(JSON.stringify(cellChildren))) : [],
+                        // Repeated columns share the (read-only) child nodes via a shallow array copy
+                        // rather than deep-copying them: a huge number-columns-repeated on a content-
+                        // bearing cell would otherwise duplicate the whole cell body per column (bytes the
+                        // cell-count budget does not charge), a multi-GB amplification and CPU hang.
+                        children: cellChildren.length > 0 ? (k === 0 ? cellChildren : cellChildren.slice()) : [],
                         metadata: {
                             row: rowIndex,
                             col: colIndex,
@@ -980,9 +984,11 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                 }
             }
 
-            // Add row(s) for repeated rows. Every repetition past the first deep-copies the
-            // whole cell array, so rows x cols is what actually exhausts memory; charge those
-            // copies against the same budget.
+            // Add row(s) for repeated rows. rows x cols cells are materialized (charged against the
+            // budget), but a repeated row shallow-clones each cell (own object + own metadata for the
+            // row-index fix below) and SHARES the read-only children/comments/text by reference; JSON
+            // deep-copying instead serialized every cell's full content per row, so a row of content-
+            // bearing cells built a multi-hundred-MB string (a RangeError / OOM the count budget missed).
             const allowedRows = cells.length === 0
                 ? (rowsRepeated > 0 ? 1 + cellBudget.take(rowsRepeated - 1) : 0)
                 : Math.min(rowsRepeated,
@@ -991,7 +997,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                 if ((k & 255) === 0) checkAbortSignal(config.abortSignal);
                 const rowNode: OfficeContentNode = {
                     type: 'row',
-                    children: k === 0 ? cells : JSON.parse(JSON.stringify(cells))
+                    children: k === 0 ? cells : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata }) as OfficeContentNode)
                 };
 
                 // Fix row indices for repeated rows

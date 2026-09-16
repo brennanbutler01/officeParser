@@ -1349,6 +1349,19 @@ async function testOdfComments(): Promise<void> {
     const commented = repCells.filter(c => c.comments && c.comments.length);
     assert.ok(commented.length >= 2, `ODS repeat: many cells carry the comment, got ${commented.length}`);
     assert.strictEqual(commented[0].comments![0], commented[1].comments![0], 'ODS repeat: repeated cells share the comment node by reference (no per-cell duplication)');
+
+    // Same amplification class in an EMBEDDED table (the general parseTable path, used by ODT/ODP/ODG):
+    // a content-bearing cell repeated across many columns must share its child nodes by reference, not
+    // deep-copy the whole cell body per column.
+    const odtMt = 'application/vnd.oasis.opendocument.text';
+    const embedded = `<?xml version="1.0"?><office:document-content ${NS}><office:body><office:text><table:table table:name="T"><table:table-row><table:table-cell table:number-columns-repeated="20000"><text:p>${note}</text:p></table:table-cell></table:table-row></table:table></office:text></office:body></office:document-content>`;
+    const embAst = await OfficeParser.parseOffice(pkg(odtMt, embedded), { fileType: 'odt' });
+    const embCells: OfficeContentNode[] = [];
+    const walkEmb = (n: OfficeContentNode) => { if (n.type === 'cell') embCells.push(n); (n.children || []).forEach(walkEmb); };
+    embAst.content.forEach(walkEmb);
+    const bodied = embCells.filter(c => c.children && c.children.length && c.children[0].text);
+    assert.ok(bodied.length >= 2, `ODT embedded repeat: many cells carry the body, got ${bodied.length}`);
+    assert.strictEqual(bodied[0].children![0], bodied[1].children![0], 'ODT embedded repeat: repeated cells share the child node by reference (no per-cell duplication)');
 }
 
 // A minimal valid 1x1 PNG (sniffs to 1x1, Tesseract-independent) for image-bearing synthetic ASTs.
