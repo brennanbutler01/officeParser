@@ -322,8 +322,10 @@ export interface CommonOfficeParserConfig {
      */
     ignoreSlideMasters?: boolean;
     /**
-     * Flag to extract attachments like images, charts, etc.
-     * Default is false.
+     * Flag to extract attachments like images, charts, etc. into `ast.attachments` (Base64). Default
+     * is false. It is also the switch that lets image bytes reach any generated output (HTML/EPUB embed,
+     * DOCX/ODT media, native PDF) and that OCR (`ocr: true`) runs over. HTML and Markdown input capture
+     * images only from `data:` URIs; a remote-URL image is referenced, not fetched.
      */
     extractAttachments?: boolean;
     /**
@@ -374,27 +376,29 @@ export interface CommonOfficeParserConfig {
      */
     preserveXmlWhitespace?: boolean;
     /**
-     * The URL/path to the PDF.js worker script.
+     * The URL/path to the PDF.js worker script, used only on the PDF path in the browser.
      *
-     * **Mandatory** when using PDF parsing in browser environments to avoid worker configuration errors.
-     * If not provided, it defaults to `https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs`.
-     * You can override this with your own local path or a different CDN link.
+     * Defaults to `https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.min.mjs`, so you only
+     * need to set it to point at a self-hosted copy when the CDN is unreachable or a CSP blocks it. The
+     * slim browser bundle ships no default, so there it is required for PDF parsing. Ignored in Node.
      */
     pdfWorkerSrc?: string;
     /**
-     * Flag to include break nodes in the AST.
-     * Supported for Word (`w:br`) and ODF (`fo:break-before`/`fo:break-after`, `text:soft-page-break`).
-     *
-     * Default is false
+     * Flag to include break nodes in the AST. Default is false.
+     * Applies to Word (`w:br`/`w:cr`) and ODF (`fo:break-before`/`fo:break-after`, `text:soft-page-break`),
+     * where breaks are otherwise invisible. HTML and Markdown always emit `break` nodes (a `<br>`/hard
+     * line break, and `<hr>`/`---` as a `thematic`/`page` break), since a break is content there; this
+     * flag does not gate those.
      */
     includeBreakNodes?: boolean;
     /**
      * Flag to ignore all internal (anchor) links during parsing.
-     * When true, all bookmarks, cross-references, and internal document jumps are stripped 
-     * from the AST. Only external URLs will be preserved.
-     * 
+     * When true, all bookmarks, cross-references, and internal document jumps are stripped
+     * from the AST. Only external URLs will be preserved. Honored at parse time by DOCX, ODF and PDF;
+     * HTML/Markdown anchors are handled by the generator-side flag of the same name instead.
+     *
      * Use this if you want a "flat" document without any internal interactivity.
-     * 
+     *
      * Default is false.
      */
     ignoreInternalLinks?: boolean;
@@ -618,13 +622,13 @@ export type OfficeParserConfig<F extends string = string> = CommonOfficeParserCo
 export interface DecompressionLimits {
     /**
      * Maximum allowed total uncompressed size (in bytes) of files extracted from a ZIP archive.
-     * Applies to OOXML (DOCX, XLSX, PPTX) and ODF (ODT, ODP, ODS) formats.
+     * Applies to every ZIP-backed input: OOXML (DOCX, XLSX, PPTX), ODF (ODT, ODS, ODP, ODG) and EPUB.
      * Default is 536870912 (512 MB).
      */
     maxUncompressedBytes?: number;
     /**
      * Maximum allowed number of entries (files and directories) in a ZIP archive.
-     * Applies to OOXML (DOCX, XLSX, PPTX) and ODF (ODT, ODP, ODS) formats.
+     * Applies to every ZIP-backed input: OOXML (DOCX, XLSX, PPTX), ODF (ODT, ODS, ODP, ODG) and EPUB.
      * Default is 10000.
      */
     maxZipEntries?: number;
@@ -843,21 +847,23 @@ export interface CommonGeneratorConfig {
     styleMap?: string[] | StructuredStyleMapping[];
     /**
      * Whether to include visual formatting like font size, font family, and colors in the output.
-     * Set to false for clean, semantic output.
-     * Defaults to true.
+     * Set to false for clean, semantic output. Defaults to true.
+     * Applies to the formatting-carrying generators: HTML, Markdown, DOCX, ODT and RTF (text/CSV/chunks
+     * carry no run formatting, so it is a no-op there).
      */
     includeFormatting?: boolean;
     /**
      * Whether to automatically generate unique slug-based IDs for headings.
-     * Useful for table-of-contents and anchor links.
-     * Defaults to true.
+     * Useful for table-of-contents and anchor links. Defaults to true.
+     * Applies to HTML, Markdown, DOCX and ODT (the formats that carry an anchor/bookmark id).
      */
     generateIds?: boolean;
     /**
-     * Whether to render document metadata (title, author, etc.) as visible content 
+     * Whether to render document metadata (title, author, etc.) as visible content
      * in the generated output (e.g., a header block in HTML or plain text).
      * Structural metadata (HTML <meta> tags, Markdown YAML frontmatter) is always included.
-     * Defaults to false.
+     * Defaults to false. Rendered by CSV, DOCX, HTML (and the Puppeteer PDF engine), EPUB, text, ODT
+     * and RTF; the native PDF engine and Markdown do not render it as visible content.
      */
     renderMetadata?: boolean;
     /**
@@ -933,15 +939,17 @@ export interface CommonGeneratorConfig {
      */
     maxInlineImageBytes?: number;
     /**
-     * Whether to include interactive charts in the generated output (HTML only).
-     * Defaults to true.
+     * Whether to include charts in the generated output. Defaults to true.
+     * HTML renders an interactive Chart.js canvas; DOCX and ODT render the chart's data as a table;
+     * the native PDF engine, Markdown, RTF and plain text do not render charts (a chart node's data
+     * lives in `.text`, so only text output shows anything). `false` omits charts everywhere.
      */
     includeCharts?: boolean;
     /**
      * Whether to ignore all internal (anchor) links and anchor IDs during generation.
      * When true, all bookmarks, cross-references, and internal document jumps are stripped.
      * Specifically for Markdown, this removes the {#id} block from headings.
-     * Defaults to false.
+     * Applies to HTML, Markdown, DOCX, ODT and RTF. Defaults to false.
      */
     ignoreInternalLinks?: boolean;
     /**
@@ -1668,6 +1676,10 @@ export interface TextGeneratorConfig {
      * Note this differs from the parser's `ignoreNotes`, which discards notes at parse time so they
      * never reach the AST at all. Use this when you want the AST to keep them but the text output
      * to leave them out.
+     *
+     * This generation-time suppression is specific to plain-text output. Other generators have no
+     * equivalent switch (Markdown can inline them via `dialect.footnotes: 'none'`; HTML/DOCX/ODT/PDF
+     * always render collected notes); use the parser's `ignoreNotes`, or `onNode`, to drop them there.
      *
      * Defaults to true.
      */

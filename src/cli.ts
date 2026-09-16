@@ -11,7 +11,7 @@
  *   --to=json|text|md|html|csv|rtf|pdf|docx|odt|epub|chunks  Convert AST to specified format (default: json)
  *   --output=path             Save result to a file
  *   --fileType=docx|xlsx|...  Override file type detection
- *   --ocr                     Enable OCR for images (default: false)
+ *   --ocr                     Enable OCR for images (default: false); also requires --extractAttachments
  *   --ocrConfig.language=eng  OCR language (default: eng)
  *   --extractAttachments      Extract embedded attachments (default: false)
  *   --ignoreNotes             Ignore footnotes/endnotes/speaker notes (default: false)
@@ -336,7 +336,7 @@ if (fileArg && !showHelp) {
     console.log('  --to=json|text|md|html|pdf|csv|rtf|docx|odt|epub|chunks  Target conversion format (default: json)');
     console.log('  --output=file.ext                           Save output to file instead of stdout');
     console.log('  --fileType=docx|xlsx|pptx|odt|...           Explicitly override input file type detection');
-    console.log('  --ocr                                       Enable OCR for images (default: false)');
+    console.log('  --ocr                                       Enable OCR for images (default: false; also requires --extractAttachments)');
     console.log('  --ocrConfig.language=eng                    OCR language (default: eng)');
     console.log('  --extractAttachments                        Extract embedded attachments (default: false)');
     console.log('  --ignoreNotes                               Ignore footnotes/endnotes/speaker notes (default: false)');
@@ -393,7 +393,7 @@ if (fileArg && !showHelp) {
     console.log('  officeparser document.docx');
     console.log('  officeparser document.docx --to html --output doc.html');
     console.log('  officeparser document.docx --to md');
-    console.log('  officeparser report.pdf --ocr --ocrConfig.language eng --to text');
+    console.log('  officeparser report.pdf --ocr --extractAttachments --ocrConfig.language eng --to text');
     console.log('  officeparser data.xlsx --to csv --output data.csv --csvDelimiter ";"');
     console.log('  officeparser document.docx --extractAttachments --to epub --output document.epub');
     console.log('  officeparser notes.md --extractAttachments --to odt --output notes.odt');

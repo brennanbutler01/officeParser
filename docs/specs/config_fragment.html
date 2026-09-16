@@ -115,7 +115,9 @@
                 <td><code>boolean</code></td>
                 <td><code>false</code></td>
                 <td><strong>Vision Synthesis</strong>: Enables optical character recognition for images and
-                    non-selectable PDF layers. <em>Requires Tesseract.js.</em></td>
+                    non-selectable PDF layers. OCR runs over <em>extracted</em> images, so it also requires
+                    <code>extractAttachments: true</code> in every format; <code>ocr: true</code> alone
+                    performs no OCR and warns <code>OCR_REQUIRES_ATTACHMENTS</code>. <em>Requires Tesseract.js.</em></td>
             </tr>
             <tr>
                 <td><code>pdfWorkerSrc</code></td>
@@ -127,8 +129,8 @@
             <tr>
                 <td><code>ocrConfig</code></td>
                 <td><code>object</code></td>
-                <td><code>{}</code></td>
-                <td><strong>OCR Scheduler</strong>: Fine-grained settings for the intelligent worker pool.</td>
+                <td><code>language: 'eng', preserveLayout: true</code></td>
+                <td><strong>OCR Scheduler</strong>: Fine-grained settings for the intelligent worker pool. Populated defaults (language <code>'eng'</code>, layout preserved, worker/timeout defaults), not an empty object.</td>
             </tr>
             <tr>
                 <td><code>ocrConfig.language</code></td>
@@ -279,7 +281,7 @@
                 <td><code>decompressionLimits.maxTableCells</code></td>
                 <td><code>number</code></td>
                 <td><code>1000000</code></td>
-                <td><strong>Cell Expansion Limit</strong>: Maximum number of ODF spreadsheet cells materialized from <code>table:number-columns-repeated</code>/<code>table:number-rows-repeated</code>. Beyond it, expansion clamps and warns instead of allocating without bound.</td>
+                <td><strong>Cell Expansion Limit</strong>: Maximum number of table cells materialized from <code>table:number-columns-repeated</code>/<code>table:number-rows-repeated</code> in any ODF table (spreadsheet grids and embedded tables in ODT/ODP/ODG alike). Beyond it, expansion clamps and warns instead of allocating without bound.</td>
             </tr>
             <tr>
                 <td><code>htmlParserConfig</code></td>

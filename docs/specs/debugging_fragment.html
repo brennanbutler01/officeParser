@@ -31,9 +31,9 @@
 };</code></pre>
 
     <h2>1. Node.js Process Hanging (OCR)</h2>
-    <p>In v6.1.0, if you use <code>ocr: true</code>, the library maintains a persistent worker pool to make subsequent
-        OCR tasks much faster. However, this background pool will keep your Node.js process alive for <strong>10
-            seconds</strong> of inactivity by default.</p>
+    <p>When you use <code>ocr: true</code> (with <code>extractAttachments: true</code>), the library maintains a
+        persistent worker pool to make subsequent OCR tasks much faster. However, this background pool will keep your
+        Node.js process alive for <strong>10 seconds</strong> of inactivity by default.</p>
 
     <h3>Solutions:</h3>
     <ul>
@@ -87,9 +87,11 @@ await terminateOcr(); // Snappy exit</code></pre>
     <h2>5. Metadata & Custom Properties</h2>
     <p>If <code>metadata.customProperties</code> is empty:</p>
     <ul>
-        <li>Custom property extraction is currently limited to <strong>OOXML (DOCX, XLSX, PPTX)</strong>, <strong>ODF
-                (ODT, ODS, ODP)</strong>, and <strong>PDF</strong>.</li>
-        <li>Legacy formats like <strong>RTF</strong> do not support custom property extraction.</li>
+        <li><code>metadata.customProperties</code> is populated for <strong>OOXML (DOCX, XLSX, PPTX)</strong>, <strong>ODF
+                (ODT, ODS, ODP, ODG)</strong>, and <strong>PDF</strong>.</li>
+        <li>HTML and Markdown expose their <code>&lt;meta&gt;</code> tags / YAML front matter as
+            <code>metadata.nativeProperties</code> rather than <code>customProperties</code>; EPUB exposes its OPF
+            metadata. Legacy <strong>RTF</strong> supports no custom-property extraction.</li>
     </ul>
 
     <h2>6. Bundle Selection</h2>

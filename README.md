@@ -132,6 +132,7 @@ npx officeparser my_document --fileType=docx --to=json
 - **Values:** Flags can be passed as `--flag=value` or `--flag value`.
 - **Booleans:** Bare flags imply `true` (e.g. `--ocr` is equivalent to `--ocr=true`). Negation flags start with `no-` (e.g. `--no-ocr` is equivalent to `--ocr=false`).
 - **Nested Objects:** You can pass nested properties directly using JSON dot-notation (e.g. `--ocrConfig.language=fra` or `--htmlConfig.containerWidth=900px`).
+- **Images:** the CLI parses directly, so add `--extractAttachments` for images to reach *any* output (HTML/EPUB embed them, DOCX/ODT/Markdown/native-PDF include them). Without it, an image node has no bytes and HTML/Markdown emit a name-only `<img src="image1.png">` reference. (The `OfficeConverter`/`convert()` API auto-enables this; the CLI does not.)
 
 ### CLI Options
 
@@ -611,17 +612,19 @@ OfficeParserAST
 │   ├── formatting: { bold, italic, underline, color, size, font, alignment, ... }
 │   └── metadata: { level, listId, row, col, rowSpan, colSpan, backgroundColor, style, ... }
 ├── auxiliary?: OfficeAuxiliaryContent   (out-of-band layout elements)
-│   ├── headers?: OfficeContentNode[]   (DOCX headers)
-│   ├── footers?: OfficeContentNode[]   (DOCX footers)
-│   └── slideMasters?: OfficeContentNode[] (PPTX slide masters)
+│   ├── headers?: OfficeContentNode[]   (DOCX, PDF top band, ODT master pages)
+│   ├── footers?: OfficeContentNode[]   (DOCX, PDF bottom band, ODT master pages)
+│   ├── slideMasters?: OfficeContentNode[] (PPTX slide masters)
+│   └── outline?: OfficeContentNode[]   (PDF bookmark outline)
 ├── attachments: [ OfficeAttachment ]  (populated when extractAttachments: true)
 │   ├── type: 'image' | 'chart'
 │   ├── name: string
 │   ├── mimeType: string
 │   ├── data: string  (Base64)
-│   ├── ocrText?: string  (if ocr: true)
+│   ├── ocrText?: string  (if ocr: true AND extractAttachments: true)
 │   └── chartData?: { title, dataSets, labels }
 ├── warnings: OfficeIssue[]  (non-fatal issues from the parsing phase)
+├── config: OfficeParserConfig  (the resolved parse config; `.to()` inherits newlineDelimiter/onWarning from it)
 └── to(format, config?)  (format: 'html'|'md'|'text'|'csv'|'rtf'|'pdf'|'docx'|'odt'|'epub'|'chunks', returns { value, messages })
 ```
 
@@ -816,13 +819,19 @@ When `includeBreakNodes: true`, break elements appear as nodes:
 ```text
 Break Node (type: 'break')
 └── metadata: {
-        breakType: 'textWrapping' | 'page' | 'column' | 'lastRenderedPage' | 'carriageReturn',
+        breakType: 'textWrapping' | 'page' | 'column' | 'lastRenderedPage' | 'carriageReturn' | 'thematic',
         clear?: 'all' | 'left' | 'none' | 'right'
     }
 ```
 
 > [!NOTE]
 > Break nodes have no `text` property, but `ast.to('text')` automatically converts them to the configured newline delimiter.
+
+> [!NOTE]
+> `includeBreakNodes` gates DOCX/ODF only (where a break is otherwise invisible layout). **HTML and
+> Markdown always emit break nodes regardless of the flag**, because a break is explicit content there:
+> a `<br>`/hard line break becomes a `carriageReturn` break, and `<hr>`/`---` a `thematic` break (a
+> Markdown `\f`-style page break maps to `page`).
 
 > [!NOTE]
 > DOCX writes breaks inline (`w:br`/`w:cr`), so they land as children of the paragraph. ODF instead
@@ -915,6 +924,10 @@ Beyond CommonMark/GFM basics, `MarkdownParser`/`MarkdownGenerator` support an ex
 full-fidelity round-tripping with rich Markdown editors. Every construct below parses to a first-class
 AST node/metadata field and regenerates back to the canonical syntax shown, so `.md → AST → .md` is
 idempotent and `.md → AST → HTML → AST → .md` survives unchanged.
+
+> Markdown-input parsing options that are not dialect toggles live on `htmlParserConfig` (Markdown
+> shares the HTML parser for embeds): `preserveIframes` and `embedFolkForms` govern raw `<iframe>`
+> blocks and folk embed forms encountered in `.md`. There is no separate `mdParserConfig`.
 
 | Feature | Markdown syntax | AST representation |
 |---|---|---|
@@ -1118,7 +1131,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `newlineDelimiter` | `string` | `'\n'` | Delimiter inserted between lines in text output |
+| `newlineDelimiter` | `string` | `'\n'` | Joins multi-line text inside the AST's pre-flattened `.text` (RTF table cells, chart text, PDF page text); also the default for `textConfig.newlineDelimiter` in `.to('text')` when that is not set explicitly. Not read by the Word parser |
 | `password` | `string` | `''` | Password for a password-protected document. Applies to every encryptable format: PDF, encrypted OOXML (`.docx`/`.xlsx`/`.pptx`, ECMA-376 agile or standard AES), and encrypted ODF (`.odt`/`.ods`/`.odp`/`.odg`, AES-CBC with PBKDF2). A missing password rejects with `PASSWORD_REQUIRED`, a wrong one with `PASSWORD_INCORRECT`. Ignored for unencrypted files. *ODF note:* LibreOffice 24.8+ defaults to AES-256-GCM with Argon2id key derivation ("wholesome encryption"), which is not supported and rejects with `DOCUMENT_DECRYPTION_FAILED`; re-save with the classic AES-CBC/PBKDF2 scheme (or an earlier LibreOffice) to parse it |
 | `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted document needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Works for every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's `onPassword` |
 | `ignoreNotes` | `boolean` | `false` | Ignore footnotes/endnotes (DOCX, ODT, RTF, PDF, HTML, Markdown, EPUB) and speaker notes (PPTX/ODP). See the [capability matrix](#per-format-capability-matrix) |
@@ -1127,7 +1140,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `ignoreSlideMasters` | `boolean` | `false` | Skip PPTX slide masters (populated in `ast.auxiliary.slideMasters` by default). PPTX only; ODP masters are not extracted |
 | `extractAttachments` | `boolean` | `false` | Populate `ast.attachments` with Base64 images/charts |
 | `ocr` | `boolean` | `false` | Run Tesseract OCR on images (requires `extractAttachments: true`) |
-| `ocrConfig` | `OcrConfig` | `{}` | OCR worker pool settings (see [OCR section](#ocr-scheduler--resource-management)) |
+| `ocrConfig` | `OcrConfig` | see below | OCR settings (populated defaults: `language: 'eng'`, `preserveLayout: true`, worker/timeout defaults). See the [OCR section](#ocr-scheduler--resource-management) |
 | `includeRawContent` | `boolean` | `false` | Attach raw XML/RTF source to each node |
 | `serializeRawContent` | `boolean` | `true` | Re-serialize XML to clean strings (only if `includeRawContent: true`) |
 | `preserveXmlWhitespace` | `boolean` | `false` | Preserve original XML whitespace during serialization |
@@ -1137,7 +1150,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 | `fileType` | `SupportedFileType \| null` | `null` | **Required for text-based binary data** (`'md'`, `'html'`, `'csv'`) as these lack magic bytes. |
 | `csvDelimiter` | `string` | `','` | Input delimiter when parsing CSV files |
 | `decompressionLimits` | `DecompressionLimits` | `{ maxUncompressedBytes: 512MB, maxZipEntries: 10000, maxTableCells: 1000000 }` | **New**: Limits applied during ZIP extraction (and ODF cell expansion) to protect against excessive memory and resource usage |
-| `htmlParserConfig` | `HtmlParserConfig` | `{}` | HTML/XHTML/EPUB parsing options. `preserveAttributes` (`boolean`, default `false`): keep generic source attributes no typed field consumed on `node.htmlAttributes`. `preserveIframes` (`boolean \| string[]`, default `false`): preserve non-YouTube `<iframe>` embeds (otherwise dropped) as `embed` nodes — `true` for any, or a hostname allowlist; the src is scheme-checked on generation. `embedFolkForms` (`boolean`, default `false`): opt in to importing ambiguous folk embed forms (Obsidian `![](youtube-url)`, thumbnail-link) as YouTube embeds |
+| `htmlParserConfig` | `HtmlParserConfig` | `{}` | HTML/XHTML/EPUB parsing options **(and Markdown input: `preserveIframes`/`embedFolkForms` govern raw `<iframe>` blocks and folk embeds in `.md` too)**. `preserveAttributes` (`boolean`, default `false`): keep generic source attributes no typed field consumed on `node.htmlAttributes`. `preserveIframes` (`boolean \| string[]`, default `false`): preserve non-YouTube `<iframe>` embeds (otherwise dropped) as `embed` nodes: `true` for any, or a hostname allowlist; the src is scheme-checked on generation. `embedFolkForms` (`boolean`, default `false`): opt in to importing ambiguous folk embed forms (Obsidian `![](youtube-url)`, thumbnail-link) as YouTube embeds |
 | `pdfWorkerSrc` | `string` | CDN (jsDelivr) | Path/URL to `pdf.worker.min.mjs` (required in browser) |
 | `pdfParserConfig` | `PdfParserConfig` | see below | PDF-specific options ([table below](#pdfparserconfig)) |
 | `onWarning` | `(issue: OfficeIssue) => void` | — | Callback for non-fatal parsing issues |
@@ -1169,19 +1182,19 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `includeFormatting` | `boolean` | `true` | Include bold/italic/colors/sizes in output |
-| `generateIds` | `boolean` | `true` | Slug-based heading anchors: `id` attributes on HTML headings, and a `{#slug}` suffix on Markdown headings (`# Title {#title}`, kramdown/Pandoc). Set `false` to omit both — useful when the Markdown is rendered by GFM/CommonMark, which show `{#slug}` as literal text. Applies to all generator formats (it is a top-level option, not under `mdConfig`/`htmlConfig`). |
-| `renderMetadata` | `boolean` | `false` | Render title/author as visible header block |
+| `includeFormatting` | `boolean` | `true` | Include bold/italic/colors/sizes in output (HTML, Markdown, DOCX, ODT, RTF; a no-op for text/CSV/chunks, which carry no run formatting) |
+| `generateIds` | `boolean` | `true` | Slug-based heading anchors: `id` attributes on HTML headings, and a `{#slug}` suffix on Markdown headings (`# Title {#title}`, kramdown/Pandoc). Set `false` to omit both, useful when the Markdown is rendered by GFM/CommonMark, which show `{#slug}` as literal text. A top-level option (not under `mdConfig`/`htmlConfig`); it affects HTML, Markdown, DOCX and ODT (the formats that carry a heading anchor/bookmark id). |
+| `renderMetadata` | `boolean` | `false` | Render title/author as a visible header block. Rendered by CSV, DOCX, HTML (and the Puppeteer PDF engine), EPUB, text, ODT and RTF; the native PDF engine and Markdown do not |
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
 | `includeImages` | `boolean \| 'image-only' \| 'image+ocr-text' \| 'ocr-text-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocr-text'` (image then its recognized/OCR text); `'ocr-text-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocr-text'`), or just the OCR text for `'ocr-text-only'` |
 | `maxInlineImageBytes` | `number` | `1500000` | Max decoded image size, in bytes, that is inlined as a `data:` URI (HTML/Markdown); the base64 URI itself is ~1/3 larger, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. Under the default `image-only` mode an image over the cap renders its recognized/OCR text when it has any (multi-line OCR as a fenced block in Markdown), otherwise a compact name reference; Markdown still emits the `IMAGE_NOT_INLINED` warning. Plain text follows the same rule. **Standalone HTML always inlines**, whatever the cap: a self-contained document has nowhere else to resolve the image from. `0` never inlines, `Infinity` always inlines |
-| `includeCharts` | `boolean` | `true` | Include interactive charts (HTML only) |
-| `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output |
+| `includeCharts` | `boolean` | `true` | Include charts: HTML renders an interactive Chart.js canvas, DOCX/ODT render the chart's data as a table; the native PDF engine, Markdown, RTF and plain text do not render charts. `false` omits them everywhere |
+| `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output (HTML, Markdown, DOCX, ODT, RTF) |
 | `ignoreDefaultStyleMap` | `boolean` | `false` | Disable built-in style mappings (e.g., "Heading 1" → h1) |
 | `styleMap` | `string[] \| StructuredStyleMapping[]` | `[]` | Custom semantic style mappings |
 | `onNode` | `(node) => string \| false \| void` | — | Per-node callback for filtering, overriding, or mutating |
 | `onWarning` | `(issue: OfficeIssue) => void` | — | Callback for non-fatal generation issues |
-| `abortSignal` | `AbortSignal \| null` | `null` | Optional signal to cancel the generation operation (rejects with AbortError) |
+| `abortSignal` | `AbortSignal \| null` | `null` | Optional signal to cancel the generation operation (rejects with AbortError). Currently honored by the PDF and chunking generators; other generators run to completion |
 
 ---
 
