@@ -1141,8 +1141,10 @@ export class HtmlGenerator extends BaseGenerator<'html'> {
                         // default path); a dropped/overridden row is honoured.
                         const rowVerdict = await this.handleOnNode(firstRow);
                         if (rowVerdict === false) {
-                            // Header row dropped by the hook: render every row as a plain body, no <thead>.
-                            finalChildren = await this.processNodeArray(rows.filter(r => r.type === 'row'));
+                            // Header row dropped by the hook: render the remaining rows as a plain body,
+                            // no <thead>. Use rows.slice(1) (not a filter that re-includes firstRow), so
+                            // the already-answered header row is not walked - and onNode not asked - twice.
+                            finalChildren = await this.processNodeArray(rows.slice(1));
                         } else {
                             let headInner: string;
                             if (typeof rowVerdict === 'string') {

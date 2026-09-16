@@ -537,7 +537,7 @@ export interface PdfParserConfig {
      * color on its text content, so this is recovered from the page's operator list. On the default
      * text path the operator list is only fetched for the first page(s) that introduce a font, so
      * turning this on fetches it for every page instead: about 1.6x parse time on a text-heavy PDF,
-     * and near-free when `extractAttachments` or `ocr` already fetch it. Color is part of a document's
+     * and near-free when `extractAttachments` already fetches the operator list. Color is part of a document's
      * content, like bold or font, so it is extracted by default; set this to `false` to skip it on a
      * throughput-focused text/RAG path that does not need color. Pure black (`#000000`) is treated as
      * the default and left unset, so only genuinely colored text carries a `color`, mirroring how the
@@ -941,8 +941,8 @@ export interface CommonGeneratorConfig {
     /**
      * Whether to include charts in the generated output. Defaults to true.
      * HTML renders an interactive Chart.js canvas; DOCX and ODT render the chart's data as a table;
-     * the native PDF engine, Markdown, RTF and plain text do not render charts (a chart node's data
-     * lives in `.text`, so only text output shows anything). `false` omits charts everywhere.
+     * plain text and the native PDF engine render the chart's data text (its series, which live in
+     * `node.text`); Markdown and RTF render nothing for a chart. `false` omits charts in every generator.
      */
     includeCharts?: boolean;
     /**

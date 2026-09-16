@@ -387,6 +387,12 @@ class NativeLayout {
             case 'code': return this.code(node);
             case 'note': return this.note(node);
             case 'break': return this.breakNode(node);
+            case 'chart':
+                // includeCharts: false omits charts in every generator. The native engine cannot draw a
+                // chart, so it otherwise renders the chart's data text (in node.text); skip it when off.
+                if (this.config.includeCharts === false) return;
+                if (node.text) await this.paragraph(node);
+                return;
             default:
                 if (node.children?.length) { for (const c of node.children) await this.render(c); }
                 else if (node.text) await this.paragraph(node);

@@ -41,7 +41,7 @@ export class OfficeConverter {
      * // Convert Word to Markdown with a single call
      * const { value: markdown } = await OfficeConverter.convert('report.docx', 'md');
      * 
-     * // Convert PDF to HTML (Note: OCR is disabled in this one-step API)
+     * // Convert PDF to HTML (for OCR, pass parseConfig: { ocr: true } - attachments auto-extract)
      * const { value: html } = await OfficeConverter.convert(buffer, 'html', {
      *   generatorConfig: {
      *     includeImages: true

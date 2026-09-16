@@ -426,7 +426,7 @@ const { value: csv } = await OfficeGenerator.generate(ast, 'csv');
 > npm install puppeteer
 > ```
 > Or choose `pdfConfig.engine: 'native'` to lay the document out directly with `pdf-lib`
-> (`npm install pdf-lib`) — no browser, and the only engine that produces a real PDF in the browser
+> (`npm install pdf-lib`): no browser, and the only engine that produces a real PDF in the browser
 > (import from `officeparser/browser-native-pdf` for the client-side path).
 > See [PdfGeneratorConfig](#pdfgeneratorconfig).
 >
@@ -501,10 +501,10 @@ docs.forEach((d, i) => writeFileSync(`invoice-${i}.docx`, d));
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `data` | `TemplateData \| TemplateData[]` | — (required) | Field values. One object → one document; an array → one document per entry |
+| `data` | `TemplateData \| TemplateData[]` | (required) | Field values. One object is one document; an array is one document per entry |
 | `delimiters` | `{ start: string; end: string }` | `{{ }}` | Placeholder delimiters |
 | `onMissing` | `'keep' \| 'empty' \| 'error'` | `'keep'` | A placeholder with no matching field: leave it, blank it, or reject with `TEMPLATE_FIELD_MISSING`. A field present but `null`/`undefined` always renders empty |
-| `password` | `string` | — | Decrypt the template first, if it is itself password-protected |
+| `password` | `string` | (none) | Decrypt the template first, if it is itself password-protected |
 
 Only DOCX is supported today (other OOXML/ODF formats will follow); a non-DOCX template rejects with `TEMPLATE_UNSUPPORTED_FORMAT`.
 
@@ -696,6 +696,9 @@ These never throw; they report a degraded-but-successful outcome you may branch 
 | `PDF_GENERATION_FAILED` | generate | PDF generation failed (e.g. Puppeteer missing for `engine: 'html'`). |
 | `INVALID_STYLE_MAPPING` / `INVALID_STYLE_MAP_TAG` | generate | A `styleMap` entry/tag was invalid and ignored. |
 | `TEMPLATE_UNSUPPORTED_FORMAT` / `TEMPLATE_FIELD_MISSING` | template | The template format is unsupported / a `{{field}}` had no value under `onMissing: 'error'`. |
+| `PAGE_LOAD_FAILED` | parse | A PDF page could not be processed and was skipped (partial content). |
+| `SHEET_RANGE_NOT_FOUND` | generate | A `csvConfig.sheets` range matched no sheet, so CSV output is empty. |
+| `EMPTY_CHUNK_GENERATED` / `WHITESPACE_NODE_SKIPPED` / `BROWSER_GENERATION_LIMITATION` / `PERFORMANCE_TIP` / `DEPENDENCY_LOAD_FAILED` | generate | Diagnostic/informational notes from the chunking and PDF generators. |
 
 The full enum lives in `OfficeWarningType` / `OfficeErrorType` (`src/types.ts`); the error codes used in the `catch` above are the `OfficeErrorType` members.
 
@@ -717,7 +720,7 @@ extracted (the matching `ignore*` flag is then a no-op).
 | ODS  | Y (cell notes) | – | – | – | Y | Y | grid |
 | ODP  | Y (page) | speaker notes | – | – (ODP masters not extracted) | Y | Y | Y |
 | ODG  | Y (page) | – | – | – | Y | – | Y |
-| PDF  | – | footnotes/endnotes (tagged) | Y (top/bottom bands) | – | Y | – | Y (tagged) |
+| PDF  | – | footnotes/endnotes (tagged) | Y (top/bottom bands) | – | Y | – | Y (spans: tagged only) |
 | RTF  | – | footnotes/endnotes | – (dropped) | – | Y | – | Y |
 | HTML | – | footnotes/endnotes | – | – | Y (`data:` only) | – | Y |
 | MD   | – | footnotes/endnotes | – | – | Y (`data:` only) | – | Y (HTML-table fallback) |
@@ -1147,7 +1150,7 @@ Pass as the second argument to `parseOffice(file, config)`.
 |--------|------|---------|-------------|
 | `newlineDelimiter` | `string` | `'\n'` | Joins multi-line text inside the AST's pre-flattened `.text` (RTF table cells, chart text, PDF page text); also the default for `textConfig.newlineDelimiter` in `.to('text')` when that is not set explicitly. Not read by the Word parser |
 | `password` | `string` | `''` | Password for a password-protected document. Applies to every encryptable format: PDF, encrypted OOXML (`.docx`/`.xlsx`/`.pptx`, ECMA-376 agile or standard AES), and encrypted ODF (`.odt`/`.ods`/`.odp`/`.odg`, AES-CBC with PBKDF2). A missing password rejects with `PASSWORD_REQUIRED`, a wrong one with `PASSWORD_INCORRECT`. Ignored for unencrypted files. *ODF note:* LibreOffice 24.8+ defaults to AES-256-GCM with Argon2id key derivation ("wholesome encryption"), which is not supported and rejects with `DOCUMENT_DECRYPTION_FAILED`; re-save with the classic AES-CBC/PBKDF2 scheme (or an earlier LibreOffice) to parse it |
-| `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | — | Called when an encrypted document needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Works for every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's `onPassword` |
+| `onPassword` | `(reason: 'required' \| 'incorrect') => string \| undefined \| Promise<...>` | (none) | Called when an encrypted document needs a password `password` did not satisfy, so it can be supplied lazily or interactively (prompt, vault). Return a password to retry (capped), or `undefined` to reject as above. Works for every encryptable format (PDF/OOXML/ODF); mirrors pdf.js's `onPassword` |
 | `ignoreNotes` | `boolean` | `false` | Ignore footnotes/endnotes (DOCX, ODT, RTF, PDF, HTML, Markdown, EPUB) and speaker notes (PPTX/ODP). See the [capability matrix](#per-format-capability-matrix) |
 | `ignoreComments` | `boolean` | `false` | Ignore comments/annotations, attached by default via `node.comments[]`. Applies to DOCX, XLSX, PPTX and every ODF type (ODT/ODS/ODP/ODG). See the [capability matrix](#per-format-capability-matrix) |
 | `ignoreHeadersAndFooters` | `boolean` | `false` | Skip headers & footers (populated in `ast.auxiliary.headers/footers` by default). Extracted for DOCX, PDF and ODT only; a no-op for ODS/ODP/ODG, XLSX, PPTX and RTF. See the [capability matrix](#per-format-capability-matrix) |
@@ -1202,7 +1205,7 @@ Options shared by all generator formats. Pass to `OfficeGenerator.generate(ast, 
 | `metadataOverrides` | `MetadataOverrides` | `{}` | Override the metadata embedded in the output, merged per field over `ast.metadata` |
 | `includeImages` | `boolean \| 'image-only' \| 'image+ocr-text' \| 'ocr-text-only' \| 'none'` | `true` | How to render an image node. `true`=`'image-only'` (embed the image, no OCR text); `'image+ocr-text'` (image then its recognized/OCR text); `'ocr-text-only'` (OCR text, no image); `false`=`'none'` (omit). In plain-text output an image becomes an `[Image: name]` placeholder (plus OCR text for `'image+ocr-text'`), or just the OCR text for `'ocr-text-only'` |
 | `maxInlineImageBytes` | `number` | `1500000` | Max decoded image size, in bytes, that is inlined as a `data:` URI (HTML/Markdown); the base64 URI itself is ~1/3 larger, so a scanned page cannot emit a multi-megabyte line that breaks downstream parsers. Under the default `image-only` mode an image over the cap renders its recognized/OCR text when it has any (multi-line OCR as a fenced block in Markdown), otherwise a compact name reference; Markdown still emits the `IMAGE_NOT_INLINED` warning. Plain text follows the same rule. **Standalone HTML always inlines**, whatever the cap: a self-contained document has nowhere else to resolve the image from. `0` never inlines, `Infinity` always inlines |
-| `includeCharts` | `boolean` | `true` | Include charts: HTML renders an interactive Chart.js canvas, DOCX/ODT render the chart's data as a table; the native PDF engine, Markdown, RTF and plain text do not render charts. `false` omits them everywhere |
+| `includeCharts` | `boolean` | `true` | Include charts: HTML renders an interactive Chart.js canvas, DOCX/ODT render the chart's data as a table, plain text and the native PDF engine render the chart's data text; Markdown and RTF render nothing for a chart. `false` omits charts in every generator |
 | `ignoreInternalLinks` | `boolean` | `false` | Strip bookmarks and internal anchors from output (HTML, Markdown, DOCX, ODT, RTF) |
 | `ignoreDefaultStyleMap` | `boolean` | `false` | Disable built-in style mappings (e.g., "Heading 1" → h1) |
 | `styleMap` | `string[] \| StructuredStyleMapping[]` | `[]` | Custom semantic style mappings |

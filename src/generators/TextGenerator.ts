@@ -66,6 +66,10 @@ export class TextGenerator extends BaseGenerator<'text'> {
         }
 
         const processor = async (node: OfficeContentNode, childrenOutput: string): Promise<string> => {
+            // includeCharts: false omits charts in every generator. Plain text otherwise renders a
+            // chart's data series (it lives in `node.text`); this drops it when charts are turned off.
+            if (node.type === 'chart' && this.config.includeCharts === false) return '';
+
             // Return raw text for text nodes
             if (node.type === 'text' || node.type === 'code') {
                 return node.text || '';

@@ -818,7 +818,7 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
          * megapixel guard bounds an inline image's allocation (pdf.js `maxImageSize` gates decoded
          * XObjects, but an inline image's declared dimensions reach `convertToRgbaBuffer` directly).
          */
-        const pushImage = async (imgObj: any, imgName: string): Promise<void> => {
+        const pushImage = async (imgObj: any, imgName: string, placement: number[] = ctm): Promise<void> => {
             if (!imgObj) return;
             if (isBrowser && !imgObj.data && imgObj.bitmap) {
                 try {
@@ -835,10 +835,11 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
                 logWarning(OfficeWarningType.IMAGE_PROCESSING_FAILED, config, `image on page ${pageNumber} is too large to extract (${imgObj.width}x${imgObj.height} pixels)`);
                 return;
             }
-            // The tracked CTM is the image placement (unit square mapped by [a,b,c,d,e,f]). Encode to
-            // PNG now, while this page's raw pixel buffer is in hand, so the large uncompressed RGBA is
-            // freed as the page goes out of scope instead of being retained until the emit pass.
-            const bounds = imageBounds(viewport, ctm);
+            // `placement` maps the image's unit square onto the page ([a,b,c,d,e,f]); it defaults to the
+            // tracked CTM but is the first tile's matrix for a repeated image. Encode to PNG now, while
+            // this page's raw pixel buffer is in hand, so the large uncompressed RGBA is freed as the
+            // page goes out of scope instead of being retained until the emit pass.
+            const bounds = imageBounds(viewport, placement);
             try {
                 const rgba = convertToRgbaBuffer(imgObj.data, imgObj.width, imgObj.height, imgObj.kind);
                 const png = encodePng(imgObj.width, imgObj.height, new Uint8Array(rgba));
@@ -885,13 +886,23 @@ async function collectImages(pdfjs: any, page: any, viewport: any, config: FullO
             // in the current fill colour, which this pass does not track, so it has no faithful bitmap.)
             if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintImageXObjectRepeat) {
                 const imgName = argsArray[j][0];
+                // A repeated (tiled) image is placed at each `[scaleX,0,0,scaleY, x,y]` from the args,
+                // not at the bare CTM, so record the FIRST tile's box; the bitmap is collected once.
+                let placement = ctm;
+                if (fn === pdfjs.OPS.paintImageXObjectRepeat) {
+                    const a = argsArray[j];
+                    const pos = a[3];
+                    if (typeof a[1] === 'number' && typeof a[2] === 'number' && pos && pos.length >= 2) {
+                        placement = mulMatrix(ctm, [a[1], 0, 0, a[2], pos[0], pos[1]]);
+                    }
+                }
                 try {
                     let hasObj = page.objs.has(imgName);
                     let targetObjs = page.objs;
                     if (!hasObj && page.commonObjs.has(imgName)) { hasObj = true; targetObjs = page.commonObjs; }
                     if (!hasObj) continue;
                     const imgObj: any = await new Promise((resolve) => targetObjs.get(imgName, (d: any) => resolve(d)));
-                    await pushImage(imgObj, imgName);
+                    await pushImage(imgObj, imgName, placement);
                 } catch {
                     // Image access failed, continue.
                 }

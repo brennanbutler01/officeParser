@@ -997,7 +997,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                 if ((k & 255) === 0) checkAbortSignal(config.abortSignal);
                 const rowNode: OfficeContentNode = {
                     type: 'row',
-                    children: k === 0 ? cells : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata }) as OfficeContentNode)
+                    children: k === 0 ? cells : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata, children: c.children ? c.children.slice() : c.children, comments: c.comments ? c.comments.slice() : c.comments }) as OfficeContentNode)
                 };
 
                 // Fix row indices for repeated rows
@@ -1727,7 +1727,7 @@ export const parseOpenOffice = async (buffer: Buffer, config: FullOfficeParserCo
                                 // RangeError / OOM the cell-count budget did not bound).
                                 const rowCells = k === 0
                                     ? cells
-                                    : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata }) as OfficeContentNode);
+                                    : cells.map(c => ({ ...c, metadata: c.metadata ? { ...c.metadata } : c.metadata, children: c.children ? c.children.slice() : c.children, comments: c.comments ? c.comments.slice() : c.comments }) as OfficeContentNode);
                                 const rowNode: OfficeContentNode = {
                                     type: 'row',
                                     children: rowCells,

@@ -274,7 +274,9 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
     const chartFiles = files.filter(f => f.path.match(chartsRegex));
 
     // Map to store image details by drawing file path and relationship ID
-    const drawingImageMap: Record<string, Record<string, { path: string, altText?: string }>> = {};
+    // Null-prototype: keyed by document-derived drawing paths / rel ids, so a plain object would let a
+    // crafted `__proto__` key throw (or hit a shared prototype) instead of creating an own entry.
+    const drawingImageMap: Record<string, Record<string, { path: string, altText?: string }>> = Object.create(null);
 
     if (config.extractAttachments) {
         // 1. Parse Drawing Rels to map rIds to media paths
@@ -287,7 +289,7 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
             const relationships = getElementsByTagName(relsXml, "Relationship");
 
             if (!drawingImageMap[drawingPath]) {
-                drawingImageMap[drawingPath] = {};
+                drawingImageMap[drawingPath] = Object.create(null);
             }
 
             for (const rel of relationships) {
@@ -379,7 +381,8 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
     }
 
     // Build map of drawing rId -> chart attachment name for linking
-    const drawingChartMap: Record<string, Record<string, string>> = {};
+    // Null-prototype for the same reason as drawingImageMap (document-derived keys).
+    const drawingChartMap: Record<string, Record<string, string>> = Object.create(null);
     if (config.extractAttachments) {
         const drawingRelsFiles = files.filter(f => f.path.match(drawingRelsRegex));
         for (const relFile of drawingRelsFiles) {
@@ -390,7 +393,7 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
             const relationships = getElementsByTagName(relsXml, "Relationship");
 
             if (!drawingChartMap[drawingPath]) {
-                drawingChartMap[drawingPath] = {};
+                drawingChartMap[drawingPath] = Object.create(null);
             }
 
             for (const rel of relationships) {
@@ -457,7 +460,9 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
             const relsFile = files.find(f => f.path === relsFilename);
 
             const drawingMap: Record<string, string> = {}; // rId -> drawingPath
-            const sheetCommentsMap: Record<string, OfficeContentNode[]> = {};
+            // Null-prototype: keyed by the document-derived cell ref, so a crafted ref of `__proto__`
+            // creates an own entry instead of throwing on `Object.prototype.push`.
+            const sheetCommentsMap: Record<string, OfficeContentNode[]> = Object.create(null);
 
             if (relsFile) {
                 const relsXml = parseXmlString(relsFile.content.toString());
@@ -567,9 +572,12 @@ export const parseExcel = async (buffer: Buffer, config: FullOfficeParserConfig)
                         const idx = parseInt(vMatch[1]);
                         const content = sharedStrings[idx];
                         if (Array.isArray(content)) {
-                            // Rich text runs
-                            // Deep copy runs to avoid reference issues if reused
-                            cellNodes = JSON.parse(JSON.stringify(content));
+                            // Rich text runs. Share the (read-only) run nodes across every cell that
+                            // references this shared string via a shallow array copy, rather than
+                            // deep-copying them per cell: XLSX has no cell budget, so a large rich-text
+                            // shared string referenced by many cells would otherwise amplify to N x its
+                            // size in the AST. The run nodes are never mutated in place downstream.
+                            cellNodes = content.slice();
                             text = cellNodes.map(n => n.text).join('');
                         } else {
                             text = content || '';

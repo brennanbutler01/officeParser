@@ -1526,6 +1526,20 @@ async function testDocxGeneration(): Promise<void> {
     assert.ok(/<w:gridSpan w:val="2"\/>/.test(sdoc), 'DOCX synthetic: colSpan -> gridSpan');
     assert.ok(/<w:vMerge w:val="restart"\/>/.test(sdoc) && /<w:vMerge\/>/.test(sdoc), 'DOCX synthetic: rowSpan -> vMerge restart + continuation');
 
+    // A cell merged BOTH across columns and down: the continuation row must be ONE gridSpan'd vMerge
+    // cell, not one narrow vMerge per spanned column.
+    const dmAst: any = { type: 'docx', metadata: {}, content: [{
+        type: 'table', children: [
+            { type: 'row', children: [
+                { type: 'cell', metadata: { row: 0, col: 0, colSpan: 2, rowSpan: 2 }, children: [{ type: 'text', text: 'BIG' }] },
+                { type: 'cell', metadata: { row: 0, col: 2 }, children: [{ type: 'text', text: 'C' }] } ] },
+            { type: 'row', children: [
+                { type: 'cell', metadata: { row: 1, col: 2 }, children: [{ type: 'text', text: 'y' }] } ] },
+        ] }] };
+    const dmDoc = docxParts((await OfficeGenerator.generate(dmAst, 'docx' as any, {})).value as Uint8Array)['word/document.xml'];
+    assert.ok(/<w:gridSpan w:val="2"\/><w:vMerge\/>/.test(dmDoc), 'DOCX: doubly-merged cell emits one gridSpan+vMerge continuation');
+    assert.strictEqual((dmDoc.match(/<w:vMerge\/>/g) || []).length, 1, 'DOCX: doubly-merged continuation is one cell, not one bare vMerge per column');
+
     // Bookmarks: names and ids are unique; the duplicate slug is disambiguated.
     const names = [...sdoc.matchAll(/<w:bookmarkStart w:id="\d+" w:name="([^"]+)"/g)].map(m => m[1]);
     assert.ok(names.includes('intro') && names.includes('intro_2'), 'DOCX synthetic: duplicate heading slug disambiguated (intro, intro_2)');
