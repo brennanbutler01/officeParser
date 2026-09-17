@@ -50,7 +50,7 @@ import { parseWord } from './parsers/WordParser.js';
 import { BlobLike, OfficeErrorType, OfficeIssue, OfficeParserAST, OfficeParserConfig, OfficeWarningType, SupportedFileType } from './types.js';
 import { resolveParserConfig } from './utils/configUtils.js';
 import { assertNode } from './utils/envUtils.js';
-import { getOfficeError, getWrappedError, logWarning } from './utils/errorUtils.js';
+import { checkAbortSignal, getOfficeError, getWrappedError, logWarning } from './utils/errorUtils.js';
 import { decryptIfNeeded } from './crypto/decryptContainer.js';
 import { loadFileType } from './utils/moduleLoader.js';
 import { terminateOcr } from './utils/ocrUtils.js';
@@ -84,7 +84,7 @@ const resolveZipBackedType = async (
 ): Promise<string | undefined> => {
     if (detected && detected !== GENERIC_ZIP_EXTENSION) return detected;
 
-    const resolved = await detectOfficeTypeFromZip(buffer, config.decompressionLimits ?? {});
+    const resolved = await detectOfficeTypeFromZip(buffer, config.decompressionLimits ?? {}, config.abortSignal);
     return resolved ?? detected;
 };
 
@@ -176,6 +176,7 @@ export class OfficeParser {
         let filePath: string | undefined;
 
         try {
+            checkAbortSignal(internalConfig.abortSignal);
             if (!file) {
                 throw getOfficeError(OfficeErrorType.IMPROPER_ARGUMENTS, internalConfig);
             }
@@ -231,6 +232,7 @@ export class OfficeParser {
                 try {
                     const { fileTypeFromBuffer } = await loadFileType();
                     const type = await fileTypeFromBuffer(buffer);
+                    checkAbortSignal(internalConfig.abortSignal);
 
                     if (type) {
                         detected = type.ext;
@@ -240,6 +242,7 @@ export class OfficeParser {
                         // lack magic bytes. We'll let the switch default handle it.
                     }
                 } catch (error: any) {
+                    if (error?.name === 'AbortError') throw error;
                     // Log warning but don't crash; the switch below will handle unsupported/missing ext
                     logWarning(OfficeWarningType.FILE_TYPE_DETECTION_FAILED, internalConfig, { error });
                 }
@@ -251,6 +254,7 @@ export class OfficeParser {
                 try {
                     const { fileTypeFromBuffer } = await loadFileType();
                     const type = await fileTypeFromBuffer(buffer);
+                    checkAbortSignal(internalConfig.abortSignal);
                     // A bare `zip` cannot contradict a caller who already said "this is a
                     // docx", so there is nothing a closer look could add. Skipping it keeps an
                     // explicit fileType the cheapest route, rather than making it pay for an
@@ -267,6 +271,7 @@ export class OfficeParser {
                         logWarning(OfficeWarningType.BUFFER_TYPE_MISMATCH, internalConfig, { detected, expected: ext });
                     }
                 } catch (error: any) {
+                    if (error?.name === 'AbortError') throw error;
                     // Log warning so user knows verification could not be performed
                     logWarning(OfficeWarningType.FILE_TYPE_DETECTION_FAILED, internalConfig, { error });
                 }

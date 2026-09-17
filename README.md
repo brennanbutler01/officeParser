@@ -302,6 +302,12 @@ try {
 > **Worker Cleanup on Abort**
 > If an OCR job is actively running in the background when the signal is aborted, `officeParser` automatically terminates the Tesseract worker process immediately and removes it from the pool to prevent thread/memory leaks.
 
+Cancellation is cooperative. Archive extraction checks the signal before starting and
+between compressed-input chunks, yielding to the event loop so timer-driven aborts can
+run. Only calls with a signal yield between chunks. Cancellation stops further archive input and also propagates through archive-based
+format detection. A synchronous chunk or another synchronous parsing phase must finish
+before a timer can run; `abortSignal` is not a hard execution-time limit.
+
 ### Custom OCR Timeouts
 
 To prevent the parser from hanging indefinitely due to slow network connections (when downloading Tesseract language datasets) or complex image processing, you can configure granular timeouts under `ocrConfig.timeout`.
