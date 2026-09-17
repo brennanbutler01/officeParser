@@ -305,7 +305,9 @@ try {
 Cancellation is cooperative. Archive extraction checks the signal before starting and
 between compressed-input chunks, yielding to the event loop so timer-driven aborts can
 run. Only calls with a signal yield between chunks. Cancellation stops further archive input and also propagates through archive-based
-format detection. A synchronous chunk or another synchronous parsing phase must finish
+format detection and OpenDocument encryption sniffing. Cancellation during decryption
+is preserved as `AbortError`, including after password callbacks and key derivation.
+A synchronous chunk or another synchronous parsing phase must finish
 before a timer can run; `abortSignal` is not a hard execution-time limit.
 
 ### Custom OCR Timeouts

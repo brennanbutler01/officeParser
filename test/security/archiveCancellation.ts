@@ -1,6 +1,10 @@
 import * as assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { zipSync, strToU8 } from 'fflate';
+import { decryptIfNeeded } from '../../src/crypto/decryptContainer';
+import { decryptOdf, isEncryptedOdf } from '../../src/crypto/odfCrypto';
 import { OfficeParser } from '../../src/OfficeParser';
 import { detectOfficeTypeFromZip, extractFiles } from '../../src/utils/zipUtils';
 
@@ -16,6 +20,7 @@ const archive = Buffer.from(zipSync({
 
 export async function archiveCancellationTests(): Promise<void> {
     console.log('- archive cancellation...');
+    await odfEncryptionCancellationTests();
     const preAborted = new AbortController();
     preAborted.abort();
     let inspected = 0;
@@ -95,4 +100,84 @@ async function assertMidExtractionAbort(input: Buffer): Promise<void> {
         clearTimeout(abortTimer);
     }
 
+}
+
+async function odfEncryptionCancellationTests(): Promise<void> {
+    // An extension-selected package must sniff its manifest even when mimetype is
+    // not the first entry. Its contents only need to mark encryption: cancellation
+    // must prevent password handling and actual decryption from starting.
+    const encrypted = Buffer.from(zipSync({
+        'first.bin': new Uint8Array(128 * 1024),
+        'META-INF/manifest.xml': strToU8('<manifest:manifest><manifest:encryption-data/></manifest:manifest>'),
+    }, { level: 0 }));
+    assert.equal(await isEncryptedOdf(encrypted, {}, 'odt'), true);
+    const aborted = new AbortController();
+    aborted.abort();
+    await assert.rejects(isEncryptedOdf(encrypted, {}, 'odt', aborted.signal), { name: 'AbortError' });
+
+    const sniff = new AbortController();
+    const sniffTimer = setTimeout(() => sniff.abort(), 0);
+    try {
+        await assert.rejects(isEncryptedOdf(encrypted, {}, 'odt', sniff.signal), { name: 'AbortError' });
+        assert.equal(getEventListeners(sniff.signal, 'abort').length, 0);
+    } finally {
+        clearTimeout(sniffTimer);
+    }
+
+    const parsing = new AbortController();
+    let passwordRequests = 0;
+    const parseTimer = setTimeout(() => parsing.abort(), 0);
+    try {
+        await assert.rejects(OfficeParser.parseOffice(encrypted, {
+            ...quiet, fileType: 'odt', abortSignal: parsing.signal,
+            onPassword: async () => { passwordRequests++; return undefined; },
+        }), { name: 'AbortError' });
+        assert.equal(passwordRequests, 0, 'cancelled sniff must not request a password');
+    } finally {
+        clearTimeout(parseTimer);
+    }
+
+    const decrypting = new AbortController();
+    let decryptTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        await assert.rejects(decryptIfNeeded(encrypted, {
+            ...quiet, abortSignal: decrypting.signal,
+            onPassword: async () => {
+                decryptTimer = setTimeout(() => decrypting.abort(), 0);
+                return 'example password';
+            },
+        }, 'odt'), { name: 'AbortError' });
+        assert.equal(getEventListeners(decrypting.signal, 'abort').length, 0);
+    } finally {
+        clearTimeout(decryptTimer);
+    }
+
+    const passwordPrompt = new AbortController();
+    await assert.rejects(decryptIfNeeded(encrypted, {
+        ...quiet, abortSignal: passwordPrompt.signal,
+        onPassword: async () => { passwordPrompt.abort(); return undefined; },
+    }, 'odt'), { name: 'AbortError' });
+    await assert.rejects(decryptOdf(encrypted, 'example password', {}, {
+        ...quiet, abortSignal: aborted.signal,
+    }), { name: 'AbortError' });
+    const realEncrypted = readFileSync(join(__dirname, '../files/encrypted/encrypted.odt'));
+    const decryptedDocument = await OfficeParser.parseOffice(realEncrypted, {
+        ...quiet, fileType: 'odt', password: 'test123', abortSignal: new AbortController().signal,
+    });
+    assert.match(String((await decryptedDocument.to('text')).value), /SECRET CONTENT 42/);
+
+    const retry = new AbortController();
+    let retries = 0;
+    await assert.rejects(decryptIfNeeded(realEncrypted, {
+        ...quiet, password: 'incorrect password', abortSignal: retry.signal,
+        onPassword: async (reason) => {
+            assert.equal(reason, 'incorrect');
+            retries++;
+            retry.abort();
+            return undefined;
+        },
+    }, 'odt'), { name: 'AbortError' });
+    assert.equal(retries, 1, 'cancellation must stop password retries');
+    assert.equal(await isEncryptedOdf(archive, {}, 'odt', new AbortController().signal), false);
+    assert.equal(await isEncryptedOdf(encrypted.subarray(0, 80), {}, 'odt'), false);
 }
